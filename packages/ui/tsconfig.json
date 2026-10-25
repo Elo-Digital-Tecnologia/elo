@@ -1,0 +1,24 @@
+{
+  "extends": "@elo-digital/config/typescript/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "allowImportingTsExtensions": true,
+    "resolvePackageJsonExports": true,
+    "outDir": "./dist",
+    "declarationDir": "./dist",
+    "baseUrl": ".",
+    "paths": {
+      "@elo-digital/core/*": ["../core/src/*"],
+      "@elo-digital/ui/*": ["./src/*"],
+      "@elo-digital/config/*": ["../config/*"],
+      "@elo-digital/database/*": ["../database/src/*"]
+    },
+    "types": ["react", "react-dom", "react/jsx-runtime"]
+  },
+  "include": ["src/**/*", "*.config.*"],
+  "exclude": ["node_modules", "dist", ".storybook", "src/test*.tsx"]
+}

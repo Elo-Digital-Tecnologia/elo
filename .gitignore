@@ -1,0 +1,65 @@
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+build
+.next
+out
+.turbo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Database
+*.sqlite
+*.db
+
+# Misc
+*.tsbuildinfo
+.eslintcache
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Generated / Lock files (optional - keep pnpm-lock.yaml for monorepo)
+# skills-lock.json
+
+# Docker
+.docker
+
+# Vercel / Deployment
+.vercel
+.netlify
+
+# Turbo
+.turbo

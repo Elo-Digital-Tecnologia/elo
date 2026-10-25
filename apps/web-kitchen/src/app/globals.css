@@ -1,0 +1,5 @@
+@import '@elo-digital/ui/styles/globals.css';
+
+:root {
+  --navbar-height: 0;
+}

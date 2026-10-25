@@ -1,0 +1,35 @@
+{
+  "extends": "@elo-digital/config/typescript/nextjs.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@elo-digital/core/*": [
+        "../../packages/core/src/*"
+      ],
+      "@elo-digital/ui/*": [
+        "../../packages/ui/src/*"
+      ],
+      "@elo-digital/config/*": [
+        "../../packages/config/*"
+      ],
+      "@elo-digital/database/*": [
+        "../../packages/database/src/*"
+      ]
+    },
+    "allowJs": true,
+    "incremental": true,
+    "jsx": "preserve"
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

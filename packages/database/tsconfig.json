@@ -1,0 +1,22 @@
+{
+  "extends": "@elo-digital/config/typescript/nestjs.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declarationDir": "./dist",
+    "paths": {
+      "@elo-digital/core/*": ["../core/src/*"],
+      "@elo-digital/ui/*": ["../ui/src/*"],
+      "@elo-digital/config/*": ["../config/*"],
+      "@elo-digital/database/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "migrations"]
+}

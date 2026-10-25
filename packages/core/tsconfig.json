@@ -1,0 +1,18 @@
+{
+  "extends": "@elo-digital/config/typescript/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "outDir": "./dist",
+    "declarationDir": "./dist",
+    "paths": {
+      "@elo-digital/core/*": ["./src/*"],
+      "@elo-digital/ui/*": ["../ui/src/*"],
+      "@elo-digital/config/*": ["../config/*"],
+      "@elo-digital/database/*": ["../database/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

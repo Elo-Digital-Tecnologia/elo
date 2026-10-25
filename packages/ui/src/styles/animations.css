@@ -1,0 +1,673 @@
+/* ============================================
+   ANIMATIONS — Elo Digital Design System
+   Keyframes, utilities, reduced motion support
+   ============================================ */
+
+/* --------------------------------------------------------------------------
+   KEYFRAMES
+   -------------------------------------------------------------------------- */
+
+/* Fade */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Scale */
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes scale-in-spring {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Slide */
+@keyframes slide-in-from-top {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes slide-in-from-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slide-in-from-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slide-out-to-top {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+
+@keyframes slide-out-to-bottom {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+/* Spin */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+/* Pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.02); }
+}
+
+/* Bounce */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(-8px);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Shimmer (for skeleton loaders) */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Wiggle (for notifications) */
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(3deg); }
+  75% { transform: rotate(-3deg); }
+}
+
+/* Heartbeat */
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* Float */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Progress bar */
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Ring (for loading) */
+@keyframes ring-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes ring-dash {
+  0% {
+    stroke-dasharray: 1, 200;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 90, 200;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 90, 200;
+    stroke-dashoffset: -124;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   ANIMATION UTILITY CLASSES
+   -------------------------------------------------------------------------- */
+
+/* Duration */
+.animate-fastest { animation-duration: 75ms; }
+.animate-faster { animation-duration: 100ms; }
+.animate-fast { animation-duration: 150ms; }
+.animate-normal { animation-duration: 200ms; }
+.animate-slow { animation-duration: 300ms; }
+.animate-slower { animation-duration: 500ms; }
+.animate-slowest { animation-duration: 700ms; }
+
+/* Easing */
+.animate-ease-linear { animation-timing-function: linear; }
+.animate-ease-in { animation-timing-function: cubic-bezier(0.4, 0, 1, 1); }
+.animate-ease-out { animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }
+.animate-ease-in-out { animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+.animate-ease-spring { animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); }
+.animate-ease-bounce { animation-timing-function: cubic-bezier(0.68, -0.55, 0.265, 1.55); }
+
+/* Fill mode */
+.animate-fill-forwards { animation-fill-mode: forwards; }
+.animate-fill-backwards { animation-fill-mode: backwards; }
+.animate-fill-both { animation-fill-mode: both; }
+
+/* Iteration */
+.animate-once { animation-iteration-count: 1; }
+.animate-twice { animation-iteration-count: 2; }
+.animate-infinite { animation-iteration-count: infinite; }
+
+/* Combined presets */
+.animate-fade-in {
+  animation: fade-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+.animate-fade-out {
+  animation: fade-out var(--duration-normal) var(--ease-in) forwards;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-fade-in-down {
+  animation: fade-in-down var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-fade-in-left {
+  animation: fade-in-left var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-fade-in-right {
+  animation: fade-in-right var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+.animate-scale-in-spring {
+  animation: scale-in-spring var(--duration-slower) var(--ease-spring) forwards;
+}
+
+.animate-slide-in-top {
+  animation: slide-in-from-top var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-slide-in-bottom {
+  animation: slide-in-from-bottom var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-from-left var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-from-right var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-spin-slow {
+  animation: spin 2s linear infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s var(--ease-in-out) infinite;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s var(--ease-in-out) infinite;
+}
+
+.animate-bounce {
+  animation: bounce 1s var(--ease-in-out) infinite;
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s var(--ease-in-out) infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s linear infinite;
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 25%,
+    var(--color-muted-foreground) 50%,
+    var(--color-muted) 75%
+  );
+  background-size: 200% 100%;
+}
+
+.animate-wiggle {
+  animation: wiggle 0.5s var(--ease-in-out) infinite;
+}
+
+.animate-heartbeat {
+  animation: heartbeat 1.5s var(--ease-in-out) infinite;
+}
+
+.animate-float {
+  animation: float 3s var(--ease-in-out) infinite;
+}
+
+/* Stagger delays */
+.delay-1 { animation-delay: 50ms; }
+.delay-2 { animation-delay: 100ms; }
+.delay-3 { animation-delay: 150ms; }
+.delay-4 { animation-delay: 200ms; }
+.delay-5 { animation-delay: 250ms; }
+.delay-6 { animation-delay: 300ms; }
+.delay-7 { animation-delay: 350ms; }
+.delay-8 { animation-delay: 400ms; }
+
+/* --------------------------------------------------------------------------
+   TRANSITION UTILITIES
+   -------------------------------------------------------------------------- */
+
+/* Property-specific transitions */
+.transition-color {
+  transition-property: color, background-color, border-color, fill, stroke;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-fast);
+}
+
+.transition-opacity {
+  transition-property: opacity;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-fast);
+}
+
+.transition-shadow {
+  transition-property: box-shadow;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-normal);
+}
+
+.transition-transform {
+  transition-property: transform;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-normal);
+}
+
+.transition-transform-fast {
+  transition-property: transform;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-fast);
+}
+
+.transition-transform-spring {
+  transition-property: transform;
+  transition-timing-function: var(--ease-spring);
+  transition-duration: var(--duration-slower);
+}
+
+.transition-all-fast {
+  transition-property: all;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-fast);
+}
+
+.transition-all-normal {
+  transition-property: all;
+  transition-timing-function: var(--ease-default);
+  transition-duration: var(--duration-normal);
+}
+
+/* --------------------------------------------------------------------------
+   ENTRANCE/EXIT PATTERNS
+   -------------------------------------------------------------------------- */
+
+/* Page/Section entrance */
+.page-enter {
+  animation: fade-in-up var(--duration-slow) var(--ease-out) forwards;
+}
+
+.section-enter {
+  animation: fade-in-up var(--duration-slow) var(--ease-out) forwards;
+}
+
+.card-enter {
+  animation: scale-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+.modal-enter {
+  animation: scale-in-spring var(--duration-slower) var(--ease-spring) forwards;
+}
+
+.drawer-enter {
+  animation: slide-in-from-right var(--duration-slow) var(--ease-out) forwards;
+}
+
+.drawer-enter-left {
+  animation: slide-in-from-left var(--duration-slow) var(--ease-out) forwards;
+}
+
+.dropdown-enter {
+  animation: fade-in-down var(--duration-fast) var(--ease-out) forwards;
+}
+
+.tooltip-enter {
+  animation: scale-in var(--duration-faster) var(--ease-spring) forwards;
+}
+
+.toast-enter {
+  animation: slide-in-from-right var(--duration-normal) var(--ease-spring) forwards;
+}
+
+/* Exit patterns */
+.page-exit {
+  animation: fade-out var(--duration-fast) var(--ease-in) forwards;
+}
+
+.modal-exit {
+  animation: scale-out var(--duration-fast) var(--ease-in) forwards;
+}
+
+.drawer-exit {
+  animation: slide-out-to-right var(--duration-normal) var(--ease-in) forwards;
+}
+
+.dropdown-exit {
+  animation: fade-out var(--duration-faster) var(--ease-in) forwards;
+}
+
+.toast-exit {
+  animation: slide-out-to-right var(--duration-normal) var(--ease-in) forwards;
+}
+
+/* --------------------------------------------------------------------------
+   INTERACTION STATES
+   -------------------------------------------------------------------------- */
+
+/* Press/Active state */
+.pressable {
+  transition: transform var(--duration-fastest) var(--ease-out);
+}
+
+.pressable:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pressable-lg:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* Hover lift */
+.hover-lift {
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.hover-lift-lg:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl);
+}
+
+/* Focus ring */
+.focus-ring {
+  @apply relative;
+}
+
+.focus-ring:focus-visible {
+  @apply outline-none ring-2 ring-[var(--color-ring)] ring-offset-2 ring-offset-[var(--color-background)];
+}
+
+/* --------------------------------------------------------------------------
+   SKELETON LOADERS
+   -------------------------------------------------------------------------- */
+
+/* @utility (not a plain class) so the .skeleton-* variants below can @apply it —
+   Tailwind v4's @apply only resolves registered utilities. */
+@utility skeleton {
+  @apply relative overflow-hidden bg-[var(--color-muted)];
+  animation: shimmer 2s linear infinite;
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 25%,
+    var(--color-border) 50%,
+    var(--color-muted) 75%
+  );
+  background-size: 200% 100%;
+}
+
+.skeleton-text {
+  @apply skeleton h-4 rounded;
+}
+
+.skeleton-title {
+  @apply skeleton h-6 rounded w-3/4;
+}
+
+.skeleton-card {
+  @apply skeleton h-32 rounded-xl;
+}
+
+.skeleton-avatar {
+  @apply skeleton rounded-full;
+}
+
+.skeleton-button {
+  @apply skeleton h-10 rounded-lg w-24;
+}
+
+.skeleton-input {
+  @apply skeleton h-10 rounded-lg;
+}
+
+/* --------------------------------------------------------------------------
+   LOADING SPINNERS
+   -------------------------------------------------------------------------- */
+
+/* @utility for the same reason as .skeleton above. */
+@utility spinner {
+  @apply inline-block animate-spin;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+}
+
+.spinner-sm {
+  @apply spinner w-4 h-4 border-[1.5px];
+}
+
+.spinner-lg {
+  @apply spinner w-8 h-8 border-[3px];
+}
+
+.spinner-primary {
+  @apply spinner;
+  border-color: var(--color-primary-light);
+  border-top-color: var(--color-primary);
+}
+
+.spinner-white {
+  @apply spinner;
+  border-color: rgba(255,255,255,0.3);
+  border-top-color: white;
+}
+
+/* Ring spinner (SVG-based, more performant) */
+.spinner-ring {
+  @apply inline-block;
+  width: 1.5rem;
+  height: 1.5rem;
+  animation: ring-rotate 1s linear infinite;
+}
+
+.spinner-ring circle {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+  animation: ring-dash 1.5s ease-in-out infinite;
+}
+
+/* --------------------------------------------------------------------------
+   REDUCED MOTION
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  /* Disable all animations */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Keep critical feedback */
+  .pressable:active:not(:disabled) {
+    transform: none !important;
+  }
+
+  .hover-lift:hover {
+    transform: none !important;
+  }
+
+  /* Skeleton shimmer becomes static */
+  .skeleton {
+    animation: none !important;
+    background: var(--color-muted) !important;
+  }
+
+  /* Spinner keeps spinning for loading feedback */
+  .spinner,
+  .spinner-ring {
+    animation-duration: 1s !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   HIGH CONTRAST MODE
+   -------------------------------------------------------------------------- */
+
+@media (prefers-contrast: high) {
+  .skeleton {
+    background: var(--color-border) !important;
+    animation: none !important;
+  }
+
+  .spinner {
+    border-color: var(--color-foreground);
+    border-top-color: var(--color-primary);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   PRINT
+   -------------------------------------------------------------------------- */
+
+@media print {
+  [class*="animate-"],
+  .skeleton,
+  .spinner,
+  .spinner-ring {
+    animation: none !important;
+    display: none !important;
+  }
+}

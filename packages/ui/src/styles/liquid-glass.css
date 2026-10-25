@@ -1,0 +1,373 @@
+/* ============================================
+   LIQUID GLASS — Elo Digital Design System
+   Efeito vidro translúcido com blur, bordas suaves
+   ============================================ */
+
+/* --------------------------------------------------------------------------
+   CSS VARIABLES FOR LIQUID GLASS
+   -------------------------------------------------------------------------- */
+:root {
+  /* Light mode glass */
+  --glass-bg: rgba(255, 255, 255, 0.1);
+  --glass-bg-hover: rgba(255, 255, 255, 0.15);
+  --glass-bg-pressed: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-border-hover: rgba(255, 255, 255, 0.25);
+  --glass-blur: blur(12px);
+  --glass-blur-strong: blur(16px);
+  --glass-shadow: var(--shadow-glass);
+  --glass-shadow-hover: var(--shadow-glass-hover);
+  --glass-shadow-pressed: var(--shadow-glass-pressed);
+
+  /* Glass text colors */
+  --glass-text: var(--color-foreground);
+  --glass-text-muted: var(--color-muted-foreground);
+  --glass-text-inverse: #FFFFFF;
+}
+
+.dark {
+  /* Dark mode glass */
+  --glass-bg: rgba(15, 23, 42, 0.3);
+  --glass-bg-hover: rgba(15, 23, 42, 0.4);
+  --glass-bg-pressed: rgba(15, 23, 42, 0.25);
+  --glass-border: rgba(148, 163, 184, 0.1);
+  --glass-border-hover: rgba(148, 163, 184, 0.2);
+  --glass-blur: blur(12px);
+  --glass-blur-strong: blur(16px);
+  --glass-shadow: var(--shadow-glass-dark);
+  /* --shadow-glass-dark-hover was never defined anywhere; fall back to the
+     base dark glass shadow instead of an invalid custom property. */
+  --glass-shadow-hover: var(--shadow-glass-dark);
+  --glass-shadow-pressed: var(--shadow-glass-dark);
+
+  --glass-text: var(--color-foreground);
+  --glass-text-muted: var(--color-muted-foreground);
+  --glass-text-inverse: #0F172A;
+}
+
+/* Reduced transparency fallback */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  .dark {
+    --glass-bg: var(--color-surface);
+    --glass-bg-hover: var(--color-surface-elevated);
+    --glass-bg-pressed: var(--color-muted);
+    --glass-border: var(--color-border);
+    --glass-border-hover: var(--color-border);
+    --glass-blur: none;
+    --glass-blur-strong: none;
+    --glass-shadow: var(--shadow-lg);
+    --glass-shadow-hover: var(--shadow-xl);
+    --glass-shadow-pressed: var(--shadow-md);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   BASE GLASS UTILITIES
+   -------------------------------------------------------------------------- */
+
+/* Core glass effect — use on cards, modals, navbars.
+   Declared with @utility (Tailwind v4 custom-utility API) so @apply glass
+   works from other rules below; a plain .glass class is not @apply-able in v4. */
+@utility glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  color: var(--glass-text);
+  transition: background-color var(--duration-fast) var(--ease-default),
+              border-color var(--duration-fast) var(--ease-default),
+              box-shadow var(--duration-normal) var(--ease-default);
+
+  &:hover {
+    background: var(--glass-bg-hover);
+    border-color: var(--glass-border-hover);
+    box-shadow: var(--glass-shadow-hover);
+  }
+
+  &:active:not(:disabled) {
+    background: var(--glass-bg-pressed);
+    box-shadow: var(--glass-shadow-pressed);
+  }
+}
+
+/* Stronger glass — for modals, important overlays */
+@utility glass-strong {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass-strong);
+
+  &:hover {
+    background: var(--glass-bg-hover);
+    border-color: var(--glass-border-hover);
+  }
+}
+
+/* Dark variant — explicit dark glass regardless of theme */
+.glass-dark {
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: var(--shadow-glass-dark);
+  color: var(--glass-text-inverse);
+}
+
+.glass-dark:hover {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+/* Subtle glass — for minimal separation */
+@utility glass-subtle {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: none;
+}
+
+/* --------------------------------------------------------------------------
+   SEMANTIC GLASS VARIANTS
+   -------------------------------------------------------------------------- */
+
+/* Card */
+.glass-card {
+  @apply glass rounded-xl p-6;
+}
+
+/* Modal/Dialog */
+.glass-modal {
+  @apply glass-strong rounded-2xl p-6;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Navbar/Header */
+.glass-navbar {
+  @apply glass sticky top-0 z-[200];
+  border-bottom: 1px solid var(--glass-border);
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* Sidebar */
+.glass-sidebar {
+  /* "glass-fixed" utility never existed; this always errored before the
+     v4 migration surfaced it. Use the base glass effect instead. */
+  @apply glass fixed inset-y-0 z-[300] h-full;
+  border-right: 1px solid var(--glass-border);
+}
+
+/* Dropdown */
+.glass-dropdown {
+  @apply glass-strong rounded-lg p-2 min-w-[200px];
+  box-shadow: var(--shadow-glass-strong);
+}
+
+/* Popover */
+.glass-popover {
+  @apply glass-strong rounded-lg p-3;
+  max-width: 320px;
+}
+
+/* Tooltip */
+.glass-tooltip {
+  @apply glass-subtle rounded-md px-3 py-1.5 text-sm;
+  font-weight: 500;
+}
+
+/* Toast */
+.glass-toast {
+  @apply glass-strong rounded-lg p-4;
+  min-width: 280px;
+  max-width: 420px;
+}
+
+/* Button */
+.glass-button {
+  @apply glass inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.glass-button:hover {
+  /* "glass-hover"/"glass-pressed" utilities never existed; mirror .glass's
+     own hover/active states explicitly instead. */
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  box-shadow: var(--glass-shadow-hover);
+}
+
+.glass-button:active:not(:disabled) {
+  background: var(--glass-bg-pressed);
+  box-shadow: var(--glass-shadow-pressed);
+  transform: scale(0.98);
+}
+
+.glass-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Input */
+.glass-input {
+  @apply glass w-full rounded-lg px-4 py-2.5 text-base;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: var(--color-ring);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.dark .glass-input:focus {
+  box-shadow: 0 0 0 3px var(--color-primary-900);
+}
+
+/* Badge/Chip */
+.glass-badge {
+  @apply glass-subtle inline-flex items-center gap-1.5 rounded-full px-3 py-0.5 text-xs font-medium;
+}
+
+/* --------------------------------------------------------------------------
+   GLASS WITH COLORED TINT
+   -------------------------------------------------------------------------- */
+
+/* Primary tinted glass */
+.glass-primary {
+  @apply glass;
+  background: linear-gradient(
+    135deg,
+    rgba(21, 128, 61, 0.15),
+    rgba(21, 128, 61, 0.05)
+  );
+  border-color: rgba(21, 128, 61, 0.2);
+}
+
+.glass-primary:hover {
+  background: linear-gradient(
+    135deg,
+    rgba(21, 128, 61, 0.2),
+    rgba(21, 128, 61, 0.1)
+  );
+  border-color: rgba(21, 128, 61, 0.3);
+}
+
+/* Accent tinted glass */
+.glass-accent {
+  @apply glass;
+  background: linear-gradient(
+    135deg,
+    rgba(217, 119, 6, 0.15),
+    rgba(217, 119, 6, 0.05)
+  );
+  border-color: rgba(217, 119, 6, 0.2);
+}
+
+/* Destructive tinted glass */
+.glass-destructive {
+  @apply glass;
+  background: linear-gradient(
+    135deg,
+    rgba(220, 38, 38, 0.15),
+    rgba(220, 38, 38, 0.05)
+  );
+  border-color: rgba(220, 38, 38, 0.2);
+}
+
+/* --------------------------------------------------------------------------
+   GLASS ANIMATIONS
+   -------------------------------------------------------------------------- */
+
+/* Enter animation */
+@keyframes glass-enter {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: var(--glass-blur);
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-glass-enter {
+  animation: glass-enter 300ms var(--ease-out) forwards;
+}
+
+/* Exit animation */
+@keyframes glass-exit {
+  from {
+    opacity: 1;
+    backdrop-filter: var(--glass-blur);
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0);
+    transform: scale(0.96) translateY(8px);
+  }
+}
+
+.animate-glass-exit {
+  animation: glass-exit 200ms var(--ease-in) forwards;
+}
+
+/* --------------------------------------------------------------------------
+   ANTI-PATTERN: PREVENT GLASS STACKING
+   -------------------------------------------------------------------------- */
+/*
+   IMPORTANT: Never nest .glass inside .glass
+   This causes performance issues and visual artifacts
+   Use .glass-subtle for nested contexts or restructure layout
+*/
+
+/* Warning utility - apply to detect nesting in dev */
+@media (prefers-reduced-transparency: no-preference) {
+  .glass .glass {
+    /* This will show a red border in dev if glass is nested */
+    outline: 2px solid red;
+    outline-offset: -2px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   RESPONSIVE GLASS
+   -------------------------------------------------------------------------- */
+
+/* On mobile, reduce blur for performance */
+@media (max-width: 640px) {
+  .glass,
+  .glass-strong,
+  .glass-dark,
+  .glass-subtle {
+    --glass-blur: blur(8px);
+    --glass-blur-strong: blur(12px);
+  }
+}
+
+/* On very small screens, use solid backgrounds */
+@media (max-width: 375px) {
+  .glass-responsive {
+    @apply glass;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .glass-responsive {
+      background: var(--color-surface);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "extends": "./base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "plugins": [{ "name": "next" }],
+    "allowImportingTsExtensions": true,
+    "resolvePackageJsonExports": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@elo-digital/core/*": ["../../core/src/*"],
+      "@elo-digital/ui/*": ["../../ui/src/*"],
+      "@elo-digital/config/*": ["../*"],
+      "@elo-digital/database/*": ["../../database/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

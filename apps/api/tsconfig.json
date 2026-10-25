@@ -1,0 +1,15 @@
+{
+  "extends": "@elo-digital/config/typescript/nestjs.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@elo-digital/core/*": ["../../packages/core/src/*"],
+      "@elo-digital/ui/*": ["../../packages/ui/src/*"],
+      "@elo-digital/config/*": ["../../packages/config/*"],
+      "@elo-digital/database/*": ["../../packages/database/src/*"]
+    }
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
