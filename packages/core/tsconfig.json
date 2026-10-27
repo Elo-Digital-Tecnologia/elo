@@ -1,0 +1,6 @@
+{
+  "extends": "@elo/config/tsconfig.base.json",
+  "compilerOptions": { "module": "CommonJS", "outDir": "dist", "rootDir": "src" },
+  "include": ["src"],
+  "exclude": ["src/**/*.spec.ts"]
+}

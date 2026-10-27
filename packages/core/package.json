@@ -1,0 +1,20 @@
+{
+  "name": "@elo/core",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@elo/config": "workspace:*",
+    "@types/jest": "^29.5.13",
+    "eslint": "^9.39.5",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,90 @@
+import type { OrderStatus, TableState } from './orders';
+import type { AccessState } from './subscription';
+
+export interface OptionChoice {
+  label: string;
+  priceCents: number;
+}
+
+export interface OptionGroup {
+  name: string;
+  required: boolean;
+  multiple: boolean;
+  choices: OptionChoice[];
+}
+
+export interface ProductView {
+  id: string;
+  categoryId: string;
+  name: string;
+  description: string | null;
+  priceCents: number;
+  imageUrl: string | null;
+  available: boolean;
+  options: OptionGroup[];
+}
+
+export interface CategoryView {
+  id: string;
+  name: string;
+  position: number;
+  products: ProductView[];
+}
+
+export interface OrderItemView {
+  productId: string;
+  name: string;
+  unitCents: number;
+  quantity: number;
+  notes?: string;
+  options: { group: string; label: string; priceCents: number }[];
+}
+
+export interface OrderView {
+  id: string;
+  tableId: string;
+  tableName?: string;
+  status: OrderStatus;
+  items: OrderItemView[];
+  cancelReason: string | null;
+  createdAt: string;
+  /** Presente em order.cancelled: a cozinha deve destacar o card. */
+  alertKitchen?: boolean;
+}
+
+export interface TableView {
+  id: string;
+  name: string;
+  state: TableState;
+  waiterId: string | null;
+  /** Só para administrador do restaurante. */
+  token?: string;
+}
+
+export interface PublicMenuView {
+  readOnly: true;
+  restaurant: { name: string; slug: string };
+  menu: CategoryView[];
+}
+
+export interface SessionStateView {
+  readOnly: false;
+  restaurant: { name: string; slug: string; serviceFeeBps: number };
+  table: { name: string; state: TableState };
+  orders: OrderView[];
+  menu: CategoryView[];
+}
+
+export interface SubscriptionView {
+  state: AccessState;
+  dueDate: string;
+  graceEndsAt: string;
+  warning: boolean;
+}
+
+export interface WaiterCallView {
+  id: string;
+  tableId: string;
+  tableName?: string;
+  createdAt: string;
+}

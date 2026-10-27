@@ -1,0 +1,13 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: elo
+      POSTGRES_PASSWORD: elo
+      POSTGRES_DB: elo_digital
+    ports:
+      - '5433:5432'
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+volumes:
+  dbdata:

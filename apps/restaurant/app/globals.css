@@ -1,0 +1,10 @@
+@import '@elo/ui/fonts.css';
+@import '@elo/ui/theme.css';
+@import '@elo/ui/glass.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  min-height: 100dvh;
+}

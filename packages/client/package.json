@@ -1,0 +1,25 @@
+{
+  "name": "@elo/client",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@elo/config": "workspace:*",
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.11",
+    "eslint": "^9.12.0",
+    "react": "^18.3.1",
+    "typescript": "^5.6.0"
+  }
+}

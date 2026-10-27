@@ -1,0 +1,132 @@
+/*
+ * FONTE ÚNICA de cor, tipografia, raio, blur e movimento.
+ * Cores em canais "H S% L%" para compor alpha: hsl(var(--x) / .5).
+ * Tema claro é o padrão; o escuro vem de [data-theme='dark'].
+ */
+:root {
+  color-scheme: light;
+
+  /* Rampa de verdes (50 claro → 900 profundo) */
+  --elo-leaf-50: 138 45% 96%;
+  --elo-leaf-100: 140 42% 91%;
+  --elo-leaf-200: 142 40% 82%;
+  --elo-leaf-300: 145 38% 70%;
+  --elo-leaf-400: 148 40% 55%;
+  --elo-leaf-500: 152 48% 40%;
+  --elo-leaf-600: 154 55% 30%;
+  --elo-leaf-700: 156 58% 22%;
+  --elo-leaf-800: 158 60% 15%;
+  --elo-leaf-900: 160 66% 9%;
+
+  /* Destaques */
+  --elo-lime: 76 82% 60%;
+  --elo-mint: 164 62% 68%;
+  --elo-teal: 178 56% 38%;
+  --elo-sun: 42 92% 56%;
+
+  /* Superfícies e texto (brancos puxados ao verde, nunca branco puro) */
+  --elo-bg: 140 32% 95%;
+  --elo-bg-soft: 140 28% 91%;
+  --elo-fg: 156 46% 9%;
+  --elo-fg-muted: 154 16% 34%;
+  --elo-line: 150 24% 70%;
+
+  /* Marca e interação */
+  --elo-brand: var(--elo-leaf-500);
+  --elo-brand-hover: var(--elo-leaf-600);
+  --elo-brand-fg: 138 45% 97%;
+  --elo-accent: var(--elo-lime);
+  --elo-accent-fg: 156 46% 9%;
+
+  /* Estados */
+  --elo-success: 148 60% 34%;
+  --elo-warning: 36 92% 46%;
+  --elo-danger: 4 70% 50%;
+  --elo-info: 196 70% 40%;
+
+  /* Aurora (formas fluidas atrás do vidro) */
+  --elo-aurora-1: 150 60% 62%;
+  --elo-aurora-2: 76 80% 66%;
+  --elo-aurora-3: 176 56% 58%;
+  --elo-aurora-4: 130 50% 80%;
+  --elo-aurora-opacity: 0.75;
+
+  /* Vidro */
+  --elo-glass-hi: 0 0% 100%;
+  --elo-glass-lo: 140 40% 96%;
+  --elo-glass-a1: 0.62;
+  --elo-glass-a2: 0.28;
+  --elo-glass-edge: 0 0% 100%;
+  --elo-glass-edge-dim: 152 30% 62%;
+  --elo-glass-glow: 150 70% 55%;
+  --elo-shadow: 158 60% 14%;
+  --elo-blur: 22px;
+  --elo-blur-strong: 34px;
+
+  /* Gráficos: ordem fixa verde, roxo, âmbar, azul, vermelho. Validada com validate_palette.js em claro e escuro */
+  --elo-chart-1: 152 48% 34%;
+  --elo-chart-2: 262 42% 52%;
+  --elo-chart-3: 34 94% 38%;
+  --elo-chart-4: 204 78% 40%;
+  --elo-chart-5: 4 68% 50%;
+  --elo-chart-grid: 152 18% 62% / 0.28;
+
+  /* Raios */
+  --elo-radius-sm: 14px;
+  --elo-radius-md: 20px;
+  --elo-radius-lg: 28px;
+  --elo-radius-xl: 36px;
+  --elo-radius-pill: 999px;
+
+  /* Tipografia */
+  --elo-font-display: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --elo-font-sans: 'Hanken Grotesk Variable', 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+
+  /* Movimento */
+  --elo-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --elo-dur-fast: 160ms;
+  --elo-dur: 320ms;
+  --elo-dur-slow: 700ms;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --elo-bg: 160 62% 5%;
+  --elo-bg-soft: 158 52% 8%;
+  --elo-fg: 140 34% 94%;
+  --elo-fg-muted: 148 14% 68%;
+  --elo-line: 154 30% 26%;
+
+  --elo-brand: 150 58% 52%;
+  --elo-brand-hover: 150 62% 60%;
+  --elo-brand-fg: 160 70% 6%;
+  --elo-accent-fg: 160 70% 6%;
+
+  --elo-success: 148 58% 52%;
+  --elo-warning: 40 94% 60%;
+  --elo-danger: 6 82% 66%;
+  --elo-info: 196 76% 62%;
+
+  --elo-aurora-1: 150 70% 26%;
+  --elo-aurora-2: 100 60% 22%;
+  --elo-aurora-3: 176 64% 24%;
+  --elo-aurora-4: 160 60% 16%;
+  --elo-aurora-opacity: 0.9;
+
+  --elo-glass-hi: 150 50% 34%;
+  --elo-glass-lo: 160 60% 12%;
+  --elo-glass-a1: 0.42;
+  --elo-glass-a2: 0.3;
+  --elo-glass-edge: 140 70% 80%;
+  --elo-glass-edge-dim: 152 40% 36%;
+  --elo-glass-glow: 150 80% 55%;
+  --elo-shadow: 160 80% 2%;
+
+  --elo-chart-1: 150 52% 41%;
+  --elo-chart-2: 262 58% 64%;
+  --elo-chart-3: 38 92% 41%;
+  --elo-chart-4: 204 76% 52%;
+  --elo-chart-5: 6 72% 58%;
+  --elo-chart-grid: 150 30% 60% / 0.2;
+}
