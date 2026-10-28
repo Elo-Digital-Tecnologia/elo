@@ -35,3 +35,15 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }
+
+/** Envio de arquivo (multipart). O navegador define o cabeçalho com o limite do corpo. */
+export async function apiUpload<T>(path: string, file: File, token: string): Promise<T> {
+  const body = new FormData();
+  body.append('file', file);
+  const res = await fetch(path, { method: 'POST', credentials: 'include', headers: { authorization: `Bearer ${token}` }, body });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, (Array.isArray(data.message) ? data.message[0] : data.message) ?? res.statusText);
+  }
+  return (await res.json()) as T;
+}
