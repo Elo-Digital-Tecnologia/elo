@@ -6,8 +6,8 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
+  Matches,
   MaxLength,
   Min,
   MinLength,
@@ -37,7 +37,8 @@ export class ProductDto {
   @IsString() @MinLength(1) @MaxLength(120) name: string;
   @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsInt() @Min(0) priceCents: number;
-  @IsOptional() @IsUrl({ require_tld: false }) @MaxLength(500) imageUrl?: string;
+  /** Link externo ou imagem do banco do restaurante (/api/media/<id>.webp). */
+  @IsOptional() @Matches(/^(https?:\/\/\S+|\/api\/media\/[0-9a-f-]{36}\.webp)$/) @MaxLength(500) imageUrl?: string;
   @IsOptional() @IsBoolean() available?: boolean;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => OptionGroupDto)
   options?: OptionGroupDto[];
