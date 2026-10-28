@@ -29,13 +29,13 @@ step('bad superadmin key', await call('POST', '/auth/superadmin', { body: { key:
 const T = sa.accessToken;
 const due = new Date(Date.now() + 10 * 86400000).toISOString();
 const rest = step('create restaurant', await call('POST', '/admin/restaurants', { token: T, body: { name: 'Pizzaria ' + suf, managerName: 'Maria', managerContact: '11999999999', dueDate: due, adminUsername: 'adm' + suf, adminPassword: 'senha12345' } }), 201);
-const adm = step('restaurant admin login', await call('POST', '/auth/login', { body: { username: 'adm' + suf, password: 'senha12345' } }), 201);
+const adm = step('restaurant admin login', await call('POST', `/auth/restaurants/${rest.slug}/login`, { body: { username: 'adm' + suf, password: 'senha12345' } }), 201);
 const A = adm.accessToken;
 for (const [u, role] of [['wai', 'waiter'], ['kit', 'kitchen']]) {
   step('create ' + role, await call('POST', '/staff', { token: A, body: { username: u + suf, password: 'senha12345', role } }), 201);
 }
-const W = (await call('POST', '/auth/login', { body: { username: 'wai' + suf, password: 'senha12345' } })).json.accessToken;
-const K = (await call('POST', '/auth/login', { body: { username: 'kit' + suf, password: 'senha12345' } })).json.accessToken;
+const W = (await call('POST', `/auth/restaurants/${rest.slug}/login`, { body: { username: 'wai' + suf, password: 'senha12345' } })).json.accessToken;
+const K = (await call('POST', `/auth/restaurants/${rest.slug}/login`, { body: { username: 'kit' + suf, password: 'senha12345' } })).json.accessToken;
 const cat = step('create category', await call('POST', '/catalog/categories', { token: A, body: { name: 'Pizzas' } }), 201);
 const prod = step('create product', await call('POST', '/catalog/products', { token: A, body: { categoryId: cat.id, name: 'Margherita', priceCents: 4000, options: [{ name: 'Tamanho', required: true, multiple: false, choices: [{ label: 'M', priceCents: 0 }, { label: 'G', priceCents: 1000 }] }] } }), 201);
 const table = step('create table', await call('POST', '/tables', { token: A, body: { name: 'Mesa 01' } }), 201);
@@ -75,7 +75,7 @@ step('reactivate', await call('POST', `/admin/restaurants/${rest.id}/reactivate`
 step('staff ok again', await call('GET', '/tables', { token: A }), 200);
 // tenant isolation
 const other = step('create restaurant B', await call('POST', '/admin/restaurants', { token: T, body: { name: 'Burger ' + suf, managerName: 'Joao', managerContact: '11888888888', dueDate: due, adminUsername: 'admb' + suf, adminPassword: 'senha12345' } }), 201);
-const B2 = (await call('POST', '/auth/login', { body: { username: 'admb' + suf, password: 'senha12345' } })).json.accessToken;
+const B2 = (await call('POST', `/auth/restaurants/${other.slug}/login`, { body: { username: 'admb' + suf, password: 'senha12345' } })).json.accessToken;
 const bt = (await call('GET', '/tables', { token: B2 })).json;
 console.log(bt.length === 0 ? 'OK   B sees none of A tables' : 'FAIL isolation');
 step('B cannot read A table qr', await call('GET', `/tables/${table.id}/qr`, { token: B2 }), 404);
