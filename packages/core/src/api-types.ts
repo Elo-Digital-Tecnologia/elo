@@ -88,3 +88,52 @@ export interface WaiterCallView {
   tableName?: string;
   createdAt: string;
 }
+
+export type FeeWaivedBy = 'customer' | 'staff';
+
+export interface BillAdjustmentView {
+  label: string;
+  cents: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface BillLineView {
+  name: string;
+  unitCents: number;
+  quantity: number;
+  /** Opções escolhidas, já em texto ("Tamanho: Grande"). */
+  details: string[];
+}
+
+/** Conta da mesa: pedidos válidos da sessão ativa (sem cancelados nem devolvidos). */
+export interface BillView {
+  tableId: string;
+  tableName: string;
+  state: TableState;
+  serviceFeeBps: number;
+  feeWaivedBy: FeeWaivedBy | null;
+  lines: BillLineView[];
+  adjustments: BillAdjustmentView[];
+  subtotalCents: number;
+  serviceFeeCents: number;
+  adjustmentsCents: number;
+  totalCents: number;
+}
+
+export interface ReportView {
+  from: string;
+  to: string;
+  totals: {
+    /** Soma dos itens dos pedidos válidos (sem taxa de serviço). */
+    revenueCents: number;
+    orders: number;
+    items: number;
+    averageTicketCents: number;
+    cancelled: number;
+    returned: number;
+  };
+  byDay: { date: string; revenueCents: number; orders: number }[];
+  byHour: { hour: number; orders: number }[];
+  topProducts: { name: string; quantity: number; revenueCents: number }[];
+}

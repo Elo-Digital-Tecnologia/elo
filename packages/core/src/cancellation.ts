@@ -11,12 +11,14 @@ export type CancelDecision =
 
 /**
  * Regras de cancelamento (REFERENCE). Cliente: antes do preparo. Garçom: até
- * "em preparo", só mesas que atende, motivo obrigatório. Administrador: qualquer
- * status ainda não cancelado, motivo obrigatório. Pós-"pronto" para os demais
- * usa status separado (fora do escopo P0).
+ * "em preparo", só mesas que atende, motivo obrigatório. Administrador: até
+ * "em preparo", motivo obrigatório. Depois de "pronto" o cancelamento não é
+ * permitido para ninguém; o tratamento é o status separado "devolvido"
+ * (`returnRule`).
  */
 export function cancellationRule(actor: CancelActor, status: OrderStatus): CancelDecision {
-  if (status === 'cancelled') return { allowed: false, why: 'already_cancelled' };
+  if (status === 'cancelled' || status === 'returned') return { allowed: false, why: 'already_closed' };
+  if (status === 'ready') return { allowed: false, why: 'use_return' };
   const notifyKitchen = status === 'preparing';
 
   if (actor.kind === 'customer') {
@@ -26,9 +28,7 @@ export function cancellationRule(actor: CancelActor, status: OrderStatus): Cance
   }
   if (actor.role === Role.Waiter) {
     if (!actor.managesTable) return { allowed: false, why: 'not_your_table' };
-    return status === 'ready'
-      ? { allowed: false, why: 'already_ready' }
-      : { allowed: true, reasonRequired: true, notifyKitchen };
+    return { allowed: true, reasonRequired: true, notifyKitchen };
   }
   if (
     actor.role === Role.RestaurantAdmin ||
@@ -37,5 +37,22 @@ export function cancellationRule(actor: CancelActor, status: OrderStatus): Cance
   ) {
     return { allowed: true, reasonRequired: true, notifyKitchen };
   }
+  return { allowed: false, why: 'role_not_allowed' };
+}
+
+export type ReturnDecision = { allowed: true; reasonRequired: true } | { allowed: false; why: string };
+
+/**
+ * Devolução/recusa de um pedido já "pronto". Garçom (mesa que atende) ou
+ * administrador do restaurante, sempre com motivo. Registrada como decisão
+ * pendente: o REFERENCE não diz quem executa.
+ */
+export function returnRule(actor: CancelActor, status: OrderStatus): ReturnDecision {
+  if (status !== 'ready') return { allowed: false, why: 'not_ready' };
+  if (actor.kind === 'customer') return { allowed: false, why: 'role_not_allowed' };
+  if (actor.role === Role.Waiter) {
+    return actor.managesTable ? { allowed: true, reasonRequired: true } : { allowed: false, why: 'not_your_table' };
+  }
+  if (actor.role === Role.RestaurantAdmin) return { allowed: true, reasonRequired: true };
   return { allowed: false, why: 'role_not_allowed' };
 }

@@ -4,6 +4,8 @@ export const OrderStatus = {
   Preparing: 'preparing',
   Ready: 'ready',
   Cancelled: 'cancelled',
+  /** Recusado/devolvido depois de "pronto" (cancelamento não é permitido nesse ponto). */
+  Returned: 'returned',
 } as const;
 export type OrderStatus = (typeof OrderStatus)[keyof typeof OrderStatus];
 
