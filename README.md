@@ -21,7 +21,7 @@ docker compose up -d db     # Postgres em localhost:5433
 pnpm install && pnpm build
 set -a && . ./.env && set +a
 pnpm --filter @elo/api migration:run
-pnpm dev                    # api :3001, menu :3000, restaurant :3002, admin :3003
+pnpm dev                    # api :3001, web :3000 (cardápio, /admin e /r/<slug>)
 ```
 
 Smoke manual da API: `SUPERADMIN_KEY=... node apps/api/test/smoke.mjs` (API rodando).

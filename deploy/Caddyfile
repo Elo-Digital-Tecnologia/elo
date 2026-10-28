@@ -1,0 +1,27 @@
+# Exemplo: um único endereço para tudo. Troque o domínio e rode `caddy run`.
+# O Caddy emite o certificado HTTPS sozinho.
+#
+# Variáveis para esta forma de uso:
+#   PUBLIC_BASE_URL=https://cardapio.exemplo.com.br
+#   CORS_ORIGINS=https://cardapio.exemplo.com.br
+#   NEXT_PUBLIC_API_URL=https://cardapio.exemplo.com.br   (o socket conecta no mesmo endereço)
+#   API_URL=http://localhost:3001                         (lida na hora do build do apps/web)
+cardapio.exemplo.com.br {
+	encode zstd gzip
+
+	# Tempo real (socket.io) direto na API.
+	handle /socket.io/* {
+		reverse_proxy localhost:3001
+	}
+
+	# Documentação da API: restrinja ou remova em produção.
+	handle /docs* {
+		reverse_proxy localhost:3001
+	}
+
+	# Todo o resto (cardápio, /admin, /r/<slug> e /api) passa pelo app web,
+	# que encaminha /api para a API.
+	handle {
+		reverse_proxy localhost:3000
+	}
+}
