@@ -29,3 +29,11 @@ export class RecordPaymentDto {
   @Type(() => Date) @IsDate() newDueDate: Date;
   @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
+
+/** Dados editáveis pelo próprio restaurante. O slug não muda: está impresso nos QR Codes e gravado nas tags. */
+export class UpdateSettingsDto {
+  @IsString() @MinLength(2) @MaxLength(120) name: string;
+  @IsString() @MinLength(2) @MaxLength(120) managerName: string;
+  @IsString() @MinLength(5) @MaxLength(120) managerContact: string;
+  @IsInt() @Min(0) @Max(3000) serviceFeeBps: number;
+}

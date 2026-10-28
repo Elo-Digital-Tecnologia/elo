@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Permission, Role } from '@elo/core';
 import {
@@ -9,8 +9,9 @@ import {
   TenantId,
 } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
+import type { Restaurant } from '../database/entities';
 import { RestaurantsService } from './restaurants.service';
-import { CreateRestaurantDto, RecordPaymentDto } from './restaurants.dto';
+import { CreateRestaurantDto, RecordPaymentDto, UpdateSettingsDto } from './restaurants.dto';
 
 const ELO = [Role.Superadmin, Role.EloAdmin];
 
@@ -58,6 +59,13 @@ export class AdminRestaurantsController {
     return this.restaurants.setSuspended(id, false);
   }
 
+  /** Entrada da equipe Elo no painel do restaurante (suporte). Token curto, registrado em auditoria. */
+  @RequirePermission(Permission.RestaurantAccess)
+  @Post('restaurants/:id/access')
+  access(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return this.restaurants.accessAs(id, user);
+  }
+
   @RequirePermission(Permission.Subscriptions)
   @Get('restaurants/:id/payments')
   payments(@Param('id', ParseUUIDPipe) id: string) {
@@ -92,11 +100,22 @@ export class RestaurantSelfController {
   @Roles(...RestaurantStaff())
   @Get('me')
   async me(@TenantId() restaurantId: string) {
-    const r = await this.restaurants.get(restaurantId);
+    return this.profile(await this.restaurants.get(restaurantId));
+  }
+
+  @Roles(Role.RestaurantAdmin)
+  @Patch('settings')
+  async settings(@TenantId() restaurantId: string, @Body() dto: UpdateSettingsDto) {
+    return this.profile(await this.restaurants.updateSettings(restaurantId, dto));
+  }
+
+  private profile(r: Restaurant) {
     return {
       id: r.id,
       slug: r.slug,
       name: r.name,
+      managerName: r.managerName,
+      managerContact: r.managerContact,
       serviceFeeBps: r.serviceFeeBps,
       subscription: this.restaurants.subscriptionOf(r),
     };

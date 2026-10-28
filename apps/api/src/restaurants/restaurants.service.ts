@@ -1,8 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AccessState, accessState, GRACE_DAYS, Role, slugify } from '@elo/core';
-import { Payment, Restaurant } from '../database/entities';
+import { AccessState, accessState, GRACE_DAYS, isReservedSlug, Role, slugify } from '@elo/core';
+import type { JwtUser } from '../common/auth-types';
+import { AuditLog, Payment, Restaurant } from '../database/entities';
 import { StaffService } from '../staff/staff.service';
 
 export interface NewRestaurant {
@@ -31,12 +33,29 @@ export class RestaurantsService {
   constructor(
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     @InjectRepository(Payment) private readonly payments: Repository<Payment>,
+    @InjectRepository(AuditLog) private readonly audit: Repository<AuditLog>,
     private readonly staff: StaffService,
+    private readonly jwt: JwtService,
   ) {}
+
+  /** Token de administrador do restaurante para a equipe Elo; dura 45 min e fica registrado. */
+  async accessAs(id: string, actor: JwtUser): Promise<{ accessToken: string; slug: string }> {
+    const restaurant = await this.get(id);
+    await this.audit.save(this.audit.create({ actor: actor.sub, action: 'restaurant_access', restaurantId: id }));
+    const payload: JwtUser = {
+      sub: `elo:${actor.sub}`,
+      role: Role.RestaurantAdmin,
+      restaurantId: id,
+      permissions: [],
+      impersonatedBy: actor.sub,
+    };
+    return { accessToken: await this.jwt.signAsync(payload, { expiresIn: '45m' }), slug: restaurant.slug };
+  }
 
   async create(data: NewRestaurant): Promise<Restaurant> {
     const slug = data.slug ?? slugify(data.name);
     if (!slug) throw new ConflictException('invalid_slug');
+    if (isReservedSlug(slug)) throw new ConflictException('slug_reserved');
     if (await this.restaurants.findOne({ where: { slug } })) {
       throw new ConflictException('slug_taken');
     }
@@ -87,6 +106,15 @@ export class RestaurantsService {
       graceEndsAt: new Date(r.dueDate.getTime() + GRACE_DAYS * DAY_MS),
       warning: state === AccessState.Grace,
     };
+  }
+
+  async updateSettings(
+    id: string,
+    data: { name: string; managerName: string; managerContact: string; serviceFeeBps: number },
+  ): Promise<Restaurant> {
+    const r = await this.get(id);
+    Object.assign(r, data);
+    return this.restaurants.save(r);
   }
 
   async setSuspended(id: string, suspended: boolean): Promise<Restaurant> {

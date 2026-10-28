@@ -11,17 +11,20 @@ import { AccessState, Role } from '@elo/core';
 import {
   ALLOW_SUSPENDED,
   IS_PUBLIC,
+  NO_IMPERSONATION,
   PERMISSIONS,
   ROLES,
 } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { RestaurantsService } from '../restaurants/restaurants.service';
+import { StaffService } from '../staff/staff.service';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    private readonly staff: StaffService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -33,6 +36,13 @@ export class JwtAuthGuard implements CanActivate {
     try {
       req.user = await this.jwt.verifyAsync<JwtUser>(header.slice(7));
     } catch {
+      throw new UnauthorizedException();
+    }
+    // Funcionário desativado perde o acesso mesmo com o JWT ainda válido.
+    const user: JwtUser = req.user;
+    // Entrada da equipe Elo no restaurante: vale enquanto quem entrou continua ativo.
+    const subject = user.impersonatedBy ?? user.sub;
+    if (subject !== 'superadmin' && !(await this.staff.isActive(subject))) {
       throw new UnauthorizedException();
     }
     return true;
@@ -47,6 +57,10 @@ export class RolesGuard implements CanActivate {
     const targets = [ctx.getHandler(), ctx.getClass()];
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, targets)) return true;
     const user: JwtUser = ctx.switchToHttp().getRequest().user;
+
+    if (user.impersonatedBy && this.reflector.getAllAndOverride<boolean>(NO_IMPERSONATION, targets)) {
+      throw new ForbiddenException('not_allowed_while_impersonating');
+    }
 
     const roles = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES, targets);
     if (roles && !roles.includes(user.role)) throw new ForbiddenException();
@@ -73,6 +87,8 @@ export class SubscriptionGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(ALLOW_SUSPENDED, targets)) return true;
     const user: JwtUser = ctx.switchToHttp().getRequest().user;
     if (!user.restaurantId) return true;
+    // Suporte da Elo pode entrar mesmo com o restaurante suspenso.
+    if (user.impersonatedBy) return true;
     const state = await this.restaurants.accessStateOf(user.restaurantId);
     if (state === AccessState.Suspended) throw new ForbiddenException('subscription_suspended');
     return true;

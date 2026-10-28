@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { StaffUser } from '../database/entities';
-import { StaffController, EloStaffController } from './staff.controller';
+import { StaffController, EloStaffController, MeController } from './staff.controller';
 import { StaffService } from './staff.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([StaffUser])],
-  controllers: [StaffController, EloStaffController],
+  controllers: [StaffController, EloStaffController, MeController],
   providers: [StaffService],
   exports: [StaffService],
 })

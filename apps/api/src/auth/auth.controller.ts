@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../common/decorators';
@@ -12,9 +12,14 @@ import { LoginDto, SuperadminLoginDto } from './auth.dto';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.username, dto.password);
+  @Post('restaurants/:slug/login')
+  restaurantLogin(@Param('slug') slug: string, @Body() dto: LoginDto) {
+    return this.auth.restaurantLogin(slug, dto.username, dto.password);
+  }
+
+  @Post('team/login')
+  teamLogin(@Body() dto: LoginDto) {
+    return this.auth.teamLogin(dto.username, dto.password);
   }
 
   @Post('superadmin')

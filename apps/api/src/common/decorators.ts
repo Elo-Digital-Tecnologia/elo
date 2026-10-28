@@ -6,6 +6,7 @@ export const IS_PUBLIC = 'isPublic';
 export const ROLES = 'roles';
 export const PERMISSIONS = 'permissions';
 export const ALLOW_SUSPENDED = 'allowSuspended';
+export const NO_IMPERSONATION = 'noImpersonation';
 
 /** Rota sem JWT (cardápio público, login). Ainda sujeita a validação e rate limit. */
 export const Public = () => SetMetadata(IS_PUBLIC, true);
@@ -14,6 +15,9 @@ export const Roles = (...roles: Role[]) => SetMetadata(ROLES, roles);
 export const RequirePermission = (...p: Permission[]) => SetMetadata(PERMISSIONS, p);
 /** Rota acessível a funcionário de restaurante mesmo com acesso suspenso (ex.: ver assinatura). */
 export const AllowSuspended = () => SetMetadata(ALLOW_SUSPENDED, true);
+
+/** Rota que a equipe Elo não pode usar dentro do painel de um restaurante (credenciais). */
+export const NoImpersonation = () => SetMetadata(NO_IMPERSONATION, true);
 
 export const CurrentUser = createParamDecorator(
   (_: unknown, ctx: ExecutionContext): JwtUser => ctx.switchToHttp().getRequest().user,

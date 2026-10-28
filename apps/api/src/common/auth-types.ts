@@ -6,4 +6,6 @@ export interface JwtUser {
   role: Role;
   restaurantId: string | null;
   permissions: string[];
+  /** Presente quando a equipe Elo entra no painel de um restaurante: id de quem entrou ('superadmin' ou usuário). */
+  impersonatedBy?: string;
 }

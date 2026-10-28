@@ -25,3 +25,12 @@ export class CreateEloStaffDto {
 export class SetActiveDto {
   @IsBoolean() active: boolean;
 }
+
+export class ChangePasswordDto {
+  @IsString() @MinLength(8) @MaxLength(128) current: string;
+  @IsString() @MinLength(8) @MaxLength(128) next: string;
+}
+
+export class ResetPasswordDto {
+  @IsString() @MinLength(8) @MaxLength(128) password: string;
+}
