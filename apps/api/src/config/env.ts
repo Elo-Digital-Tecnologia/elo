@@ -1,3 +1,5 @@
+import * as path from 'path';
+
 export interface Env {
   DATABASE_URL: string;
   JWT_SECRET: string;
@@ -7,6 +9,10 @@ export interface Env {
   PUBLIC_BASE_URL: string;
   NODE_ENV: string;
   TABLE_SESSION_HOURS: number;
+  /** Fuso dos relatórios (dia do restaurante). */
+  REPORT_TZ: string;
+  /** Pasta das imagens enviadas pelos restaurantes. */
+  UPLOAD_DIR: string;
 }
 
 const required = ['DATABASE_URL', 'JWT_SECRET', 'SUPERADMIN_KEY'] as const;
@@ -27,5 +33,7 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
     PUBLIC_BASE_URL: raw.PUBLIC_BASE_URL ?? 'http://localhost:3000',
     NODE_ENV: raw.NODE_ENV ?? 'development',
     TABLE_SESSION_HOURS: Number(raw.TABLE_SESSION_HOURS ?? 4),
+    REPORT_TZ: raw.REPORT_TZ ?? 'America/Sao_Paulo',
+    UPLOAD_DIR: raw.UPLOAD_DIR ?? path.resolve(process.cwd(), 'uploads'),
   };
 }
