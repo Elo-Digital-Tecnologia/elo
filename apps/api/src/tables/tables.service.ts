@@ -72,6 +72,24 @@ export class TablesService {
     return repo.save(table);
   }
 
+  /** Painel Elo: mesas com token e slug para montar o link impresso. */
+  async adminList(rid: string) {
+    const restaurant = await this.restaurants.findOne({ where: { id: rid } });
+    if (!restaurant) throw new NotFoundException();
+    const base = this.config.get('PUBLIC_BASE_URL', { infer: true }).replace(/\/$/, '');
+    const rows = await this.list(rid);
+    return {
+      slug: restaurant.slug,
+      tables: rows.map((t) => ({
+        id: t.id,
+        name: t.name,
+        state: t.state,
+        token: t.token,
+        url: `${base}/${restaurant.slug}/${t.token}`,
+      })),
+    };
+  }
+
   async qrPng(rid: string, id: string): Promise<Buffer> {
     const table = await this.get(rid, id);
     const restaurant = await this.restaurants.findOneOrFail({ where: { id: rid } });
@@ -175,6 +193,11 @@ export class TablesService {
   }
 
   // ---- internos ----
+
+  /** Sessão ativa da mesa (a conta pertence a ela). */
+  activeSessionOf(tableId: string) {
+    return this.activeSession(tableId);
+  }
 
   private activeSession(tableId: string) {
     return this.sessions

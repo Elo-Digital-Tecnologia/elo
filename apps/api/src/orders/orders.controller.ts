@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { OrderStatus, Role } from '@elo/core';
+import { Role } from '@elo/core';
 import { CurrentUser, Roles, TenantId } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { OrdersService } from './orders.service';
-import { AdvanceOrderDto, CancelStaffDto } from './orders.dto';
+import { AdvanceOrderDto, CancelStaffDto, ListOrdersQuery } from './orders.dto';
 
 @ApiTags('orders')
 @ApiBearerAuth()
@@ -14,11 +14,8 @@ export class OrdersController {
 
   @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin)
   @Get()
-  list(@TenantId() rid: string, @Query('status') status?: string) {
-    const statuses = status
-      ?.split(',')
-      .filter((s): s is OrderStatus => Object.values(OrderStatus).includes(s as OrderStatus));
-    return this.orders.list(rid, statuses?.length ? statuses : undefined);
+  list(@TenantId() rid: string, @Query() query: ListOrdersQuery) {
+    return this.orders.list(rid, query);
   }
 
   /** Quem muda o status é a cozinha. */
@@ -32,5 +29,12 @@ export class OrdersController {
   @Post(':id/cancel')
   cancel(@CurrentUser() user: JwtUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelStaffDto) {
     return this.orders.cancelByStaff(user, id, dto.reason);
+  }
+
+  /** Devolução de pedido já "pronto" (status separado, com motivo). */
+  @Roles(Role.Waiter, Role.RestaurantAdmin)
+  @Post(':id/return')
+  returnOrder(@CurrentUser() user: JwtUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelStaffDto) {
+    return this.orders.returnByStaff(user, id, dto.reason);
   }
 }

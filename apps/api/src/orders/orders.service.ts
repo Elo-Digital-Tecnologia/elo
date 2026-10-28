@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus } from '@elo/core';
+import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus, returnRule } from '@elo/core';
 import { TenantRepo } from '../common/tenant-repo';
 import type { JwtUser } from '../common/auth-types';
 import { Order } from '../database/entities';
@@ -15,7 +15,7 @@ import { CatalogService } from '../catalog/catalog.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { SessionContext, TablesService } from '../tables/tables.service';
 import { priceItem } from './pricing';
-import { CreateOrderDto } from './orders.dto';
+import { CreateOrderDto, ListOrdersQuery } from './orders.dto';
 
 @Injectable()
 export class OrdersService {
@@ -52,11 +52,26 @@ export class OrdersService {
     return order;
   }
 
-  /** Ordem de chegada. */
-  list(rid: string, statuses?: OrderStatus[]) {
-    return this.scoped(rid)
-      .find({}, { createdAt: 'ASC' })
-      .then((rows) => (statuses ? rows.filter((o) => statuses.includes(o.status)) : rows));
+  /**
+   * Ordem de chegada. Sem `limit` devolve os mais recentes (máx. 300), para o
+   * histórico não crescer sem fim na tela da cozinha e do salão.
+   */
+  async list(rid: string, q: ListOrdersQuery = {}) {
+    const qb = this.scoped(rid).qb('o');
+    if (q.status?.length) qb.andWhere('o.status IN (:...statuses)', { statuses: q.status });
+    if (q.from) qb.andWhere('o.createdAt >= :from', { from: q.from });
+    if (q.to) qb.andWhere('o.createdAt < :to', { to: q.to });
+    const rows = await qb
+      .orderBy('o.createdAt', 'DESC')
+      .take(q.limit ?? 300)
+      .getMany();
+    return rows.reverse();
+  }
+
+  /** Pedidos que contam na conta: tudo da sessão menos cancelados e devolvidos. */
+  async billable(rid: string, sessionId: string) {
+    const rows = await this.scoped(rid).find({ sessionId }, { createdAt: 'ASC' });
+    return rows.filter((o) => o.status !== OrderStatus.Cancelled && o.status !== OrderStatus.Returned);
   }
 
   async listForSession(ctx: SessionContext) {
@@ -91,6 +106,24 @@ export class OrdersService {
     );
   }
 
+  /** Pedido já "pronto" que o cliente recusou/devolveu: status separado, nunca cancelamento. */
+  async returnByStaff(user: JwtUser, id: string, reason: string) {
+    const rid = user.restaurantId!;
+    const order = await this.get(rid, id);
+    const table = await this.tables.get(rid, order.tableId);
+    const decision = returnRule(
+      { kind: 'staff', role: user.role, managesTable: table.waiterId === user.sub },
+      order.status,
+    );
+    if (!decision.allowed) throw new ForbiddenException(decision.why);
+    if (!reason?.trim()) throw new BadRequestException('reason_required');
+    order.status = OrderStatus.Returned;
+    order.cancelReason = reason.trim();
+    const saved = await this.scoped(rid).save(order);
+    await this.emit('order.updated', saved);
+    return saved;
+  }
+
   private async cancel(order: Order, actor: CancelActor, reason?: string) {
     const decision = cancellationRule(actor, order.status);
     if (!decision.allowed) throw new ForbiddenException(decision.why);
@@ -120,6 +153,13 @@ export class OrdersService {
       restaurantId: order.restaurantId,
       tableId: order.tableId,
       payload: { ...order, tableName: table.name, ...extra },
+    });
+    // A conta da mesa muda junto com os pedidos (caixa e cliente recarregam).
+    this.realtime.publish({
+      type: 'bill.updated',
+      restaurantId: order.restaurantId,
+      tableId: order.tableId,
+      payload: { tableId: order.tableId },
     });
   }
 }

@@ -8,6 +8,8 @@ import { SLUG_PATTERN } from '@elo/core';
 import { Public } from '../common/decorators';
 import type { Env } from '../config/env';
 import { CatalogService } from '../catalog/catalog.service';
+import { BillsService } from '../bills/bills.service';
+import { RefuseFeeDto } from '../bills/bills.dto';
 import { CallsService } from '../calls/calls.service';
 import { CancelCustomerDto, CreateOrderDto } from '../orders/orders.dto';
 import { OrdersService } from '../orders/orders.service';
@@ -41,6 +43,7 @@ export class PublicController {
     private readonly tables: TablesService,
     private readonly orders: OrdersService,
     private readonly calls: CallsService,
+    private readonly bills: BillsService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -114,6 +117,19 @@ export class PublicController {
   @Post('session/call')
   call(@Session() ctx: SessionContext) {
     return this.calls.create(ctx);
+  }
+
+  @UseGuards(TableSessionGuard)
+  @Get('session/bill')
+  bill(@Session() ctx: SessionContext) {
+    return this.bills.viewForSession(ctx);
+  }
+
+  /** O cliente pode recusar a taxa de serviço (ou desfazer a própria recusa). */
+  @UseGuards(TableSessionGuard)
+  @Post('session/bill/fee')
+  refuseFee(@Session() ctx: SessionContext, @Body() dto: RefuseFeeDto) {
+    return this.bills.refuseFee(ctx, dto.refuse);
   }
 
   private async buildState(ctx: SessionContext) {

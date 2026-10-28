@@ -1,4 +1,4 @@
-import { DeepPartial, FindOptionsWhere, Repository } from 'typeorm';
+import { DeepPartial, FindOptionsWhere, Repository, SelectQueryBuilder } from 'typeorm';
 
 /**
  * Repositório com escopo de restaurante. Todo acesso a dados de restaurante passa
@@ -12,6 +12,13 @@ export class TenantRepo<T extends { restaurantId: string }> {
 
   private where(extra: FindOptionsWhere<T> = {}): FindOptionsWhere<T> {
     return { ...extra, restaurantId: this.restaurantId } as FindOptionsWhere<T>;
+  }
+
+  /** Query builder já filtrado pelo restaurante; filtros extras entram com `andWhere`. */
+  qb(alias: string): SelectQueryBuilder<T> {
+    return this.repo
+      .createQueryBuilder(alias)
+      .where(`${alias}.restaurantId = :__tenantId`, { __tenantId: this.restaurantId });
   }
 
   find(where: FindOptionsWhere<T> = {}, order?: Record<string, 'ASC' | 'DESC'>): Promise<T[]> {

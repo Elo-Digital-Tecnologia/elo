@@ -93,6 +93,11 @@ export class TablesController {
 export class AdminTablesController {
   constructor(private readonly tables: TablesService) {}
 
+  @Get()
+  list(@Param('restaurantId', ParseUUIDPipe) restaurantId: string) {
+    return this.tables.adminList(restaurantId);
+  }
+
   @Post(':id/rotate-token')
   rotate(
     @Param('restaurantId', ParseUUIDPipe) restaurantId: string,

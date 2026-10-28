@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -44,4 +45,21 @@ export class CancelStaffDto {
 
 export class CancelCustomerDto {
   @IsOptional() @IsString() @MaxLength(300) reason?: string;
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Filtros de GET /orders. `status` aceita lista separada por vírgula. */
+export class ListOrdersQuery {
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value))
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsIn(Object.values(OrderStatus), { each: true })
+  status?: OrderStatus[];
+
+  @IsOptional() @Matches(DAY) from?: string;
+  @IsOptional() @Matches(DAY) to?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit?: number;
 }

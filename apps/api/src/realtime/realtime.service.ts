@@ -5,7 +5,7 @@ export const staffRoom = (restaurantId: string) => `r:${restaurantId}`;
 export const tableRoom = (tableId: string) => `t:${tableId}`;
 
 export interface RealtimeEvent {
-  type: 'order.created' | 'order.updated' | 'order.cancelled' | 'table.updated' | 'call.created' | 'call.resolved';
+  type: 'order.created' | 'order.updated' | 'order.cancelled' | 'table.updated' | 'call.created' | 'call.resolved' | 'bill.updated';
   restaurantId: string;
   /** Quando presente, o cliente da mesa também recebe o evento. */
   tableId?: string;
