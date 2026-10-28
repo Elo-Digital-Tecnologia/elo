@@ -10,6 +10,7 @@ export * from './components/modal';
 export * from './components/stat';
 export * from './components/table';
 export * from './components/section';
+export * from './components/fields';
 export * from './components/charts';
 export * from './components/app-shell';
 export * from './components/auth-layout';

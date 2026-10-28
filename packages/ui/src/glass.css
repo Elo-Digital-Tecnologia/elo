@@ -195,27 +195,101 @@ h1, h2, h3, .font-display {
 /* ---------- Campos ---------- */
 input, select, textarea {
   width: 100%;
+  min-height: 2.9rem;
   border-radius: var(--elo-radius-sm);
-  border: 1px solid hsl(var(--elo-line) / 0.7);
-  background: hsl(var(--elo-glass-hi) / 0.45);
+  border: 1px solid hsl(var(--elo-line) / 0.8);
+  background: hsl(var(--elo-glass-hi) / 0.55);
   padding: 0.7rem 1rem;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: hsl(var(--elo-fg));
   outline: none;
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 2px hsl(var(--elo-shadow) / 0.06);
   transition: border-color var(--elo-dur-fast), box-shadow var(--elo-dur-fast), background var(--elo-dur-fast);
 }
-input::placeholder, textarea::placeholder { color: hsl(var(--elo-fg-muted) / 0.8); }
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: hsl(var(--elo-brand) / 0.55); }
+input::placeholder, textarea::placeholder { color: hsl(var(--elo-fg-muted) / 0.75); }
 input:focus, select:focus, textarea:focus {
   border-color: hsl(var(--elo-brand));
   box-shadow: 0 0 0 4px hsl(var(--elo-brand) / 0.18);
-  background: hsl(var(--elo-glass-hi) / 0.7);
+  background: hsl(var(--elo-glass-hi) / 0.85);
 }
-input[type='checkbox'], input[type='radio'] { width: 1.1rem; accent-color: hsl(var(--elo-brand)); padding: 0; }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.6; cursor: not-allowed; background: hsl(var(--elo-bg-soft) / 0.6); }
+textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
+input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] {
+  border-color: hsl(var(--elo-danger));
+  box-shadow: 0 0 0 4px hsl(var(--elo-danger) / 0.14);
+}
+/* Seta própria no select, na cor do tema (currentColor via máscara). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.6rem;
+  cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, hsl(var(--elo-brand)) 50%), linear-gradient(135deg, hsl(var(--elo-brand)) 50%, transparent 50%);
+  background-position: calc(100% - 1.35rem) 52%, calc(100% - 1rem) 52%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+input[type='checkbox'], input[type='radio'] { width: 1.1rem; min-height: 0; accent-color: hsl(var(--elo-brand)); padding: 0; box-shadow: none; }
+input[type='date'] { cursor: pointer; }
+
+/* Campo com ícone ou prefixo à esquerda e ação à direita. */
+.field-wrap { position: relative; display: block; }
+.field-wrap > .field-lead { position: absolute; inset-block: 0; left: 0.95rem; display: grid; place-items: center; color: hsl(var(--elo-fg-muted)); pointer-events: none; }
+.field-wrap > .field-lead + input { padding-left: 2.75rem; }
+.field-wrap > .field-tail { position: absolute; inset-block: 0; right: 0.4rem; display: grid; place-items: center; }
+
+/* Interruptor (checkbox estilizado). */
+.switch { position: relative; display: inline-flex; width: 2.75rem; height: 1.6rem; flex: none; cursor: pointer; }
+.switch input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
+.switch i {
+  position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
+  background: hsl(var(--elo-line) / 0.9); transition: background var(--elo-dur-fast);
+}
+.switch i::after {
+  content: ''; position: absolute; top: 0.2rem; left: 0.2rem; width: 1.2rem; height: 1.2rem; border-radius: 999px;
+  background: hsl(0 0% 100%); box-shadow: 0 1px 3px hsl(var(--elo-shadow) / 0.35); transition: transform var(--elo-dur-fast) var(--elo-ease, ease);
+}
+.switch input:checked + i { background: hsl(var(--elo-brand)); }
+.switch input:checked + i::after { transform: translateX(1.15rem); }
+.switch input:focus-visible + i { box-shadow: 0 0 0 4px hsl(var(--elo-brand) / 0.25); }
 
 /* ---------- Scroll ---------- */
 .scroll-soft { scrollbar-width: thin; scrollbar-color: hsl(var(--elo-leaf-400) / 0.5) transparent; }
+
+/* Lista longa: o navegador pula o render do que está fora da tela. */
+.cv-auto { content-visibility: auto; contain-intrinsic-size: auto 180px; }
+
+/* Aba escondida: animações contínuas pausam. */
+[data-hidden='1'] .aurora i, [data-hidden='1'] .pulse-dot::after, [data-hidden='1'] .skeleton { animation-play-state: paused; }
+
+/*
+ * ---------- Aparelho limitado (data-lite em <html>) ----------
+ * Definido sozinho pelo script inicial (pouca memória/CPU ou economia de dados).
+ * Sem blur nem animação contínua; cores e tipografia continuam as do tema.
+ */
+[data-lite] .glass,
+[data-lite] .glass-strong {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: linear-gradient(135deg, hsl(var(--elo-glass-hi) / 0.88), hsl(var(--elo-glass-lo) / 0.74));
+  border: 1px solid hsl(var(--elo-glass-edge-dim) / 0.35);
+  box-shadow: inset 0 1px 0 hsl(var(--elo-glass-edge) / 0.7), 0 10px 24px -14px hsl(var(--elo-shadow) / 0.3);
+}
+[data-lite] .glass::before { display: none; }
+[data-lite] .glass::after { background: radial-gradient(120% 70% at 0% 0%, hsl(var(--elo-glass-edge) / 0.3), transparent 55%); }
+[data-lite] .glass-lift:hover { transform: none; }
+[data-lite] .aurora i { display: none; }
+[data-lite] .aurora {
+  background:
+    radial-gradient(60vmax 50vmax at 5% 0%, hsl(var(--elo-aurora-1) / 0.55), transparent 70%),
+    radial-gradient(50vmax 45vmax at 100% 20%, hsl(var(--elo-aurora-2) / 0.5), transparent 70%),
+    radial-gradient(55vmax 50vmax at 30% 105%, hsl(var(--elo-aurora-3) / 0.5), transparent 70%),
+    hsl(var(--elo-bg));
+}
+[data-lite] .skeleton, [data-lite] .flash-new, [data-lite] .btn-glass::before { animation: none; }
+[data-lite] .btn-glass:hover::before { left: -60%; }
+[data-lite] .modal-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .aurora i, .pulse-dot::after, .skeleton, .flash-new { animation: none; }

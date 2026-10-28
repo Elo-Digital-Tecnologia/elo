@@ -1,12 +1,12 @@
 'use client';
 
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, m as motion, useReducedMotion } from 'framer-motion';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-/** Transição entre rotas: entra subindo e desfocando para nítido. */
+/** Transição entre rotas: entra subindo e aparecendo (só transform/opacity, sem filter). */
 export function PageTransition({ children }: { children: ReactNode }) {
   const path = usePathname();
   const reduce = useReducedMotion();
@@ -14,9 +14,9 @@ export function PageTransition({ children }: { children: ReactNode }) {
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={path}
-        initial={reduce ? false : { opacity: 0, y: 18, filter: 'blur(8px)' }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-        exit={reduce ? undefined : { opacity: 0, y: -8, filter: 'blur(4px)' }}
+        initial={reduce ? false : { opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={reduce ? undefined : { opacity: 0 }}
         transition={{ duration: 0.4, ease: EASE }}
       >
         {children}
@@ -43,7 +43,6 @@ export function StaggerItem({ children, className = '' }: { children: ReactNode;
   return (
     <motion.div
       className={className}
-      layout
       variants={{
         hidden: { opacity: 0, y: 22, scale: 0.97 },
         show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: EASE } },

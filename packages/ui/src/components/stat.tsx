@@ -40,7 +40,7 @@ export function Stat({
   trend?: number[];
 }) {
   return (
-    <GlassCard lift className="flex flex-col gap-3 p-5">
+    <GlassCard lift className="flex h-full flex-col gap-3 p-5">
       <div className="flex items-center justify-between text-sm text-muted">
         <span>{label}</span>
         {Icon && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { motion, type HTMLMotionProps } from 'framer-motion';
+import { m as motion, type HTMLMotionProps } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 
 type Variant = 'primary' | 'ghost' | 'danger' | 'soft';
@@ -8,7 +8,7 @@ type Variant = 'primary' | 'ghost' | 'danger' | 'soft';
 const VARIANTS: Record<Variant, string> = {
   primary: 'btn-glass',
   soft: 'glass !rounded-pill text-fg hover:text-brand',
-  ghost: 'border border-line/70 bg-bg/30 text-fg backdrop-blur-md hover:bg-leaf-100/60 hover:border-brand/60',
+  ghost: 'border border-line/70 bg-bg/30 text-fg hover:bg-leaf-100/60 hover:border-brand/60',
   danger: 'bg-danger text-white shadow-[0_8px_20px_-8px_hsl(var(--elo-danger)/0.7)] hover:brightness-110',
 };
 

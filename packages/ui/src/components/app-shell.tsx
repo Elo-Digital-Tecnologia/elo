@@ -1,6 +1,6 @@
 'use client';
 
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, m as motion } from 'framer-motion';
 import { ChevronsLeft, LogOut, Menu, X, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -133,7 +133,7 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, footerLin
       <AnimatePresence>
         {drawer && (
           <motion.div className="fixed inset-0 z-50 lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="absolute inset-0 bg-leaf-900/40 backdrop-blur-md" onClick={() => setDrawer(false)} aria-hidden />
+            <div className="modal-backdrop absolute inset-0 bg-leaf-900/40 backdrop-blur-md" onClick={() => setDrawer(false)} aria-hidden />
             <motion.aside
               className="glass glass-strong absolute bottom-3 left-3 top-3 flex w-[min(300px,calc(100vw-24px))] flex-col p-3"
               initial={{ x: -320 }}

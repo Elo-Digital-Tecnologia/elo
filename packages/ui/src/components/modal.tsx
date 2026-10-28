@@ -1,6 +1,6 @@
 'use client';
 
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, m as motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
 
@@ -36,7 +36,7 @@ export function Modal({
           exit={{ opacity: 0 }}
         >
           <div
-            className="absolute inset-0 bg-leaf-900/40 backdrop-blur-md"
+            className="modal-backdrop absolute inset-0 bg-leaf-900/40 backdrop-blur-md"
             onClick={onClose}
             aria-hidden
           />

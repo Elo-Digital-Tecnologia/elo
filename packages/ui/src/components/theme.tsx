@@ -1,11 +1,14 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { LazyMotion, MotionConfig } from 'framer-motion';
 import { Moon, Sun } from 'lucide-react';
 import { THEME_KEY as KEY } from './theme-script';
 
 export type Theme = 'light' | 'dark';
 
+/** Carrega as features de animação de layout sob demanda, fora do JS inicial. */
+const loadFeatures = () => import('framer-motion').then((m) => m.domMax);
 
 const Ctx = createContext<{ theme: Theme; toggle: () => void }>({ theme: 'light', toggle: () => {} });
 export const useTheme = () => useContext(Ctx);
@@ -13,8 +16,19 @@ export const useTheme = () => useContext(Ctx);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light');
 
+  const [lite, setLite] = useState(false);
+
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+    const root = document.documentElement;
+    setTheme(root.dataset.theme === 'dark' ? 'dark' : 'light');
+    setLite(root.dataset.lite === '1');
+
+    // Aba escondida: animações contínuas pausam.
+    const onVisibility = () => {
+      root.dataset.hidden = document.hidden ? '1' : '';
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   const toggle = useCallback(() => {
@@ -30,7 +44,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  return <Ctx.Provider value={{ theme, toggle }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ theme, toggle }}>
+      <MotionConfig reducedMotion={lite ? 'always' : 'user'}>
+        <LazyMotion features={loadFeatures}>{children}</LazyMotion>
+      </MotionConfig>
+    </Ctx.Provider>
+  );
 }
 
 /** Botão de vidro com ícone que gira ao trocar. */

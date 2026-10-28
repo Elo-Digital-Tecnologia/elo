@@ -60,8 +60,8 @@
   --elo-glass-edge-dim: 152 30% 62%;
   --elo-glass-glow: 150 70% 55%;
   --elo-shadow: 158 60% 14%;
-  --elo-blur: 22px;
-  --elo-blur-strong: 34px;
+  --elo-blur: 16px;
+  --elo-blur-strong: 26px;
 
   /* Gráficos: ordem fixa verde, roxo, âmbar, azul, vermelho. Validada com validate_palette.js em claro e escuro */
   --elo-chart-1: 152 48% 34%;
