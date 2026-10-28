@@ -4,3 +4,10 @@ dist
 .turbo
 .env
 *.tsbuildinfo
+uploads
+
+# docs internas (não vão para o GitHub)
+PENDENCIAS.md
+REFERENCE.md
+NOTES.txt
+next-env.d.ts
