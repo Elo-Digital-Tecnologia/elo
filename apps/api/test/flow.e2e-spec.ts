@@ -275,4 +275,86 @@ suite('fluxo da mesa (e2e)', () => {
     await http().delete(`/catalog/media/${up.body.id}`).set(auth(admin)).expect(204);
     await http().get(up.body.url.replace('/api', '')).expect(404);
   }, 30_000);
+
+  it('perfil público, etiquetas, ordem e avaliação', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const base = { name: 'Perfil', managerName: 'Maria', managerContact: '11999999999', serviceFeeBps: 500 };
+
+    // perfil: valida o formato e aceita limpar com texto vazio
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, phone: 'abc' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, instagram: 'com espaço' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, logoUrl: 'javascript:alert(1)' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, null] }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, { open: '25:00', close: '23:00' }, null, null, null, null, null] }).expect(400);
+    const day = { open: '00:00', close: '23:59' };
+    const saved = await http().patch('/restaurant/settings').set(auth(admin)).send({
+      ...base,
+      description: 'Pizzas no forno a lenha.',
+      address: 'Rua das Flores, 100',
+      phone: '(11) 4000-1234',
+      instagram: '@casaverde',
+      wifiName: 'Casa Verde',
+      wifiPassword: 'segredo-wifi-123',
+      openingHours: [day, day, day, day, day, day, day],
+    }).expect(200);
+    expect(saved.body).toMatchObject({ description: 'Pizzas no forno a lenha.', wifiName: 'Casa Verde', openStatus: { open: true } });
+
+    // consulta pública mostra o perfil, mas nunca o Wi-Fi
+    const pub = await http().get(`/public/${slug}/menu`).expect(200);
+    expect(pub.body.restaurant).toMatchObject({ description: 'Pizzas no forno a lenha.', phone: '(11) 4000-1234', openStatus: { open: true } });
+    expect(JSON.stringify(pub.body)).not.toContain('segredo-wifi-123');
+
+    // dentro da mesa o Wi-Fi aparece
+    const sess = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    const cookie = (sess.headers['set-cookie'] as unknown as string[]).map((c) => c.split(';')[0]).join('; ');
+    expect(sess.body.restaurant.wifi).toEqual({ name: 'Casa Verde', password: 'segredo-wifi-123' });
+
+    // limpar campos
+    const cleared = await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, description: '', phone: null }).expect(200);
+    expect(cleared.body).toMatchObject({ description: null, phone: null, address: 'Rua das Flores, 100' });
+
+    // etiquetas e destaque
+    const cat = await http().post('/catalog/categories').set(auth(admin)).send({ name: 'Ordem A' }).expect(201);
+    const cat2 = await http().post('/catalog/categories').set(auth(admin)).send({ name: 'Ordem B' }).expect(201);
+    const p = (name: string, extra: object = {}) =>
+      http().post('/catalog/products').set(auth(admin)).send({ categoryId: cat.body.id, name, priceCents: 1000, ...extra });
+    await p('Inválido', { tags: ['inexistente'] }).expect(400);
+    await p('Repetido', { tags: ['spicy', 'spicy'] }).expect(400);
+    const a = (await p('Alfa', { featured: true, tags: ['spicy', 'new'] }).expect(201)).body;
+    const b = (await p('Beta').expect(201)).body;
+    const c = (await p('Gama').expect(201)).body;
+    expect(a).toMatchObject({ featured: true, tags: ['spicy', 'new'] });
+
+    // ordem de produtos: precisa trazer todos, só do restaurante
+    await http().patch('/catalog/products/order').set(auth(admin)).send({ categoryId: cat.body.id, ids: [c.id, a.id] }).expect(400);
+    await http().patch('/catalog/products/order').set(auth(admin)).send({ categoryId: cat.body.id, ids: [c.id, a.id, 'e1f5b8d0-0000-4000-8000-000000000000'] }).expect(400);
+    await http().patch('/catalog/products/order').set(auth(admin)).send({ categoryId: cat.body.id, ids: [c.id, a.id, b.id] }).expect(204);
+    const menu = (await http().get('/catalog').set(auth(admin)).expect(200)).body as { id: string; products: { id: string }[] }[];
+    expect(menu.find((x) => x.id === cat.body.id)!.products.map((x) => x.id)).toEqual([c.id, a.id, b.id]);
+
+    // ordem de categorias: lista completa
+    const all = menu.map((x) => x.id);
+    await http().patch('/catalog/categories/order').set(auth(admin)).send({ ids: all.slice(1) }).expect(400);
+    const reversed = [...all].reverse();
+    await http().patch('/catalog/categories/order').set(auth(admin)).send({ ids: reversed }).expect(204);
+    expect(((await http().get('/catalog').set(auth(admin)).expect(200)).body as { id: string }[]).map((x) => x.id)).toEqual(reversed);
+    await http().patch('/catalog/products/order').set(auth(waiter)).send({ categoryId: cat.body.id, ids: [a.id] }).expect(403);
+    expect(cat2.body.id).toBeTruthy();
+
+    // avaliação: precisa de mesa aberta, 1 a 5, uma por sessão
+    await http().post('/public/session/review').set('Cookie', cookie).send({ stars: 5 }).expect(400);
+    await http().post('/public/session/open').set('Cookie', cookie).expect(201);
+    await http().post(`/tables/${tableId}/validate-open`).set(auth(waiter)).expect(201);
+    await http().post('/public/session/review').set('Cookie', cookie).send({ stars: 0 }).expect(400);
+    await http().post('/public/session/review').set('Cookie', cookie).send({ stars: 6 }).expect(400);
+    await http().post('/public/session/review').send({ stars: 5 }).expect(401);
+    await http().post('/public/session/review').set('Cookie', cookie).send({ stars: 4, comment: 'Bom' }).expect(201);
+    await http().post('/public/session/review').set('Cookie', cookie).send({ stars: 5, comment: '  Ótimo  ' }).expect(201);
+    expect((await http().get('/public/session/review').set('Cookie', cookie).expect(200)).body).toMatchObject({ stars: 5, comment: 'Ótimo' });
+    const sum = (await http().get('/reviews').set(auth(admin)).expect(200)).body;
+    expect(sum).toMatchObject({ count: 1, average: 5 });
+    expect(sum.reviews[0]).toMatchObject({ stars: 5, comment: 'Ótimo', tableName: 'Mesa 01' });
+    await http().get('/reviews').set(auth(waiter)).expect(403);
+    await http().post(`/tables/${tableId}/close`).set(auth(waiter)).expect(201);
+  }, 30_000);
 });
