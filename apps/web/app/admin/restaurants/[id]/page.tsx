@@ -1,6 +1,6 @@
 'use client';
 
-import { Ban, CalendarClock, CircleCheck, ExternalLink, MessageCircle, Phone, RefreshCw, Table2, UserRound, Wallet } from 'lucide-react';
+import { Ban, CalendarClock, Pencil, Trash2, CircleCheck, ExternalLink, MessageCircle, Phone, RefreshCw, Table2, UserRound, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
@@ -46,6 +46,12 @@ function billingLink(r: Detail): string | null {
 
 const EMPTY = { amount: '', paidAt: '', newDueDate: '', note: '' };
 
+const ERRORS: Record<string, string> = {
+  not_suspended: 'Suspenda o acesso antes de excluir.',
+  slug_mismatch: 'O link digitado não confere.',
+  restaurant_deleted: 'Este restaurante foi excluído.',
+};
+
 function View({ id }: { id: string }) {
   const router = useRouter();
   const { token, can } = useAdmin();
@@ -59,12 +65,15 @@ function View({ id }: { id: string }) {
   const [tables, setTables] = useState<AdminTables | null>(null);
   const [rotating, setRotating] = useState<AdminTables['tables'][number] | null>(null);
   const [newLink, setNewLink] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ name: string; managerName: string; managerContact: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmSlug, setConfirmSlug] = useState('');
 
   const load = useCallback(async () => {
     try {
       setR(await api<Detail>(`/api/admin/restaurants/${id}`, { token }));
-      if (can('subscriptions')) setPayments(await api<Payment[]>(`/api/admin/restaurants/${id}/payments`, { token }));
-      if (can('table_tokens')) setTables(await api<AdminTables>(`/api/admin/restaurants/${id}/tables`, { token }));
+      if (can('payments.view')) setPayments(await api<Payment[]>(`/api/admin/restaurants/${id}/payments`, { token }));
+      if (can('restaurants.tables')) setTables(await api<AdminTables>(`/api/admin/restaurants/${id}/tables`, { token }));
       setFailed(false);
     } catch {
       setFailed(true);
@@ -83,7 +92,7 @@ function View({ id }: { id: string }) {
       await load();
       return true;
     } catch (e) {
-      setError(e instanceof ApiError ? e.code : 'Não foi possível concluir.');
+      setError(e instanceof ApiError ? ERRORS[e.code] ?? 'Não foi possível concluir. Confira os campos.' : 'Não foi possível concluir.');
       return false;
     } finally {
       setSaving(false);
@@ -115,6 +124,17 @@ function View({ id }: { id: string }) {
     if (ok) setRotating(null);
   };
 
+  const saveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editing && (await guard(() => api(`/api/admin/restaurants/${id}`, { method: 'PATCH', body: editing, token })))) setEditing(null);
+  };
+
+  const remove = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const ok = await guard(() => api(`/api/admin/restaurants/${id}`, { method: 'DELETE', body: { confirmSlug }, token }));
+    if (ok) router.replace('/admin/restaurants?status=deleted');
+  };
+
   if (failed) return <ErrorState action={<Button onClick={load}>Tentar de novo</Button>}>Não foi possível carregar este restaurante.</ErrorState>;
   if (!r) return <SkeletonCards count={3} />;
   const openPanel = async () => {
@@ -141,11 +161,14 @@ function View({ id }: { id: string }) {
         description={`Cardápio em /${r.slug}`}
         actions={
           <>
-            {can('restaurant_access') && (
+            {can('restaurants.edit') && (
+              <Button variant="ghost" onClick={() => { setError(null); setEditing({ name: r.name, managerName: r.managerName, managerContact: r.managerContact }); }}><Pencil size={16} /> Editar</Button>
+            )}
+            {can('restaurants.access') && (
               <Button variant="soft" loading={saving} onClick={openPanel}><ExternalLink size={17} /> Abrir painel</Button>
             )}
-            {can('subscriptions') && <Button onClick={() => { setError(null); setOpen(true); }}><Wallet size={17} /> Registrar pagamento</Button>}
-            {can('access_control') && (
+            {can('payments.record') && <Button onClick={() => { setError(null); setOpen(true); }}><Wallet size={17} /> Registrar pagamento</Button>}
+            {can('restaurants.suspend') && (
               <Button variant={r.suspended ? 'soft' : 'danger'} loading={saving} onClick={() => guard(() => api(`/api/admin/restaurants/${id}/${r.suspended ? 'reactivate' : 'suspend'}`, { method: 'POST', body: {}, token }))}>
                 {r.suspended ? <><CircleCheck size={17} /> Reativar acesso</> : <><Ban size={17} /> Suspender acesso</>}
               </Button>
@@ -153,19 +176,19 @@ function View({ id }: { id: string }) {
           </>
         }
       />
-      {error && !open && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
+      {error && !open && !editing && !deleting && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <GlassCard strong className="space-y-4 p-6">
           <Badge tone={st.tone} dot>{st.label}</Badge>
-          {can('subscriptions') && billingLink(r) && r.subscription.state !== 'active' && (
+          {can('payments.record') && billingLink(r) && r.subscription.state !== 'active' && (
             <a href={billingLink(r)!} target="_blank" rel="noreferrer" className="btn-glass inline-flex items-center gap-2 rounded-pill px-4 py-2 text-sm font-semibold"><MessageCircle size={16} /> Cobrar pelo WhatsApp</a>
           )}
           <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={20} /><div><div className="text-sm text-muted">Vencimento</div><div className="font-semibold">{fmt(r.subscription.dueDate)}</div></div></div>
           <div className="flex items-center gap-3"><UserRound className="text-brand" size={20} /><div><div className="text-sm text-muted">Gerente</div><div className="font-semibold">{r.managerName}</div></div></div>
           <div className="flex items-center gap-3"><Phone className="text-brand" size={20} /><div><div className="text-sm text-muted">Contato</div><div className="font-semibold">{r.managerContact}</div></div></div>
         </GlassCard>
-        {can('subscriptions') && (
+        {can('payments.view') && (
           <GlassCard className="p-6 lg:col-span-2">
             <h2 className="mb-4 text-lg font-semibold">Pagamentos recebidos</h2>
             {chart.length >= 2 ? <ColumnChart data={chart} format={(n) => formatBRL(n * 100)} /> : <p className="text-sm text-muted">O gráfico aparece a partir do segundo pagamento registrado.</p>}
@@ -173,7 +196,7 @@ function View({ id }: { id: string }) {
         )}
       </div>
 
-      {can('subscriptions') && (
+      {can('payments.view') && (
         <section className="mt-6">
           <h2 className="mb-3 text-xl font-semibold">Histórico de pagamentos</h2>
           {payments.length === 0 ? (
@@ -194,7 +217,7 @@ function View({ id }: { id: string }) {
         </section>
       )}
 
-      {can('table_tokens') && tables && (
+      {can('restaurants.tables') && tables && (
         <section className="mt-6">
           <h2 className="mb-1 text-xl font-semibold">Mesas e tokens</h2>
           <p className="mb-3 text-sm text-muted">Regravar um token invalida o QR Code e a tag atuais da mesa e encerra a sessão em andamento. Use só se suspeitar de abuso.</p>
@@ -213,6 +236,44 @@ function View({ id }: { id: string }) {
           )}
         </section>
       )}
+
+      {can('restaurants.delete') && (
+        <section className="mt-8 rounded-lg border border-danger/40 p-5">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-danger"><Trash2 size={18} /> Excluir restaurante</h2>
+          <p className="mt-1 text-sm text-muted">
+            O cardápio sai do ar e a equipe perde o acesso. Os dados ficam guardados para restauração ou exportação e depois são apagados de vez.
+            {r.subscription.state !== 'suspended' && ' Suspenda o acesso antes de excluir.'}
+          </p>
+          <Button className="mt-3" variant="danger" disabled={r.subscription.state !== 'suspended'} onClick={() => { setError(null); setConfirmSlug(''); setDeleting(true); }}>Excluir restaurante</Button>
+        </section>
+      )}
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar restaurante" sheet>
+        {editing && (
+          <form onSubmit={saveEdit} className="space-y-4">
+            <Field label="Nome do restaurante"><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} minLength={2} maxLength={120} required autoFocus /></Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Nome do gerente"><input value={editing.managerName} onChange={(e) => setEditing({ ...editing, managerName: e.target.value })} minLength={2} maxLength={120} required /></Field>
+              <Field label="Contato do gerente"><input value={editing.managerContact} onChange={(e) => setEditing({ ...editing, managerContact: e.target.value })} minLength={5} maxLength={120} required /></Field>
+            </div>
+            <p className="text-xs text-muted">O link /{r.slug} não muda: ele está impresso nos QR Codes.</p>
+            {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+            <div className="flex justify-end"><Button type="submit" loading={saving}>Salvar</Button></div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={deleting} onClose={() => setDeleting(false)} title={`Excluir ${r.name}?`} sheet>
+        <form onSubmit={remove} className="space-y-4">
+          <p className="text-sm">Para confirmar, digite o link do restaurante: <strong className="font-mono">{r.slug}</strong></p>
+          <input value={confirmSlug} onChange={(e) => setConfirmSlug(e.target.value)} autoCapitalize="none" autoComplete="off" spellCheck={false} aria-label="Link do restaurante" autoFocus />
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setDeleting(false)}>Voltar</Button>
+            <Button type="submit" variant="danger" loading={saving} disabled={confirmSlug.trim() !== r.slug}>Excluir</Button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal open={!!rotating} onClose={() => setRotating(null)} title="Regravar token da mesa" sheet>
         <p className="text-sm">A mesa <strong>{rotating?.name}</strong> passará a ter um novo link. O QR Code impresso e a tag NFC atuais deixam de funcionar e a sessão aberta é encerrada.</p>

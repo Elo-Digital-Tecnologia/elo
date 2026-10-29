@@ -3,7 +3,7 @@
 import { Building2, CircleCheck, OctagonAlert, TimerReset } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@elo/client';
-import { accessState } from '@elo/core';
+import type { RestaurantListItem, RestaurantListView } from '@elo/core';
 import { Badge, Donut, ErrorState, GlassCard, PageHeader, SkeletonCards, Stagger, StaggerItem, Stat } from '@elo/ui';
 import { Shell, useAdmin } from '../_components/shell';
 import Link from 'next/link';
@@ -14,34 +14,27 @@ interface Overview {
   grace: number;
   suspended: number;
 }
-interface Restaurant {
-  id: string;
-  name: string;
-  slug: string;
-  dueDate: string;
-  suspended: boolean;
-}
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
 
 function View() {
   const { token, can } = useAdmin();
   const [o, setO] = useState<Overview | null>(null);
-  const [list, setList] = useState<Restaurant[]>([]);
+  const [attention, setAttention] = useState<RestaurantListItem[]>([]);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     api<Overview>('/api/admin/overview', { token }).then(setO).catch(() => setFailed(true));
-    if (can('restaurants')) api<Restaurant[]>('/api/admin/restaurants', { token }).then(setList).catch(() => undefined);
+    if (can('restaurants.view')) {
+      api<RestaurantListView>('/api/admin/restaurants?status=attention&sort=due&pageSize=6', { token })
+        .then((v) => setAttention(v.items))
+        .catch(() => undefined);
+    }
   }, [token, can]);
 
   if (failed) return <ErrorState>Não conseguimos buscar o resumo da plataforma.</ErrorState>;
   if (!o) return <SkeletonCards count={4} />;
 
-  const attention = list
-    .map((r) => ({ r, state: accessState(new Date(r.dueDate), new Date(), r.suspended) }))
-    .filter((x) => x.state !== 'active')
-    .slice(0, 6);
 
   return (
     <>
@@ -68,11 +61,11 @@ function View() {
             <p className="rounded-lg border border-dashed border-line/60 px-4 py-8 text-center text-sm text-muted">Nenhum pagamento pendente.</p>
           ) : (
             <Stagger className="space-y-2.5">
-              {attention.map(({ r, state }) => (
+              {attention.map((r) => (
                 <StaggerItem key={r.id}>
                   <Link href={`/admin/restaurants/${r.id}`} className="flex items-center justify-between gap-3 rounded-md bg-leaf-100/40 px-4 py-3 text-sm transition hover:bg-brand/10">
                     <span><b>{r.name}</b> <span className="text-muted">venceu em {fmt(r.dueDate)}</span></span>
-                    <Badge tone={state === 'grace' ? 'warning' : 'danger'} dot>{state === 'grace' ? 'Em tolerância' : 'Suspenso'}</Badge>
+                    <Badge tone={r.subscription.state === 'grace' ? 'warning' : 'danger'} dot>{r.subscription.state === 'grace' ? 'Em tolerância' : 'Suspenso'}</Badge>
                   </Link>
                 </StaggerItem>
               ))}

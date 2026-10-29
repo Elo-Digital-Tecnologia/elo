@@ -1,38 +1,78 @@
 'use client';
 
-import { KeyRound, UserPlus, UsersRound } from 'lucide-react';
+import { KeyRound, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { ALL_PERMISSIONS } from '@elo/core';
+import { type Permission, PERMISSION_GROUPS, upgradePermissions, withRequired } from '@elo/core';
 import { Badge, Button, DataTable, EmptyState, ErrorState, Field, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
 import { Shell, useAdmin } from '../_components/shell';
 
 interface Member {
   id: string;
   username: string;
+  name: string;
   permissions: string[];
   active: boolean;
 }
 
-const PERM_LABEL: Record<string, string> = {
-  restaurants: 'Restaurantes',
-  subscriptions: 'Assinaturas e pagamentos',
-  access_control: 'Suspender e reativar',
-  settings: 'Equipe e configurações',
-  table_tokens: 'Regravar tokens de mesa',
-  restaurant_access: 'Abrir o painel dos restaurantes',
-};
+/** "Restaurantes: Ver, Cadastrar" per group, so a member with many permissions still fits in a row. */
+function summary(perms: string[]) {
+  const held = upgradePermissions(perms);
+  return PERMISSION_GROUPS.map((g) => ({ label: g.label, items: g.items.filter((i) => held.includes(i.permission)).map((i) => i.label) })).filter((g) => g.items.length);
+}
+
+/** Removing a permission also removes the ones that depend on it. */
+function toggled(current: Permission[], p: Permission): Permission[] {
+  if (!current.includes(p)) return withRequired([...current, p]);
+  return current.filter((q) => q !== p && !withRequired([q]).includes(p));
+}
+
+function PermissionPicker({ value, onChange, grantable }: { value: Permission[]; onChange: (v: Permission[]) => void; grantable: (p: Permission) => boolean }) {
+  return (
+    <fieldset className="space-y-4">
+      <legend className="mb-1 text-sm font-medium">O que esta pessoa pode fazer</legend>
+      {PERMISSION_GROUPS.map((g) => (
+        <div key={g.label}>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{g.label}</h3>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {g.items.map((i) => {
+              const allowed = grantable(i.permission);
+              const on = value.includes(i.permission);
+              return (
+                <label key={i.permission} title={allowed ? undefined : 'Você não pode conceder esta permissão.'} className={`flex items-start gap-3 rounded-md border px-3.5 py-3 text-sm transition ${on ? 'border-brand bg-brand/10' : 'border-line/50'} ${allowed ? 'cursor-pointer hover:border-brand/50' : 'cursor-not-allowed opacity-60'}`}>
+                  <input type="checkbox" className="mt-0.5" checked={on} disabled={!allowed} onChange={() => onChange(toggled(value, i.permission))} />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{i.label}</span>
+                    {i.hint && <span className="block text-xs text-muted">{i.hint}</span>}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </fieldset>
+  );
+}
 
 function View() {
-  const { token } = useAdmin();
+  const { token, roles, sub, can } = useAdmin();
   const [list, setList] = useState<Member[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ username: '', password: '' });
-  const [perms, setPerms] = useState<string[]>([]);
+  const [form, setForm] = useState({ name: '', username: '', password: '' });
+  const [perms, setPerms] = useState<Permission[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [resetting, setResetting] = useState<Member | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [editing, setEditing] = useState<Member | null>(null);
+  const [editPerms, setEditPerms] = useState<Permission[]>([]);
+  const [removing, setRemoving] = useState<Member | null>(null);
+
+  const isSuper = roles.includes('superadmin');
+  /** Mirrors the server: hand out only what you hold; deletion only by the superadmin. */
+  const grantable = (p: Permission) => isSuper || (p !== 'restaurants.delete' && can(p));
 
   const load = useCallback(async () => {
     try {
@@ -51,12 +91,31 @@ function View() {
     setError(null);
     try {
       await api('/api/admin/staff', { body: { ...form, permissions: perms }, token });
-      setForm({ username: '', password: '' });
+      setForm({ name: '', username: '', password: '' });
       setPerms([]);
       setOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 409 ? 'Esse usuário já existe.' : 'Confira os campos: usuário em minúsculas e senha com 8+ caracteres.');
+      setError(
+        err instanceof ApiError && err.status === 409
+          ? 'Esse usuário já existe.'
+          : err instanceof ApiError && err.code === 'cannot_grant'
+            ? 'Você marcou uma permissão que não pode conceder.'
+            : 'Confira os campos: nome com letras, usuário em minúsculas e senha com 8 ou mais caracteres.',
+      );
+    }
+  };
+
+  const savePerms = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editing) return;
+    setError(null);
+    try {
+      await api(`/api/admin/staff/${editing.id}`, { method: 'PATCH', body: { permissions: editPerms }, token });
+      setEditing(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError && err.code === 'cannot_grant' ? 'Você marcou uma permissão que não pode conceder.' : 'Não foi possível salvar as permissões.');
     }
   };
 
@@ -74,13 +133,30 @@ function View() {
   };
 
   const toggle = async (m: Member) => {
-    await api(`/api/admin/staff/${m.id}/active`, { method: 'PATCH', body: { active: !m.active }, token });
-    await load();
+    setListError(null);
+    try {
+      await api(`/api/admin/staff/${m.id}/active`, { method: 'PATCH', body: { active: !m.active }, token });
+      await load();
+    } catch {
+      setListError('Não foi possível mudar a situação.');
+    }
+  };
+
+  const remove = async () => {
+    if (!removing) return;
+    try {
+      await api(`/api/admin/staff/${removing.id}`, { method: 'DELETE', token });
+      setRemoving(null);
+      await load();
+    } catch {
+      setError('Não foi possível excluir.');
+    }
   };
 
   return (
     <>
-      <PageHeader title="Equipe" actions={<Button onClick={() => { setError(null); setOpen(true); }}><UserPlus size={17} /> Novo integrante</Button>} />
+      <PageHeader title="Equipe" actions={<Button onClick={() => { setError(null); setPerms([]); setOpen(true); }}><UserPlus size={17} /> Novo integrante</Button>} />
+      {listError && <p role="alert" className="mb-4 text-sm text-danger">{listError}</p>}
       {failed && <ErrorState action={<Button onClick={load}>Tentar de novo</Button>}>Não foi possível carregar a equipe.</ErrorState>}
       {!list && !failed && <SkeletonCards count={2} />}
       {list?.length === 0 && <EmptyState icon={UsersRound} title="Nenhum integrante" action={<Button onClick={() => setOpen(true)}>Adicionar integrante</Button>}>Crie logins e escolha as permissões.</EmptyState>}
@@ -89,37 +165,73 @@ function View() {
           rows={list}
           rowKey={(m) => m.id}
           columns={[
-            { key: 'u', header: 'Usuário', cell: (m) => <span className="font-semibold">{m.username}</span> },
-            { key: 'p', header: 'Permissões', cell: (m) => <span className="flex flex-wrap gap-1.5">{m.permissions.length ? m.permissions.map((p) => <Badge key={p} tone="brand">{PERM_LABEL[p]}</Badge>) : <span className="text-muted">Nenhuma</span>}</span> },
+            { key: 'u', header: 'Nome', cell: (m) => <span className="block min-w-0"><span className="block truncate font-semibold">{m.name}{m.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span><span className="block truncate text-xs text-muted">{m.username}</span></span> },
+            {
+              key: 'p',
+              header: 'Permissões',
+              cell: (m) => {
+                const groups = summary(m.permissions);
+                return groups.length ? (
+                  <span className="flex flex-col gap-1 text-xs">
+                    {groups.map((g) => <span key={g.label}><strong className="font-semibold">{g.label}:</strong> <span className="text-muted">{g.items.join(', ')}</span></span>)}
+                  </span>
+                ) : <span className="text-muted">Nenhuma</span>;
+              },
+            },
             { key: 's', header: 'Situação', cell: (m) => <Badge tone={m.active ? 'success' : 'neutral'} dot>{m.active ? 'Ativo' : 'Desativado'}</Badge> },
-            { key: 'a', header: '', align: 'right', cell: (m) => (<span className="inline-flex gap-1"><Button variant="ghost" onClick={() => { setError(null); setNewPassword(''); setResetting(m); }}><KeyRound size={16} /> Nova senha</Button><Button variant="ghost" onClick={() => toggle(m)}>{m.active ? 'Desativar' : 'Ativar'}</Button></span>) },
+            {
+              key: 'a',
+              header: '',
+              align: 'right',
+              cell: (m) => {
+                const self = m.id === sub;
+                return (
+                  <span className="inline-flex flex-wrap justify-end gap-1">
+                    <Button variant="ghost" disabled={self} onClick={() => { setError(null); setEditPerms(upgradePermissions(m.permissions)); setEditing(m); }}><ShieldCheck size={16} /> Permissões</Button>
+                    <Button variant="ghost" onClick={() => { setError(null); setNewPassword(''); setResetting(m); }}><KeyRound size={16} /> Nova senha</Button>
+                    <Button variant="ghost" disabled={self} onClick={() => toggle(m)}>{m.active ? 'Desativar' : 'Ativar'}</Button>
+                    <Button variant="ghost" disabled={self} className="text-danger" aria-label={`Excluir ${m.name}`} onClick={() => { setError(null); setRemoving(m); }}><Trash2 size={15} /></Button>
+                  </span>
+                );
+              },
+            },
           ]}
         />
       )}
-      <Modal open={!!resetting} onClose={() => setResetting(null)} title={`Nova senha de ${resetting?.username ?? ''}`}>
+
+      <Modal open={!!resetting} onClose={() => setResetting(null)} title={`Nova senha de ${resetting?.name ?? ''}`}>
         <form onSubmit={resetPassword} className="space-y-4">
           <Field label="Nova senha" hint="Pelo menos 8 caracteres."><PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} autoComplete="new-password" required autoFocus /></Field>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end"><Button type="submit">Salvar senha</Button></div>
         </form>
       </Modal>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`Permissões de ${editing?.name ?? ''}`} sheet>
+        <form onSubmit={savePerms} className="space-y-4">
+          <PermissionPicker value={editPerms} onChange={setEditPerms} grantable={grantable} />
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+          <div className="flex justify-end"><Button type="submit">Salvar</Button></div>
+        </form>
+      </Modal>
+
+      <Modal open={!!removing} onClose={() => setRemoving(null)} title={`Excluir ${removing?.name ?? ''}?`} sheet>
+        <p className="text-sm text-muted">A pessoa perde o acesso ao painel Elo. O que ela registrou (pagamentos, entradas em restaurantes) continua no histórico.</p>
+        {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setRemoving(null)}>Voltar</Button>
+          <Button variant="danger" onClick={remove}>Excluir</Button>
+        </div>
+      </Modal>
+
       <Modal open={open} onClose={() => setOpen(false)} title="Novo integrante" sheet>
         <form onSubmit={create} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Usuário"><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} required autoFocus /></Field>
-            <Field label="Senha" hint="Pelo menos 8 caracteres."><input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></Field>
+            <Field label="Nome completo"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} minLength={2} maxLength={80} required autoFocus /></Field>
+            <Field label="Usuário"><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} autoCapitalize="none" required /></Field>
+            <Field label="Senha" hint="Pelo menos 8 caracteres."><PasswordInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" minLength={8} required /></Field>
           </div>
-          <fieldset>
-            <legend className="mb-2 text-sm font-medium">O que esta pessoa pode fazer</legend>
-            <div className="space-y-2">
-              {ALL_PERMISSIONS.map((p) => (
-                <label key={p} className={`flex cursor-pointer items-center gap-3 rounded-md border px-4 py-3 text-sm transition ${perms.includes(p) ? 'border-brand bg-brand/10' : 'border-line/50 hover:border-brand/50'}`}>
-                  <input type="checkbox" checked={perms.includes(p)} onChange={() => setPerms((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]))} />
-                  {PERM_LABEL[p]}
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <PermissionPicker value={perms} onChange={setPerms} grantable={grantable} />
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end"><Button type="submit">Criar integrante</Button></div>
         </form>
