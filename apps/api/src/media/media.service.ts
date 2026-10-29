@@ -44,8 +44,6 @@ export class MediaService implements OnModuleInit {
     config: ConfigService<Env, true>,
   ) {
     this.dir = config.get('UPLOAD_DIR', { infer: true });
-    // Pouca memória: uma conversão por vez.
-    sharp.concurrency(1);
   }
 
   onModuleInit() {
