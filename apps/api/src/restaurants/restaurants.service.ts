@@ -1,8 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AccessState, accessState, GRACE_DAYS, isReservedSlug, Role, slugify } from '@elo/core';
+import { AccessState, accessState, GRACE_DAYS, isReservedSlug, openStatus, type RestaurantProfileView, Role, slugify } from '@elo/core';
+import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditLog, Payment, Restaurant } from '../database/entities';
 import { StaffService } from '../staff/staff.service';
@@ -36,7 +38,21 @@ export class RestaurantsService {
     @InjectRepository(AuditLog) private readonly audit: Repository<AuditLog>,
     private readonly staff: StaffService,
     private readonly jwt: JwtService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
+
+  /** Perfil que qualquer cliente pode ver no cardápio. O Wi-Fi fica de fora. */
+  publicProfile(r: Restaurant): RestaurantProfileView {
+    return {
+      description: r.description,
+      logoUrl: r.logoUrl,
+      coverUrl: r.coverUrl,
+      address: r.address,
+      phone: r.phone,
+      instagram: r.instagram,
+      openStatus: openStatus(r.openingHours, new Date(), this.config.get('REPORT_TZ', { infer: true })),
+    };
+  }
 
   /** Token de administrador do restaurante para a equipe Elo; dura 45 min e fica registrado. */
   async accessAs(id: string, actor: JwtUser): Promise<{ accessToken: string; slug: string }> {
@@ -110,10 +126,12 @@ export class RestaurantsService {
 
   async updateSettings(
     id: string,
-    data: { name: string; managerName: string; managerContact: string; serviceFeeBps: number },
+    data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'wifiName' | 'wifiPassword' | 'openingHours'>> &
+      Pick<Restaurant, 'name' | 'managerName' | 'managerContact' | 'serviceFeeBps'>,
   ): Promise<Restaurant> {
     const r = await this.get(id);
-    Object.assign(r, data);
+    // Campos não enviados ficam como estão; só o que veio (inclusive nulo) é gravado.
+    Object.assign(r, Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)));
     return this.restaurants.save(r);
   }
 

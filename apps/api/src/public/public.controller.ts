@@ -14,6 +14,8 @@ import { CallsService } from '../calls/calls.service';
 import { CancelCustomerDto, CreateOrderDto } from '../orders/orders.dto';
 import { OrdersService } from '../orders/orders.service';
 import { TABLE_COOKIE } from '../realtime/realtime.gateway';
+import { ReviewDto } from '../reviews/reviews.dto';
+import { ReviewsService } from '../reviews/reviews.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { SessionContext, TablesService } from '../tables/tables.service';
 import { Session, TableSessionGuard } from './table-session.guard';
@@ -44,6 +46,7 @@ export class PublicController {
     private readonly orders: OrdersService,
     private readonly calls: CallsService,
     private readonly bills: BillsService,
+    private readonly reviews: ReviewsService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -53,7 +56,7 @@ export class PublicController {
     const r = await this.restaurants.getBySlug(slug);
     return {
       readOnly: true,
-      restaurant: { name: r.name, slug: r.slug },
+      restaurant: { name: r.name, slug: r.slug, ...this.restaurants.publicProfile(r) },
       menu: await this.catalog.publicMenu(r.id),
     };
   }
@@ -132,6 +135,19 @@ export class PublicController {
     return this.bills.refuseFee(ctx, dto.refuse);
   }
 
+  @UseGuards(TableSessionGuard)
+  @Get('session/review')
+  myReview(@Session() ctx: SessionContext) {
+    return this.reviews.mine(ctx);
+  }
+
+  /** Avaliação do atendimento (1 a 5, comentário opcional), uma por sessão. */
+  @UseGuards(TableSessionGuard)
+  @Post('session/review')
+  review(@Session() ctx: SessionContext, @Body() dto: ReviewDto) {
+    return this.reviews.submit(ctx, dto);
+  }
+
   private async buildState(ctx: SessionContext) {
     const [table, orders, restaurant] = await Promise.all([
       this.tables.tableOf(ctx),
@@ -140,7 +156,14 @@ export class PublicController {
     ]);
     return {
       readOnly: false,
-      restaurant: { name: restaurant.name, slug: restaurant.slug, serviceFeeBps: restaurant.serviceFeeBps },
+      restaurant: {
+        name: restaurant.name,
+        slug: restaurant.slug,
+        serviceFeeBps: restaurant.serviceFeeBps,
+        ...this.restaurants.publicProfile(restaurant),
+        // Só quem está numa mesa recebe o Wi-Fi; o link de consulta nunca.
+        wifi: restaurant.wifiName || restaurant.wifiPassword ? { name: restaurant.wifiName, password: restaurant.wifiPassword } : null,
+      },
       table: { name: table.name, state: table.state },
       orders,
       menu: await this.catalog.publicMenu(ctx.restaurantId),

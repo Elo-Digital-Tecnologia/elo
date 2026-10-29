@@ -117,6 +117,10 @@ export class RestaurantSelfController {
       managerName: r.managerName,
       managerContact: r.managerContact,
       serviceFeeBps: r.serviceFeeBps,
+      ...this.restaurants.publicProfile(r),
+      wifiName: r.wifiName,
+      wifiPassword: r.wifiPassword,
+      openingHours: r.openingHours,
       subscription: this.restaurants.subscriptionOf(r),
     };
   }

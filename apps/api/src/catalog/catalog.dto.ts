@@ -1,8 +1,12 @@
 import { Type } from 'class-transformer';
+import { PRODUCT_TAGS, type ProductTag } from '@elo/core';
+import { IMAGE_URL_PATTERN } from '../common/image-url';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -38,7 +42,9 @@ export class ProductDto {
   @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsInt() @Min(0) priceCents: number;
   /** Link externo ou imagem do banco do restaurante (/api/media/<id>.webp). */
-  @IsOptional() @Matches(/^(https?:\/\/\S+|\/api\/media\/[0-9a-f-]{36}\.webp)$/) @MaxLength(500) imageUrl?: string;
+  @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) imageUrl?: string;
+  @IsOptional() @IsBoolean() featured?: boolean;
+  @IsOptional() @IsArray() @ArrayMaxSize(PRODUCT_TAGS.length) @ArrayUnique() @IsIn(PRODUCT_TAGS, { each: true }) tags?: ProductTag[];
   @IsOptional() @IsBoolean() available?: boolean;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => OptionGroupDto)
   options?: OptionGroupDto[];
@@ -46,4 +52,13 @@ export class ProductDto {
 
 export class AvailabilityDto {
   @IsBoolean() available: boolean;
+}
+
+/** Nova ordem de itens: lista completa de ids, na ordem desejada. */
+export class OrderIdsDto {
+  @IsArray() @ArrayMaxSize(500) @ArrayUnique() @IsUUID('all', { each: true }) ids: string[];
+}
+
+export class ProductOrderDto extends OrderIdsDto {
+  @IsUUID() categoryId: string;
 }

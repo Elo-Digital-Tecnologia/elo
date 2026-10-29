@@ -9,6 +9,7 @@ import { Order } from './order.entity';
 import { WaiterCall } from './waiter-call.entity';
 import { AuditLog } from './audit-log.entity';
 import { Media } from './media.entity';
+import { Review } from './review.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -21,6 +22,7 @@ export * from './order.entity';
 export * from './waiter-call.entity';
 export * from './audit-log.entity';
 export * from './media.entity';
+export * from './review.entity';
 
 export const ENTITIES = [
   Restaurant,
@@ -34,4 +36,5 @@ export const ENTITIES = [
   WaiterCall,
   AuditLog,
   Media,
+  Review,
 ];

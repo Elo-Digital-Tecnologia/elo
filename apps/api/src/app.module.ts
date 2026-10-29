@@ -21,6 +21,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { Env, loadEnv } from './config/env';
 import { ENTITIES } from './database/entities';
 import { SnakeNamingStrategy } from './database/naming';
+import { ReviewsModule } from './reviews/reviews.module';
 import { MediaModule } from './media/media.module';
 import { OrdersModule } from './orders/orders.module';
 import { PublicModule } from './public/public.module';
@@ -95,6 +96,7 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
     RestaurantsModule,
     CatalogModule,
     MediaModule,
+    ReviewsModule,
     TablesModule,
     OrdersModule,
     CallsModule,

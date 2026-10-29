@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@elo/core';
 import { Roles, TenantId } from '../common/decorators';
 import { CatalogService } from './catalog.service';
-import { AvailabilityDto, CategoryDto, ProductDto } from './catalog.dto';
+import { AvailabilityDto, CategoryDto, OrderIdsDto, ProductDto, ProductOrderDto } from './catalog.dto';
 
 @ApiTags('catalog')
 @ApiBearerAuth()
@@ -21,6 +21,20 @@ export class CatalogController {
   @Post('categories')
   createCategory(@TenantId() rid: string, @Body() dto: CategoryDto) {
     return this.catalog.createCategory(rid, dto);
+  }
+
+  @Roles(Role.RestaurantAdmin)
+  @HttpCode(204)
+  @Patch('categories/order')
+  orderCategories(@TenantId() rid: string, @Body() dto: OrderIdsDto) {
+    return this.catalog.orderCategories(rid, dto.ids);
+  }
+
+  @Roles(Role.RestaurantAdmin)
+  @HttpCode(204)
+  @Patch('products/order')
+  orderProducts(@TenantId() rid: string, @Body() dto: ProductOrderDto) {
+    return this.catalog.orderProducts(rid, dto.categoryId, dto.ids);
   }
 
   @Roles(Role.RestaurantAdmin)

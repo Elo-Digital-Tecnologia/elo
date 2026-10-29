@@ -1,3 +1,4 @@
+import type { ProductTag } from '@elo/core';
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 export interface OptionChoice {
@@ -22,5 +23,10 @@ export class Product {
   @Column({ type: 'int' }) priceCents: number;
   @Column({ type: 'text', nullable: true }) imageUrl: string | null;
   @Column({ default: true }) available: boolean;
+  /** Aparece na seção "Destaques" do cardápio. */
+  @Column({ default: false }) featured: boolean;
+  @Column({ type: 'text', array: true, default: '{}' }) tags: ProductTag[];
+  /** Ordem dentro da categoria (menor primeiro). */
+  @Column({ type: 'int', default: 0 }) position: number;
   @Column({ type: 'jsonb', default: () => "'[]'" }) options: OptionGroup[];
 }

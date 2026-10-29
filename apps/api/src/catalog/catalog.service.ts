@@ -5,6 +5,8 @@ import { TenantRepo } from '../common/tenant-repo';
 import { Category, Product } from '../database/entities';
 import { CategoryDto, ProductDto } from './catalog.dto';
 
+const sameSet = (a: string[], b: string[]) => a.length === b.length && new Set(a).size === a.length && b.every((x) => a.includes(x));
+
 @Injectable()
 export class CatalogService {
   constructor(
@@ -19,8 +21,9 @@ export class CatalogService {
     return new TenantRepo(this.products, rid);
   }
 
-  createCategory(rid: string, dto: CategoryDto) {
-    return this.cats(rid).create({ name: dto.name, position: dto.position ?? 0 });
+  async createCategory(rid: string, dto: CategoryDto) {
+    const last = (await this.cats(rid).find()).reduce((max, c) => Math.max(max, c.position + 1), 0);
+    return this.cats(rid).create({ name: dto.name, position: dto.position ?? last });
   }
 
   async updateCategory(rid: string, id: string, dto: CategoryDto) {
@@ -52,7 +55,7 @@ export class CatalogService {
   private async assemble(rid: string, onlyAvailable: boolean) {
     const [cats, prods] = await Promise.all([
       this.cats(rid).find({}, { position: 'ASC', name: 'ASC' }),
-      this.prods(rid).find(onlyAvailable ? { available: true } : {}, { name: 'ASC' }),
+      this.prods(rid).find(onlyAvailable ? { available: true } : {}, { position: 'ASC', name: 'ASC' }),
     ]);
     return cats
       .map((c) => ({ ...c, products: prods.filter((p) => p.categoryId === c.id) }))
@@ -68,6 +71,9 @@ export class CatalogService {
       priceCents: dto.priceCents,
       imageUrl: dto.imageUrl ?? null,
       available: dto.available ?? true,
+      featured: dto.featured ?? false,
+      tags: dto.tags ?? [],
+      position: await this.nextPosition(rid, dto.categoryId),
       options: dto.options ?? [],
     });
   }
@@ -84,9 +90,34 @@ export class CatalogService {
       priceCents: dto.priceCents,
       imageUrl: dto.imageUrl ?? null,
       available: dto.available ?? p.available,
+      featured: dto.featured ?? false,
+      tags: dto.tags ?? [],
       options: dto.options ?? [],
     });
     return repo.save(p);
+  }
+
+  /** Fim da lista da categoria: produto novo entra por último. */
+  private async nextPosition(rid: string, categoryId: string): Promise<number> {
+    const siblings = await this.prods(rid).find({ categoryId });
+    return siblings.reduce((max, p) => Math.max(max, p.position + 1), 0);
+  }
+
+  /** Define a ordem das categorias. Precisa trazer todas, uma vez cada. */
+  async orderCategories(rid: string, ids: string[]) {
+    const repo = this.cats(rid);
+    const all = await repo.find();
+    if (!sameSet(ids, all.map((c) => c.id))) throw new BadRequestException('invalid_order');
+    await Promise.all(all.map((c) => { c.position = ids.indexOf(c.id); return repo.save(c); }));
+  }
+
+  /** Define a ordem dos produtos de uma categoria. Precisa trazer todos, uma vez cada. */
+  async orderProducts(rid: string, categoryId: string, ids: string[]) {
+    await this.assertCategory(rid, categoryId);
+    const repo = this.prods(rid);
+    const all = await repo.find({ categoryId });
+    if (!sameSet(ids, all.map((p) => p.id))) throw new BadRequestException('invalid_order');
+    await Promise.all(all.map((p) => { p.position = ids.indexOf(p.id); return repo.save(p); }));
   }
 
   async setAvailability(rid: string, id: string, available: boolean) {
