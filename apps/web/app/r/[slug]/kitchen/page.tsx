@@ -1,9 +1,9 @@
 'use client';
 
-import { ChefHat, Clock, OctagonAlert } from 'lucide-react';
+import { ChefHat, Clock, OctagonAlert, Undo2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, upsertOrder, useRealtime } from '@elo/client';
-import { nextOrderStatus, type OrderStatus, type OrderView } from '@elo/core';
+import { nextOrderStatus, previousOrderStatus, type OrderStatus, type OrderView } from '@elo/core';
 import { AnimatePresence, Badge, Button, EmptyState, GlassCard, motion, PageHeader } from '@elo/ui';
 import { Shell, useStaff } from '../_components/shell';
 
@@ -17,6 +17,8 @@ const STATUS_TONE = { sent: 'info', received: 'brand', preparing: 'warning' } as
 const STATUS_LABEL = { sent: 'Novo', received: 'Recebido', preparing: 'Em preparo' } as const;
 
 const IN_PROGRESS = ['sent', 'received', 'preparing'];
+/** A "ready" order leaves the board; this long the kitchen can still take it back. */
+const UNDO_READY_MS = 10_000;
 
 function useNow(everyMs = 20_000) {
   const [now, setNow] = useState(() => Date.now());
@@ -80,11 +82,42 @@ function Board() {
     { onResync: load },
   );
 
+  const [error, setError] = useState<string | null>(null);
+  const [undo, setUndo] = useState<OrderView | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(undoTimer.current), []);
+
+  const change = async (o: OrderView, path: string, body?: unknown) => {
+    setError(null);
+    try {
+      const saved = await api<OrderView>(`/api/orders/${o.id}/${path}`, { method: 'PATCH', body, token });
+      onOrder({ ...o, ...saved });
+      return saved;
+    } catch {
+      // Another screen moved it first: show the current state instead of an error.
+      setError('O pedido mudou em outra tela. A lista foi atualizada.');
+      void load();
+      return null;
+    }
+  };
+
   const advance = async (o: OrderView) => {
     const next = nextOrderStatus(o.status as OrderStatus);
     if (!next) return;
-    const saved = await api<OrderView>(`/api/orders/${o.id}/status`, { method: 'PATCH', body: { status: next }, token });
-    onOrder({ ...o, ...saved });
+    const saved = await change(o, 'status', { status: next });
+    if (saved && next === 'ready') {
+      clearTimeout(undoTimer.current);
+      setUndo({ ...o, ...saved });
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_READY_MS);
+    }
+  };
+
+  const revert = async (o: OrderView) => {
+    if (undo?.id === o.id) {
+      clearTimeout(undoTimer.current);
+      setUndo(null);
+    }
+    await change(o, 'revert');
   };
 
   const dismiss = (id: string) =>
@@ -107,6 +140,7 @@ function Board() {
           </Badge>
         }
       />
+      {error && <p role="alert" className="mb-4 text-sm text-warning">{error}</p>}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         <AnimatePresence mode="popLayout">
           {[...alerts.values()].map((o) => (
@@ -149,7 +183,14 @@ function Board() {
                       </li>
                     ))}
                   </ul>
-                  {next && <Button className="mt-5 w-full !py-3.5 text-base" onClick={() => advance(o)}>{NEXT_LABEL[next]}</Button>}
+                  <div className="mt-5 flex gap-2">
+                    {previousOrderStatus(o.status as OrderStatus) && (
+                      <Button variant="ghost" className="!px-4 !py-3.5" onClick={() => revert(o)} aria-label="Voltar um passo" title="Voltar um passo">
+                        <Undo2 size={18} /> Voltar
+                      </Button>
+                    )}
+                    {next && <Button className="min-w-0 flex-1 !py-3.5 text-base" onClick={() => advance(o)}>{NEXT_LABEL[next]}</Button>}
+                  </div>
                 </GlassCard>
               </motion.div>
             );
@@ -159,6 +200,20 @@ function Board() {
       {visible.length === 0 && alerts.size === 0 && (
         <EmptyState icon={ChefHat} title="Sem pedidos">Nenhum pedido em andamento.</EmptyState>
       )}
+      <AnimatePresence>
+        {undo && (
+          <motion.div
+            role="status"
+            className="glass glass-strong fixed inset-x-4 bottom-4 z-40 mx-auto flex max-w-md items-center justify-between gap-3 !rounded-pill py-2 pl-5 pr-2"
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+          >
+            <span className="min-w-0 truncate text-sm"><strong>{undo.tableName}</strong> marcado como pronto</span>
+            <Button variant="ghost" onClick={() => revert(undo)}><Undo2 size={16} /> Desfazer</Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

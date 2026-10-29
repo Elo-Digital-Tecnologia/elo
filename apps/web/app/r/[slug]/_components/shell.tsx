@@ -15,11 +15,12 @@ import {
   Users,
   ConciergeBell,
   ShieldAlert,
+  Trophy,
 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, ApiError, type RealtimeStatus, useAuth, useRealtimeStatus } from '@elo/client';
-import type { RestaurantSettingsView, SubscriptionView } from '@elo/core';
+import { ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
 import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, SkeletonCards } from '@elo/ui';
 
 interface Me extends RestaurantSettingsView {
@@ -34,7 +35,11 @@ interface Me extends RestaurantSettingsView {
 
 interface StaffCtx {
   token: string;
-  role: string;
+  roles: string[];
+  /** Signed-in team member's id, to tell "you" apart in lists. */
+  sub: string;
+  /** Elo support inside the panel: not bound by the admin-vs-admin rule. */
+  impersonated: boolean;
   me: Me;
   /** Atualiza os dados do restaurante após editar as configurações. */
   setMe: (me: Me) => void;
@@ -43,55 +48,41 @@ interface StaffCtx {
 const Ctx = createContext<StaffCtx | null>(null);
 export const useStaff = () => useContext(Ctx)!;
 
-const ROLE_LABEL: Record<string, string> = {
-  restaurant_admin: 'Administrador',
-  waiter: 'Garçom',
-  kitchen: 'Cozinha',
-  cashier: 'Caixa',
-};
+/** First match wins: a waiter who also cooks lands on the salon. */
+const HOME_ORDER: [string, string][] = [
+  ['restaurant_admin', '/dashboard'],
+  ['waiter', '/waiter'],
+  ['kitchen', '/kitchen'],
+  ['cashier', '/cashier'],
+];
 
-const HOME_PATH: Record<string, string> = {
-  restaurant_admin: '/dashboard',
-  waiter: '/waiter',
-  kitchen: '/kitchen',
-  cashier: '/cashier',
-};
+/** Landing page for the signed-in member's roles. */
+export const homeOf = (slug: string, roles: string[]) =>
+  `/r/${slug}${HOME_ORDER.find(([r]) => roles.includes(r))?.[1] ?? '/login'}`;
 
-/** Página inicial de cada perfil dentro do restaurante. */
-export const homeOf = (slug: string, role: string) => `/r/${slug}${HOME_PATH[role] ?? '/login'}`;
-
-function navFor(base: string, role: string): NavItem[] {
-  const item = (path: string, label: string, icon: NavItem['icon']): NavItem => ({ href: base + path, label, icon });
-  const account = item('/account', 'Minha conta', KeyRound);
-  const salon = item('/waiter', 'Salão', ConciergeBell);
-  const cashier = item('/cashier', 'Caixa', Receipt);
-  const kitchen = item('/kitchen', 'Cozinha', ChefHat);
-  switch (role) {
-    case 'restaurant_admin':
-      return [
-        item('/dashboard', 'Visão geral', LayoutDashboard),
-        item('/dashboard/reports', 'Relatórios', BarChart3),
-        item('/dashboard/reviews', 'Avaliações', Star),
-        item('/dashboard/menu', 'Cardápio', UtensilsCrossed),
-        item('/dashboard/tables', 'Mesas e QR Codes', Table2),
-        salon,
-        cashier,
-        kitchen,
-        item('/dashboard/staff', 'Equipe', Users),
-        item('/dashboard/settings', 'Configurações', Settings),
-        item('/dashboard/subscription', 'Assinatura', CreditCard),
-        account,
-      ];
-    case 'waiter':
-      return [salon, cashier, account];
-    case 'kitchen':
-      return [kitchen, account];
-    case 'cashier':
-      return [cashier, account];
-    default:
-      return [];
-  }
+/** Navigation for every role the member holds, without repeated screens. */
+function navFor(base: string, roles: string[]): NavItem[] {
+  const item = (path: string, label: string, icon: NavItem['icon'], allowed: string[]): NavItem | null =>
+    roles.some((r) => allowed.includes(r)) ? { href: base + path, label, icon } : null;
+  const admin = ['restaurant_admin'];
+  return [
+    item('/dashboard', 'Visão geral', LayoutDashboard, admin),
+    item('/dashboard/reports', 'Relatórios', BarChart3, admin),
+    item('/dashboard/team-performance', 'Desempenho', Trophy, admin),
+    item('/dashboard/reviews', 'Avaliações', Star, admin),
+    item('/dashboard/menu', 'Cardápio', UtensilsCrossed, admin),
+    item('/dashboard/tables', 'Mesas e QR Codes', Table2, admin),
+    item('/waiter', 'Salão', ConciergeBell, ['restaurant_admin', 'waiter']),
+    item('/cashier', 'Caixa', Receipt, ['restaurant_admin', 'waiter', 'cashier']),
+    item('/kitchen', 'Cozinha', ChefHat, ['restaurant_admin', 'kitchen']),
+    item('/dashboard/staff', 'Equipe', Users, admin),
+    item('/dashboard/settings', 'Configurações', Settings, admin),
+    item('/dashboard/subscription', 'Assinatura', CreditCard, admin),
+    item('/account', 'Minha conta', KeyRound, ['restaurant_admin', 'waiter', 'kitchen', 'cashier']),
+  ].filter((i): i is NavItem => !!i);
 }
+
+const rolesLabel = (roles: string[]) => roles.map((r) => ROLE_LABEL[r as Role] ?? r).join(' · ');
 
 /** Exige login e perfil permitido; mostra aviso de vencimento e bloqueio por suspensão. */
 export function Shell({ roles, children }: { roles: string[]; children: ReactNode; bare?: boolean }) {
@@ -107,7 +98,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
   useEffect(() => {
     if (!ready) return;
     if (!token || !user) return void router.replace(`${base}/login`);
-    if (!roles.includes(user.role)) return void router.replace(homeOf(slug, user.role));
+    if (!user.roles.some((r) => roles.includes(r))) return void router.replace(homeOf(slug, user.roles));
     let retry: ReturnType<typeof setTimeout> | undefined;
     const load = (attempt: number) =>
       api<Me>('/api/restaurant/me', { token })
@@ -126,7 +117,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
     void load(0);
     return () => clearTimeout(retry);
     // Depende de role/sub, não do objeto `user`.
-  }, [ready, token, user?.role, user?.sub, roles.join(','), router, setToken, slug, base]);
+  }, [ready, token, user?.roles.join(','), user?.sub, roles.join(','), router, setToken, slug, base]);
 
   // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
   useEffect(() => {
@@ -178,17 +169,17 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
 
   const warn = me.subscription.warning;
   return (
-    <Ctx.Provider value={{ token, role: user.role, me, setMe }}>
+    <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe }}>
       <AppShell
-        brandSub="Restaurante"
-        nav={navFor(base, user.role)}
-        user={{ name: me.name, role: ROLE_LABEL[user.role] ?? user.role }}
+        brandSub={me.name}
+        nav={navFor(base, user.roles)}
+        user={{ name: user.name ?? me.name, role: rolesLabel(user.roles) }}
         onLogout={() => {
           setToken(null);
           // Quem entrou pelo painel Elo volta para ele.
           if (user.impersonatedBy) router.replace(`/admin/restaurants/${me.id}`);
         }}
-        defaultCollapsed={user.role === 'kitchen'}
+        defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
         headerExtra={<LiveIndicator status={live} />}
         footerLinks={[{ label: 'Cardápio dos clientes', href: `/${me.slug}` }]}
         banner={

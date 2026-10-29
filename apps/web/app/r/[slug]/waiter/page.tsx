@@ -1,8 +1,8 @@
 'use client';
 
-import { BellRing, CheckCheck, DoorOpen, Receipt, Utensils } from 'lucide-react';
+import { BellRing, CheckCheck, DoorOpen, Hand, Receipt, UserRound, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, upsertOrder, useRealtime } from '@elo/client';
+import { api, ApiError, upsertOrder, useRealtime } from '@elo/client';
 import type { OrderView, TableView, WaiterCallView } from '@elo/core';
 import { AnimatePresence, Badge, Button, EmptyState, GlassCard, Modal, motion, PageHeader } from '@elo/ui';
 import { Shell, useStaff } from '../_components/shell';
@@ -10,11 +10,13 @@ import { Shell, useStaff } from '../_components/shell';
 const ACTIVE = ['sent', 'received', 'preparing', 'ready'];
 
 function Panel() {
-  const { token, role } = useStaff();
+  const { token, roles, sub } = useStaff();
   const [tables, setTables] = useState<TableView[]>([]);
   const [calls, setCalls] = useState<WaiterCallView[]>([]);
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** Lost a race to another waiter: not an error, just who got there first. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<{ order: OrderView; kind: 'cancel' | 'return' } | null>(null);
   const [reason, setReason] = useState('');
   const [fresh, setFresh] = useState<Set<string>>(new Set());
@@ -56,13 +58,24 @@ function Panel() {
   const onOrder = useCallback((o: OrderView) => setOrders((list) => upsertOrder(list, o, (x) => ACTIVE.includes(x.status))), []);
   useRealtime({ 'table.updated': reload, 'call.created': reload, 'call.resolved': reload, 'order.created': onOrder, 'order.updated': onOrder, 'order.cancelled': onOrder }, token, true, { onResync: reload });
 
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async (fn: () => Promise<unknown>, lostText?: (by: string) => string) => {
     setError(null);
+    setNotice(null);
     try {
       await fn();
       await load();
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : 'Não foi possível concluir a ação.');
+      if (e instanceof ApiError && e.code === 'already_handled' && lostText) {
+        setNotice(lostText(typeof e.data.by === 'string' ? e.data.by : 'outro garçom'));
+        await load().catch(() => undefined);
+      } else if (e instanceof ApiError && e.code === 'not_your_table') {
+        setError('Só quem atende a mesa pode cancelar ou devolver pedidos. Use "Assumir" para ficar com ela.');
+      } else if (e instanceof ApiError && e.status === 409) {
+        setNotice('Esta mesa mudou em outro aparelho. A lista foi atualizada.');
+        await load().catch(() => undefined);
+      } else {
+        setError('Não foi possível concluir a ação. Tente de novo.');
+      }
     }
   };
 
@@ -75,7 +88,8 @@ function Panel() {
     setReason('');
   };
 
-  const isWaiter = role === 'waiter';
+  const isWaiter = roles.includes('waiter');
+  const canResolve = isWaiter || roles.includes('restaurant_admin');
   const pendingOpen = tables.filter((t) => t.state === 'pending_open');
   const pendingClose = tables.filter((t) => t.state === 'pending_close');
   const open = tables.filter((t) => t.state === 'open');
@@ -84,13 +98,18 @@ function Panel() {
     <>
       <PageHeader title="Salão" />
       {error && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
+      {notice && (
+        <p role="status" className="mb-4 flex items-center gap-2 rounded-md bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
+          <UserRound size={16} className="shrink-0" /> {notice}
+        </p>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <Column title="Chamados" icon={BellRing} count={calls.length}>
           {calls.map((c) => (
             <Item key={c.id} fresh={fresh.has(c.id)}>
               <div><strong className="text-lg">{c.tableName ?? 'Mesa'}</strong><div className="text-sm text-muted">pediu atendimento</div></div>
-              <Button disabled={!isWaiter && role !== 'restaurant_admin'} onClick={() => run(post(`/api/calls/${c.id}/resolve`))}><CheckCheck size={16} /> Atendido</Button>
+              <Button disabled={!canResolve} onClick={() => run(post(`/api/calls/${c.id}/resolve`), (by) => `O chamado da ${c.tableName ?? 'mesa'} já foi atendido por ${by}.`)}><CheckCheck size={16} /> Atendido</Button>
             </Item>
           ))}
           {calls.length === 0 && <Quiet text="Nenhum chamado agora." />}
@@ -101,8 +120,8 @@ function Panel() {
             <Item key={t.id} fresh={fresh.has(`${t.id}:pending_open`)}>
               <div><strong className="text-lg">{t.name}</strong><div className="text-sm text-muted">quer abrir a mesa</div></div>
               <div className="flex gap-2">
-                <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/validate-open`))}>Validar</Button>
-                <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/reject-open`))}>Recusar</Button>
+                <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/validate-open`), (by) => `${t.name} já foi atendida por ${by}.`)}>Validar</Button>
+                <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/reject-open`), (by) => `${t.name} já foi atendida por ${by}.`)}>Recusar</Button>
               </div>
             </Item>
           ))}
@@ -113,7 +132,7 @@ function Panel() {
           {pendingClose.map((t) => (
             <Item key={t.id} fresh={fresh.has(`${t.id}:pending_close`)}>
               <div><strong className="text-lg">{t.name}</strong><div className="text-sm text-muted">pediu a conta</div></div>
-              <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/close`))}>Fechar mesa</Button>
+              <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/close`), (by) => `${t.name} já foi fechada por ${by}.`)}>Fechar mesa</Button>
             </Item>
           ))}
           {pendingClose.length === 0 && <Quiet text="Nenhuma conta pedida." />}
@@ -129,9 +148,20 @@ function Panel() {
             {open.map((t) => (
               <motion.div key={t.id} layout initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                 <GlassCard lift className="h-full p-5">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <strong className="font-display text-2xl">{t.name}</strong>
-                    <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/close`))}>Fechar mesa</Button>
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <strong className="min-w-0 truncate font-display text-2xl">{t.name}</strong>
+                    <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/close`), (by) => `${t.name} já foi fechada por ${by}.`)}>Fechar mesa</Button>
+                  </div>
+                  <div className="mb-3 flex min-h-9 items-center justify-between gap-3 text-sm text-muted">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <UserRound size={15} className="shrink-0" />
+                      <span className="truncate">{t.waiterId === sub ? 'Você atende esta mesa' : t.waiterName ? `Atendida por ${t.waiterName}` : 'Sem garçom definido'}</span>
+                    </span>
+                    {isWaiter && t.waiterId !== sub && (
+                      <button className="flex shrink-0 items-center gap-1 font-medium text-brand underline-offset-2 hover:underline" onClick={() => run(post(`/api/tables/${t.id}/take`))}>
+                        <Hand size={15} /> Assumir
+                      </button>
+                    )}
                   </div>
                   <ul className="space-y-2 text-sm">
                     {orders.filter((o) => o.tableId === t.id).map((o) => (

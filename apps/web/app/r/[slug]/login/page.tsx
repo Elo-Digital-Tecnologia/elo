@@ -25,7 +25,7 @@ export default function Login() {
   }, [slug]);
 
   useEffect(() => {
-    if (ready && user) router.replace(homeOf(slug, user.role));
+    if (ready && user) router.replace(homeOf(slug, user.roles));
   }, [ready, user, slug, router]);
 
   const submit = async (e: React.FormEvent) => {

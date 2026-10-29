@@ -41,6 +41,8 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [called, setCalled] = useState(false);
+  /** Name of the waiter who took the call, shown for a few seconds. */
+  const [coming, setComing] = useState<string | null>(null);
   const [view, setView] = useState<View>('menu');
   const [billVersion, setBillVersion] = useState(0);
   const [query, setQuery] = useState('');
@@ -75,6 +77,11 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       'order.updated': refresh,
       'order.cancelled': refresh,
       'bill.updated': () => setBillVersion((v) => v + 1),
+      'call.resolved': (p: { handledBy: { name: string | null } | null }) => {
+        setCalled(false);
+        setComing(p.handledBy?.name ?? 'O garçom');
+        setTimeout(() => setComing(null), 8000);
+      },
     },
     null,
     phase === 'ready',
@@ -224,11 +231,19 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       >
         <span className="rounded-pill bg-brand px-3 py-1 text-xs font-bold text-brand-fg">{state.table.name}</span>
         <span className="flex items-center gap-2"><span className="pulse-dot" aria-hidden /> {HINT[tableState]}</span>
+        {state.table.waiterName && (tableState === 'open' || tableState === 'pending_close') && (
+          <span className="text-muted">Quem atende: {state.table.waiterName}</span>
+        )}
       </MenuHeader>
 
       <RestaurantInfo profile={state.restaurant} />
 
       {message && <p role="alert" className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
+      {coming && (
+        <p role="status" className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-success/10 px-4 py-3 text-sm font-medium text-success">
+          <Check size={16} className="shrink-0" /> {coming} vai até a sua mesa.
+        </p>
+      )}
 
       {showTabs && (
         <div className="px-4 pt-4">

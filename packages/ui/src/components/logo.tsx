@@ -15,7 +15,7 @@ export function Logo({ sub }: { sub?: string }) {
       <LogoMark />
       <span className="leading-none">
         <span className="font-display text-lg font-bold tracking-tight">elo</span>
-        {sub && <span className="ml-1.5 text-sm text-muted">{sub}</span>}
+        {sub && <span className="ml-1.5 inline-block max-w-[10rem] truncate align-bottom text-sm text-muted">{sub}</span>}
       </span>
     </span>
   );
