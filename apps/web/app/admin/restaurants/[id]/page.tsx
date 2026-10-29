@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
 import { formatBRL, parseCents, type SubscriptionView } from '@elo/core';
 import { Badge, Button, ColumnChart, DataTable, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards } from '@elo/ui';
+import { ActivityList } from '../../../_components/activity-list';
 import { Shell, useAdmin } from '../../_components/shell';
 
 interface Detail {
@@ -234,6 +235,13 @@ function View({ id }: { id: string }) {
               ]}
             />
           )}
+        </section>
+      )}
+
+      {can('restaurants.activity') && (
+        <section className="mt-8">
+          <h2 className="mb-3 text-xl font-semibold">Registros</h2>
+          <ActivityList endpoint={`/api/admin/restaurants/${id}/activity`} token={token} />
         </section>
       )}
 

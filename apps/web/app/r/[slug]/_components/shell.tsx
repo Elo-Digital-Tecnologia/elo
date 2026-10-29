@@ -15,11 +15,13 @@ import {
   Users,
   ConciergeBell,
   ShieldAlert,
+  History,
   Trophy,
 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, ApiError, type RealtimeStatus, useAuth, useRealtimeStatus } from '@elo/client';
+import { useAlertsControl, useStaffAlerts } from './alerts';
 import { ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
 import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, SkeletonCards } from '@elo/ui';
 
@@ -77,6 +79,7 @@ function navFor(base: string, roles: string[]): NavItem[] {
     item('/kitchen', 'Cozinha', ChefHat, ['restaurant_admin', 'kitchen']),
     item('/dashboard/staff', 'Equipe', Users, admin),
     item('/dashboard/settings', 'Configurações', Settings, admin),
+    item('/dashboard/activity', 'Registros', History, admin),
     item('/dashboard/subscription', 'Assinatura', CreditCard, admin),
     item('/account', 'Minha conta', KeyRound, ['restaurant_admin', 'waiter', 'kitchen', 'cashier']),
   ].filter((i): i is NavItem => !!i);
@@ -94,6 +97,9 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
   const [suspended, setSuspended] = useState(false);
   const [failed, setFailed] = useState(false);
   const live = useRealtimeStatus(token, !!me);
+  const roleList = user?.roles ?? [];
+  const alerts = useAlertsControl({ token, slug, roles: roleList });
+  useStaffAlerts({ token, roles: roleList, base, push: alerts.push, enabled: !!me && alerts.enabled });
 
   useEffect(() => {
     if (!ready) return;
@@ -175,15 +181,23 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
         nav={navFor(base, user.roles)}
         user={{ name: user.name ?? me.name, role: rolesLabel(user.roles) }}
         onLogout={() => {
+          // This device stops getting the team's alerts before the next person signs in.
+          void alerts.leave();
           setToken(null);
           // Quem entrou pelo painel Elo volta para ele.
           if (user.impersonatedBy) router.replace(`/admin/restaurants/${me.id}`);
         }}
         defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
-        headerExtra={<LiveIndicator status={live} />}
+        headerExtra={
+          <span className="flex min-w-0 items-center gap-1">
+            <LiveIndicator status={live} />
+            <span className="ml-auto">{alerts.bell}</span>
+          </span>
+        }
         footerLinks={[{ label: 'Cardápio dos clientes', href: `/${me.slug}` }]}
         banner={
-          user.impersonatedBy ? (
+          <>
+          {user.impersonatedBy ? (
             <GlassCard className="mb-5 flex items-center gap-3 border-brand/40 px-5 py-3 text-sm">
               <ShieldAlert size={20} className="shrink-0 text-brand" />
               <span>
@@ -198,7 +212,9 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
                 <strong>{new Date(me.subscription.graceEndsAt).toLocaleDateString('pt-BR')}</strong> para não suspender o acesso.
               </span>
             </GlassCard>
-          ) : undefined
+          ) : null}
+          {alerts.prompt}
+          </>
         }
       >
         {children}

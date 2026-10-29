@@ -257,7 +257,7 @@ function View() {
           {field('name', 'Nome do restaurante')}
           <div className="grid gap-4 sm:grid-cols-2">
             {field('managerName', 'Nome do gerente')}
-            {field('managerContact', 'Contato do gerente')}
+            {field('managerContact', 'Contato do gerente', 'text', 'Telefone com DDD ou e-mail.')}
           </div>
           {field('dueDate', 'Primeiro vencimento', 'date')}
           <div className="grid gap-4 sm:grid-cols-2">
