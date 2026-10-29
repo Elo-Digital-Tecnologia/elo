@@ -14,7 +14,8 @@ import {
   registerDecorator,
   type ValidationOptions,
 } from 'class-validator';
-import { isHHMM, RESTAURANT_LIST_STATUSES, type RestaurantListStatus, SLUG_PATTERN } from '@elo/core';
+import { brazilPhone, contact, instagramHandle, isHHMM, LIMITS, personName, RESTAURANT_LIST_STATUSES, type RestaurantListStatus, SLUG_PATTERN } from '@elo/core';
+import { Normalized } from '../common/validation';
 import { IMAGE_URL_PATTERN } from '../common/image-url';
 
 /** Texto vazio vira nulo: é como o formulário limpa um campo. */
@@ -41,10 +42,10 @@ function IsOpeningHours(options?: ValidationOptions) {
 export class CreateRestaurantDto {
   @IsString() @MinLength(2) @MaxLength(120) name: string;
   @IsOptional() @Matches(SLUG_PATTERN) @MaxLength(60) slug?: string;
-  @IsString() @MinLength(2) @MaxLength(120) managerName: string;
-  @IsString() @MinLength(5) @MaxLength(120) managerContact: string;
+  @Normalized(personName, 'managerName must be a person name') managerName: string;
+  @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
   @Type(() => Date) @IsDate() dueDate: Date;
-  @IsOptional() @IsInt() @Min(0) @Max(3000) serviceFeeBps?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps?: number;
   @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) adminUsername: string;
   @IsString() @MinLength(8) @MaxLength(128) adminPassword: string;
 }
@@ -59,26 +60,26 @@ export class RecordPaymentDto {
 /** Dados editáveis pelo próprio restaurante. O slug não muda: está impresso nos QR Codes e gravado nas tags. */
 export class UpdateSettingsDto {
   @IsString() @MinLength(2) @MaxLength(120) name: string;
-  @IsString() @MinLength(2) @MaxLength(120) managerName: string;
-  @IsString() @MinLength(5) @MaxLength(120) managerContact: string;
-  @IsInt() @Min(0) @Max(3000) serviceFeeBps: number;
+  @Normalized(personName, 'managerName must be a person name') managerName: string;
+  @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
+  @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps: number;
 
   // Perfil público. Ausente = não muda; nulo ou texto vazio = limpa.
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(300) description?: string | null;
+  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.description) description?: string | null;
   @emptyToNull() @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) logoUrl?: string | null;
   @emptyToNull() @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) coverUrl?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(200) address?: string | null;
-  @emptyToNull() @IsOptional() @Matches(/^[0-9+()\-\s]{8,30}$/) phone?: string | null;
-  @emptyToNull() @IsOptional() @Matches(/^@?[A-Za-z0-9._]{1,30}$/) instagram?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(60) wifiName?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(80) wifiPassword?: string | null;
+  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.address) address?: string | null;
+  @IsOptional() @Normalized(brazilPhone, 'phone must be a Brazilian phone with area code', { nullable: true }) phone?: string | null;
+  @IsOptional() @Normalized(instagramHandle, 'instagram must be a profile name', { nullable: true }) instagram?: string | null;
+  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.wifiName) wifiName?: string | null;
+  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.wifiPassword) wifiPassword?: string | null;
   @IsOptional() @IsArray() @IsOpeningHours() openingHours?: ({ open: string; close: string } | null)[] | null;
 }
 
 export class EditRestaurantDto {
   @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(2) @MaxLength(120) name?: string;
-  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(2) @MaxLength(120) managerName?: string;
-  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(5) @MaxLength(120) managerContact?: string;
+  @IsOptional() @Normalized(personName, 'managerName must be a person name') managerName?: string;
+  @IsOptional() @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact?: string;
 }
 
 export class RestaurantListQuery {

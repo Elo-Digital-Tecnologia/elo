@@ -11,11 +11,9 @@ import {
   MinLength,
   IsOptional,
 } from 'class-validator';
-import { ALL_PERMISSIONS, RestaurantStaffRoles, type Role } from '@elo/core';
+import { ALL_PERMISSIONS, PERSON_NAME, RestaurantStaffRoles, type Role } from '@elo/core';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
-/** Letters (accents included), spaces, apostrophes, dots and hyphens. */
-const PERSON_NAME = /^[\p{L}][\p{L} .'-]*$/u;
 
 export class CreateRestaurantStaffDto {
   @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) username: string;
