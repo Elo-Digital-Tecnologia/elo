@@ -67,6 +67,14 @@ export class StaffService {
     return active;
   }
 
+  /** Readable name of a JWT subject, for history records. */
+  async actorName(sub: string): Promise<string> {
+    if (sub === 'superadmin') return 'Superadmin';
+    if (!/^[0-9a-f-]{36}$/.test(sub)) return sub;
+    const user = await this.users.findOne({ where: { id: sub }, select: { id: true, username: true } });
+    return user?.username ?? 'Usuário removido';
+  }
+
   async changePassword(id: string, current: string, next: string): Promise<void> {
     const user = await this.users.findOne({ where: { id } });
     if (!user || !(await bcrypt.compare(current, user.passwordHash))) {

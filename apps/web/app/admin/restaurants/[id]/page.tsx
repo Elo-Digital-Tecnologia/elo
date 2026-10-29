@@ -29,6 +29,7 @@ interface Payment {
   paidAt: string;
   newDueDate: string;
   note: string | null;
+  recordedByName: string | null;
 }
 
 const STATE = { active: { label: 'Ativa', tone: 'success' }, grace: { label: 'Em tolerância', tone: 'warning' }, suspended: { label: 'Suspensa', tone: 'danger' } } as const;
@@ -185,6 +186,7 @@ function View({ id }: { id: string }) {
                 { key: 'd', header: 'Pago em', cell: (p) => fmt(p.paidAt) },
                 { key: 'v', header: 'Valor', cell: (p) => <span className="font-semibold tabular-nums">{formatBRL(p.amountCents)}</span> },
                 { key: 'n', header: 'Observação', cell: (p) => <span className="text-muted">{p.note ?? '—'}</span> },
+                { key: 'r', header: 'Registrado por', cell: (p) => <span className="text-muted">{p.recordedByName ?? '—'}</span> },
                 { key: 'u', header: 'Novo vencimento', align: 'right', cell: (p) => fmt(p.newDueDate) },
               ]}
             />

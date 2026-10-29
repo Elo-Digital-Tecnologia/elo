@@ -149,8 +149,9 @@ export class RestaurantsService {
     const r = await this.get(id);
     r.dueDate = data.newDueDate;
     await this.restaurants.save(r);
+    const recordedByName = await this.staff.actorName(recordedBy);
     return this.payments.save(
-      this.payments.create({ restaurantId: id, ...data, note: data.note ?? null, recordedBy }),
+      this.payments.create({ restaurantId: id, ...data, note: data.note ?? null, recordedBy, recordedByName }),
     );
   }
 

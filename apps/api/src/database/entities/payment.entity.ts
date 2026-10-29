@@ -9,6 +9,8 @@ export class Payment {
   @Column({ type: 'timestamptz' }) paidAt: Date;
   @Column({ type: 'timestamptz' }) newDueDate: Date;
   @Column({ type: 'text', nullable: true }) note: string | null;
-  @Column({ type: 'uuid' }) recordedBy: string;
+  /** 'superadmin' or the Elo team member id. */
+  @Column() recordedBy: string;
+  @Column({ type: 'varchar', nullable: true }) recordedByName: string | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
 }
