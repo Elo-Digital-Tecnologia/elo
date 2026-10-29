@@ -4,9 +4,10 @@ import { SearchX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import type { PublicMenuView } from '@elo/core';
-import { Aurora, Badge, GlassCard, Logo, ThemeToggle } from '@elo/ui';
-import { CategoryNav, filterMenu, MenuList, MenuSearch } from '../_components/menu-list';
+import { CategoryTabs, filterMenu, Highlights, MenuList, MenuSearch } from '../_components/menu-list';
+import { RestaurantInfo } from '../_components/menu/info';
 import { MenuFooter } from '../_components/menu-chrome';
+import { MenuHeader } from '../_components/menu/header';
 import { Notice } from '../_components/notice';
 
 /** Link fixo do restaurante: apenas consulta do cardápio. */
@@ -24,26 +25,25 @@ export default function FixedMenu({ params }: { params: { slug: string } }) {
   if (notFound) return <Notice title="Restaurante não encontrado" icon={<SearchX size={30} />}>Confira o endereço do cardápio.</Notice>;
   if (!data)
     return (
-      <main className="relative min-h-dvh p-4"><Aurora /><div className="mx-auto max-w-3xl space-y-4 pt-4"><div className="skeleton h-36" /><div className="skeleton h-28" /><div className="skeleton h-28" /></div></main>
+      <main className="mx-auto max-w-2xl" aria-busy>
+        <div className="skeleton h-36 !rounded-none sm:h-48" />
+        <div className="space-y-4 p-4"><div className="skeleton h-8 w-2/3" /><div className="skeleton h-24" /><div className="skeleton h-24" /><div className="skeleton h-24" /></div>
+      </main>
     );
+
   const visible = filterMenu(data.menu, query);
   return (
-    <div className="relative min-h-dvh">
-      <Aurora />
-      <main className="mx-auto max-w-3xl space-y-8 px-4 pb-16 pt-4">
-        <GlassCard strong className="!rounded-xl p-6 sm:p-8">
-          <div className="flex items-start justify-between"><Logo /><ThemeToggle /></div>
-          <h1 className="mt-8 text-5xl font-extrabold leading-[0.98] sm:text-6xl">{data.restaurant.name}</h1>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Badge tone="brand">Somente consulta</Badge>
-            <span className="text-sm text-muted">Para pedir, escaneie o QR Code da sua mesa.</span>
-          </div>
-        </GlassCard>
-        <MenuSearch value={query} onChange={setQuery} />
-        <CategoryNav menu={visible} />
-        <MenuList menu={visible} searching={!!query} />
-        <MenuFooter name={data.restaurant.name} />
-      </main>
+    <div className="mx-auto min-h-dvh max-w-2xl">
+      <MenuHeader name={data.restaurant.name} coverUrl={data.restaurant.coverUrl} logoUrl={data.restaurant.logoUrl}>
+        <span className="rounded-pill bg-brand/10 px-3 py-1 text-xs font-semibold text-brand">Somente consulta</span>
+        <span>Para pedir, leia o QR Code da sua mesa.</span>
+      </MenuHeader>
+      <RestaurantInfo profile={data.restaurant} />
+      <div className="px-4 pb-1 pt-4"><MenuSearch value={query} onChange={setQuery} /></div>
+      {!query && <Highlights menu={data.menu} />}
+      <CategoryTabs menu={visible} />
+      <MenuList menu={visible} searching={!!query} />
+      <div className="px-4 pb-10 pt-6"><MenuFooter name={data.restaurant.name} /></div>
     </div>
   );
 }

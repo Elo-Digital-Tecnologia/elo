@@ -2,7 +2,7 @@
 
 import { Check, ChefHat, Send, Soup, X } from 'lucide-react';
 import type { OrderStatus, OrderView } from '@elo/core';
-import { Badge, GlassCard, motion } from '@elo/ui';
+import { Badge, motion } from '@elo/ui';
 
 const STEPS: { status: OrderStatus; label: string; icon: typeof Send }[] = [
   { status: 'sent', label: 'Enviado', icon: Send },
@@ -19,7 +19,7 @@ export function OrderTracker({ order, onCancel }: { order: OrderView; onCancel: 
   const cancellable = order.status === 'sent' || order.status === 'received';
 
   return (
-    <GlassCard className="p-5">
+    <div className="surface p-4">
       <div className="mb-4 flex items-start justify-between gap-3">
         <ul className="space-y-0.5 text-sm">
           {order.items.map((i, idx) => (
@@ -56,6 +56,6 @@ export function OrderTracker({ order, onCancel }: { order: OrderView; onCancel: 
           })}
         </ol>
       )}
-    </GlassCard>
+    </div>
   );
 }

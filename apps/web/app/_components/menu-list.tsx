@@ -1,32 +1,11 @@
 'use client';
 
-import { Plus, Search, UtensilsCrossed, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { formatBRL, type CategoryView, type ProductView } from '@elo/core';
-import { GlassCard, Input, motion } from '@elo/ui';
+import { Plus, Search, Star, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { formatBRL, PRODUCT_TAG_LABEL, type CategoryView, type ProductTag, type ProductView } from '@elo/core';
+import { Input, motion } from '@elo/ui';
 
-/** Cor do prato varia por produto, sempre dentro da rampa de verdes do tema. */
-const PLATE = ['--elo-leaf-300', '--elo-aurora-2', '--elo-aurora-3', '--elo-leaf-400', '--elo-mint'];
-
-function Plate({ product, index }: { product: ProductView; index: number }) {
-  if (product.imageUrl) {
-    // Banco de imagens: a lista usa a miniatura; links externos seguem como estão.
-    const src = product.imageUrl.startsWith('/api/media/') ? product.imageUrl.replace(/\.webp$/, '-sm.webp') : product.imageUrl;
-    return <img src={src} alt="" className="h-24 w-24 shrink-0 rounded-lg object-cover" loading="lazy" />;
-  }
-  const c = PLATE[index % PLATE.length];
-  return (
-    <span
-      className="relative grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-lg text-fg/70"
-      style={{ background: `radial-gradient(circle at 30% 25%, hsl(var(--elo-glass-edge) / 0.7), hsl(var(${c}) / 0.85) 60%, hsl(var(--elo-leaf-500) / 0.9))` }}
-      aria-hidden
-    >
-      <UtensilsCrossed size={32} />
-    </span>
-  );
-}
-
-const plain = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 /** Filtra por nome ou descrição, sem diferenciar acento nem maiúscula. Categorias sem resultado saem. */
 export function filterMenu(menu: CategoryView[], query: string): CategoryView[] {
@@ -51,9 +30,53 @@ export function MenuSearch({ value, onChange }: { value: string; onChange: (v: s
   );
 }
 
-/** Chips de categoria que acompanham a rolagem e levam à seção. */
-export function CategoryNav({ menu }: { menu: CategoryView[] }) {
+/** Etiquetas do produto (vegetariano, picante...). */
+export function TagChips({ tags }: { tags: ProductTag[] }) {
+  if (!tags.length) return null;
+  return (
+    <ul className="mt-1.5 flex flex-wrap gap-1.5">
+      {tags.map((t) => (
+        <li key={t} className={`rounded-pill px-2 py-0.5 text-[11px] font-semibold ${t === 'new' ? 'bg-accent text-accent-fg' : t === 'spicy' ? 'bg-danger/12 text-danger' : 'bg-brand/10 text-brand'}`}>
+          {PRODUCT_TAG_LABEL[t]}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Carrossel dos produtos marcados como destaque. */
+export function Highlights({ menu, onPick }: { menu: CategoryView[]; onPick?: (p: ProductView) => void }) {
+  const items = menu.flatMap((c) => c.products).filter((p) => p.featured);
+  if (!items.length) return null;
+  return (
+    <section aria-label="Destaques" className="py-3 pt-5">
+      <h2 className="flex items-center gap-2 px-4 font-display text-xl font-extrabold"><Star size={18} className="fill-accent text-accent" aria-hidden /> Destaques</h2>
+      <ul className="scroll-soft mt-3 flex snap-x gap-3 overflow-x-auto px-4 pb-2">
+        {items.map((p) => {
+          const body = (
+            <>
+              <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-brand/10">
+                {p.imageUrl ? <img src={p.imageUrl.startsWith('/api/media/') ? p.imageUrl.replace(/\.webp$/, '-sm.webp') : p.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : <div className="cover-fallback h-full w-full" aria-hidden />}
+              </div>
+              <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-snug">{p.name}</h3>
+              <p className="text-sm font-semibold text-brand">{formatBRL(p.priceCents)}</p>
+            </>
+          );
+          return (
+            <li key={p.id} className="w-40 shrink-0 snap-start">
+              {onPick ? <button type="button" onClick={() => onPick(p)} aria-label={`Ver ${p.name}`} className="block w-full text-left transition active:scale-[0.97]">{body}</button> : body}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** Abas de categoria presas ao topo. A aba ativa acompanha a rolagem; tocar leva à seção. */
+export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
   const [active, setActive] = useState(menu[0]?.id);
+  const bar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const io = new IntersectionObserver(
@@ -61,7 +84,7 @@ export function CategoryNav({ menu }: { menu: CategoryView[] }) {
         const hit = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
         if (hit) setActive(hit.target.id.replace('cat-', ''));
       },
-      { rootMargin: '-30% 0px -60% 0px' },
+      { rootMargin: '-110px 0px -70% 0px' },
     );
     menu.forEach((c) => {
       const el = document.getElementById(`cat-${c.id}`);
@@ -70,18 +93,20 @@ export function CategoryNav({ menu }: { menu: CategoryView[] }) {
     return () => io.disconnect();
   }, [menu]);
 
+  // Mantém a aba ativa à vista dentro da barra, sem mexer na rolagem da página.
+  useEffect(() => {
+    const tab = bar.current?.querySelector<HTMLElement>(`[data-cat="${active}"]`);
+    if (tab && bar.current) bar.current.scrollTo({ left: tab.offsetLeft - bar.current.clientWidth / 2 + tab.clientWidth / 2, behavior: 'smooth' });
+  }, [active]);
+
   if (menu.length < 2) return null;
   return (
-    <nav aria-label="Categorias" className="sticky top-3 z-20 -mx-1 overflow-x-auto px-1 py-1 scroll-soft">
-      <div className="glass glass-strong inline-flex gap-1 !rounded-pill p-1.5">
+    <nav aria-label="Categorias" className="glass-bar sticky top-0 z-30">
+      <div ref={bar} className="scroll-soft mx-auto flex max-w-2xl gap-1 overflow-x-auto px-2">
         {menu.map((c) => (
-          <a
-            key={c.id}
-            href={`#cat-${c.id}`}
-            className={`relative whitespace-nowrap rounded-pill px-4 py-2 text-sm font-semibold transition-colors ${active === c.id ? 'text-brand-fg' : 'text-muted hover:text-fg'}`}
-          >
-            {active === c.id && <motion.span layoutId="chip" className="btn-glass absolute inset-0 -z-10 rounded-pill" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
+          <a key={c.id} data-cat={c.id} href={`#cat-${c.id}`} aria-current={active === c.id ? 'true' : undefined} className={`relative shrink-0 px-4 py-3.5 text-sm font-semibold transition-colors ${active === c.id ? 'text-brand' : 'text-muted hover:text-fg'}`}>
             {c.name}
+            {active === c.id && <motion.span layoutId="tab-line" className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-full bg-brand" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
           </a>
         ))}
       </div>
@@ -89,53 +114,61 @@ export function CategoryNav({ menu }: { menu: CategoryView[] }) {
   );
 }
 
-/** Lista do cardápio. Sem `onPick`, é somente consulta (link fixo). */
+function Photo({ product }: { product: ProductView }) {
+  // Banco de imagens: a lista usa a miniatura; links externos seguem como estão.
+  const src = product.imageUrl!.startsWith('/api/media/') ? product.imageUrl!.replace(/\.webp$/, '-sm.webp') : product.imageUrl!;
+  return <img src={src} alt="" width={96} height={96} loading="lazy" className="h-24 w-24 rounded-2xl object-cover" />;
+}
+
+function Row({ product, onPick }: { product: ProductView; onPick?: (p: ProductView) => void }) {
+  const from = product.options.some((o) => o.required);
+  const content = (
+    <>
+      <div className="min-w-0 flex-1">
+        <h3 className="font-semibold leading-snug">{product.name}</h3>
+        {product.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{product.description}</p>}
+        <TagChips tags={product.tags} />
+        <p className="mt-2 font-semibold text-brand">
+          {from && <span className="mr-1 text-xs font-medium text-muted">a partir de</span>}
+          {formatBRL(product.priceCents)}
+        </p>
+      </div>
+      {product.imageUrl ? (
+        <div className="relative shrink-0">
+          <Photo product={product} />
+          {onPick && <span className="absolute bottom-1.5 right-1.5 grid h-8 w-8 place-items-center rounded-pill bg-brand text-brand-fg shadow-md" aria-hidden><Plus size={18} /></span>}
+        </div>
+      ) : (
+        onPick && <span className="grid h-9 w-9 shrink-0 place-items-center self-center rounded-pill bg-brand/12 text-brand" aria-hidden><Plus size={18} /></span>
+      )}
+    </>
+  );
+  return onPick ? (
+    <button type="button" onClick={() => onPick(product)} aria-label={`Adicionar ${product.name}`} className="flex w-full gap-4 py-4 text-left transition active:bg-brand/5">
+      {content}
+    </button>
+  ) : (
+    <div className="flex gap-4 py-4">{content}</div>
+  );
+}
+
+/** Lista do cardápio em linhas. Sem `onPick`, é somente consulta (link fixo). */
 export function MenuList({ menu, onPick, searching = false }: { menu: CategoryView[]; onPick?: (product: ProductView) => void; searching?: boolean }) {
-  let n = 0;
   return (
-    <div className="space-y-10">
+    <div className="px-4">
       {menu.map((cat) => (
-        <section key={cat.id} id={`cat-${cat.id}`} className="scroll-mt-24">
-          <h2 className="mb-4 text-3xl font-extrabold">{cat.name}</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {cat.products.map((p) => {
-              const i = n++;
-              const body = (
-                <div className="flex items-center gap-4 p-3.5 text-left">
-                  <Plate product={p} index={i} />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-lg font-bold leading-tight">{p.name}</div>
-                    {p.description && <p className="mt-1 line-clamp-2 text-sm text-muted">{p.description}</p>}
-                    <div className="mt-2 font-display text-xl font-bold text-brand">
-                      {p.options.some((o) => o.required) ? 'a partir de ' : ''}
-                      {formatBRL(p.priceCents)}
-                    </div>
-                  </div>
-                  {onPick && (
-                    <span className="btn-glass grid h-11 w-11 shrink-0 place-items-center rounded-pill" aria-hidden>
-                      <Plus size={22} />
-                    </span>
-                  )}
-                </div>
-              );
-              return (
-                <motion.div key={p.id} className="cv-auto" initial={{ opacity: 0, y: 26 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-40px' }} transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}>
-                  <GlassCard lift={!!onPick}>
-                    {onPick ? (
-                      <button className="block w-full rounded-[inherit] transition active:scale-[0.98]" onClick={() => onPick(p)} aria-label={`Adicionar ${p.name}`}>
-                        {body}
-                      </button>
-                    ) : (
-                      body
-                    )}
-                  </GlassCard>
-                </motion.div>
-              );
-            })}
-          </div>
+        <section key={cat.id} id={`cat-${cat.id}`} className="scroll-mt-14 pt-6">
+          <h2 className="font-display text-xl font-extrabold">{cat.name}</h2>
+          <ul className="cv-auto mt-1 divide-y divide-line/40">
+            {cat.products.map((p) => (
+              <li key={p.id}>
+                <Row product={p} onPick={onPick} />
+              </li>
+            ))}
+          </ul>
         </section>
       ))}
-      {menu.length === 0 && <p className="text-muted">{searching ? 'Nenhum item encontrado.' : 'O cardápio ainda não tem itens.'}</p>}
+      {menu.length === 0 && <p className="py-10 text-center text-muted">{searching ? 'Nenhum item encontrado.' : 'O cardápio ainda não tem itens.'}</p>}
     </div>
   );
 }

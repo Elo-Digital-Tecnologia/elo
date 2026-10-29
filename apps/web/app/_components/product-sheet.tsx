@@ -3,7 +3,8 @@
 import { Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { formatBRL, type ProductView } from '@elo/core';
-import { Button, Modal } from '@elo/ui';
+import { Button, Sheet } from '@elo/ui';
+import { TagChips } from './menu-list';
 
 export interface CartLine {
   product: ProductView;
@@ -14,16 +15,13 @@ export interface CartLine {
 
 export const lineUnit = (l: CartLine) => l.product.priceCents + l.options.reduce((s, o) => s + o.priceCents, 0);
 
-/** Escolha de opções, quantidade e observações de um produto. */
+/** Detalhe do produto: foto, opções, observação e quantidade. */
 export function ProductSheet({ product, onAdd, onClose }: { product: ProductView | null; onAdd: (line: CartLine) => void; onClose: () => void }) {
-  return (
-    <Modal open={!!product} onClose={onClose} title={product?.name} sheet>
-      {product && <Body key={product.id} product={product} onAdd={onAdd} />}
-    </Modal>
-  );
+  // O corpo remonta por produto para zerar quantidade e escolhas.
+  return product ? <Body key={product.id} product={product} onAdd={onAdd} onClose={onClose} /> : null;
 }
 
-function Body({ product, onAdd }: { product: ProductView; onAdd: (line: CartLine) => void }) {
+function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line: CartLine) => void; onClose: () => void }) {
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
   const [chosen, setChosen] = useState<CartLine['options']>([]);
@@ -36,49 +34,65 @@ function Body({ product, onAdd }: { product: ProductView; onAdd: (line: CartLine
       return [...base, { group, label, priceCents }];
     });
 
-  const missing = product.options.some((g) => g.required && !chosen.some((o) => o.group === g.name));
+  const missing = product.options.filter((g) => g.required && !chosen.some((o) => o.group === g.name));
   const unit = product.priceCents + chosen.reduce((s, o) => s + o.priceCents, 0);
 
   return (
-    <div className="space-y-5">
-      {product.imageUrl && <img src={product.imageUrl} alt="" className="aspect-video w-full rounded-lg object-cover" />}
-      {product.description && <p className="text-muted">{product.description}</p>}
-
-      {product.options.map((g) => (
-        <fieldset key={g.name}>
-          <legend className="mb-2 flex w-full items-center justify-between font-semibold">
-            {g.name}
-            <span className={`rounded-pill px-2.5 py-0.5 text-xs ${g.required ? 'bg-accent text-accent-fg' : 'bg-leaf-100 text-muted'}`}>{g.required ? 'Obrigatório' : 'Opcional'}</span>
-          </legend>
-          <div className="space-y-2">
-            {g.choices.map((c) => {
-              const on = chosen.some((o) => o.group === g.name && o.label === c.label);
-              return (
-                <label key={c.label} className={`flex cursor-pointer items-center justify-between rounded-md border px-4 py-3 transition ${on ? 'border-brand bg-brand/10' : 'border-line/50 bg-leaf-50/40 hover:border-brand/50'}`}>
-                  <span className="flex items-center gap-3">
-                    <input type={g.multiple ? 'checkbox' : 'radio'} name={g.name} checked={on} onChange={() => toggle(g.name, g.multiple, c.label, c.priceCents)} />
-                    {c.label}
-                  </span>
-                  {c.priceCents > 0 && <span className="text-sm text-muted">+ {formatBRL(c.priceCents)}</span>}
-                </label>
-              );
-            })}
+    <Sheet
+      open
+      onClose={onClose}
+      media={product.imageUrl ? <img src={product.imageUrl} alt="" className="aspect-[4/3] w-full object-cover" /> : undefined}
+      title={product.name}
+      footer={
+        <div className="flex items-center gap-3">
+          <div className="surface flex items-center !rounded-pill p-1">
+            <button aria-label="Menos" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
+            <span className="w-8 text-center font-bold tabular-nums">{quantity}</span>
+            <button aria-label="Mais" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
           </div>
-        </fieldset>
-      ))}
-
-      <textarea rows={2} maxLength={300} placeholder="Alguma observação? Ex.: sem cebola" value={notes} onChange={(e) => setNotes(e.target.value)} />
-
-      <div className="flex items-center justify-between gap-4">
-        <div className="glass flex items-center gap-1 !rounded-pill p-1">
-          <button aria-label="Menos" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
-          <span className="w-8 text-center font-bold tabular-nums">{quantity}</span>
-          <button aria-label="Mais" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
+          <Button className="flex-1 !py-3.5" disabled={missing.length > 0} onClick={() => onAdd({ product, quantity, notes: notes.trim(), options: chosen })}>
+            {missing.length > 0 ? `Escolha: ${missing[0].name}` : `Adicionar · ${formatBRL(unit * quantity)}`}
+          </Button>
         </div>
-        <Button className="flex-1 !py-3.5" disabled={missing} onClick={() => onAdd({ product, quantity, notes: notes.trim(), options: chosen })}>
-          {missing ? 'Escolha as opções' : `Adicionar · ${formatBRL(unit * quantity)}`}
-        </Button>
+      }
+    >
+      <p className="mt-1 font-semibold text-brand">
+        {product.options.some((o) => o.required) && <span className="mr-1 text-xs font-medium text-muted">a partir de</span>}
+        {formatBRL(product.priceCents)}
+      </p>
+      <TagChips tags={product.tags} />
+      {product.description && <p className="mt-3 text-muted">{product.description}</p>}
+
+      <div className="mt-5 space-y-6">
+        {product.options.map((g) => (
+          <fieldset key={g.name}>
+            <legend className="mb-2 flex w-full items-center justify-between gap-3">
+              <span className="font-semibold">{g.name}</span>
+              <span className={`rounded-pill px-2.5 py-0.5 text-xs font-medium ${g.required ? 'bg-accent text-accent-fg' : 'bg-brand/10 text-muted'}`}>{g.required ? 'Obrigatório' : g.multiple ? 'Opcional · vários' : 'Opcional'}</span>
+            </legend>
+            <div className="surface divide-y divide-line/40 overflow-hidden">
+              {g.choices.map((c) => {
+                const on = chosen.some((o) => o.group === g.name && o.label === c.label);
+                return (
+                  <label key={c.label} className="flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-brand/5">
+                    <input className="peer sr-only" type={g.multiple ? 'checkbox' : 'radio'} name={g.name} checked={on} onChange={() => toggle(g.name, g.multiple, c.label, c.priceCents)} />
+                    <span aria-hidden className={`grid h-5 w-5 shrink-0 place-items-center border-2 border-line transition peer-checked:border-brand peer-checked:bg-brand peer-focus-visible:ring-4 peer-focus-visible:ring-brand/25 ${g.multiple ? 'rounded-md' : 'rounded-full'}`}>
+                      <span className={`h-2 w-2 bg-brand-fg ${on ? 'opacity-100' : 'opacity-0'} ${g.multiple ? 'rounded-sm' : 'rounded-full'}`} />
+                    </span>
+                    <span className="flex-1">{c.label}</span>
+                    {c.priceCents > 0 && <span className="text-sm text-muted">+ {formatBRL(c.priceCents)}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        ))}
+
+        <label className="block">
+          <span className="mb-2 block font-semibold">Observações</span>
+          <textarea rows={2} maxLength={300} placeholder="Ex.: sem cebola" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </label>
       </div>
-    </div>
+    </Sheet>
   );
 }

@@ -1,18 +1,23 @@
 'use client';
 
-import { BellRing, Check, DoorOpen, Lock, Minus, Plus, Receipt, ShoppingBag, Trash2, WifiOff } from 'lucide-react';
+import { BellRing, Check, Lock, Minus, Plus, Trash2, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
 import { formatBRL, type ProductView, type SessionStateView } from '@elo/core';
-import { Aurora, Button, GlassCard, Logo, Modal, ThemeToggle, motion, AnimatePresence } from '@elo/ui';
-import { BillSheet } from '../../_components/bill-sheet';
-import { CategoryNav, filterMenu, MenuList, MenuSearch } from '../../_components/menu-list';
+import { AnimatePresence, Button, Sheet } from '@elo/ui';
+import { BillPanel } from '../../_components/bill-panel';
 import { MenuFooter } from '../../_components/menu-chrome';
+import { CartBar } from '../../_components/menu/cart-bar';
+import { MenuHeader } from '../../_components/menu/header';
+import { CategoryTabs, filterMenu, Highlights, MenuList, MenuSearch } from '../../_components/menu-list';
+import { RestaurantInfo } from '../../_components/menu/info';
+import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
 import { CartLine, lineUnit, ProductSheet } from '../../_components/product-sheet';
 
 type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'ended' | 'error';
+type View = 'menu' | 'orders' | 'bill';
 
 const HINT: Record<string, string> = {
   closed: 'Escolha os itens e abra a mesa.',
@@ -20,6 +25,8 @@ const HINT: Record<string, string> = {
   open: 'Mesa aberta. Envie a comanda quando quiser.',
   pending_close: 'Conta pedida. O garçom vai fechar a mesa.',
 };
+
+const ACTION = 'rounded-[18px] bg-white/95 px-5 py-3 text-sm font-bold text-leaf-700 shadow-sm transition active:scale-95 disabled:opacity-60';
 
 export default function TableMenu({ params }: { params: { slug: string; token: string } }) {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -30,7 +37,7 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [called, setCalled] = useState(false);
-  const [billOpen, setBillOpen] = useState(false);
+  const [view, setView] = useState<View>('menu');
   const [billVersion, setBillVersion] = useState(0);
   const [query, setQuery] = useState('');
   const cartKey = `elo.cart.${params.slug}.${params.token}`;
@@ -74,6 +81,12 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     if (state?.table.state === 'closed' && phase === 'ready') void refresh();
   }, [state?.table.state, phase, refresh]);
 
+  // Conta pedida: leva o cliente para a aba Conta, onde está a avaliação do atendimento.
+  const tableStateNow = state?.table.state;
+  useEffect(() => {
+    if (tableStateNow === 'pending_close') setView('bill');
+  }, [tableStateNow]);
+
   // Carrinho salvo no aparelho: sobrevive a recarregar a página.
   useEffect(() => {
     if (!state || cartLoaded) return;
@@ -114,7 +127,10 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
 
   if (phase === 'loading')
     return (
-      <main className="relative min-h-dvh p-4"><Aurora /><div className="mx-auto max-w-3xl space-y-4 pt-4"><div className="skeleton h-36" /><div className="skeleton h-14 w-2/3" /><div className="skeleton h-28" /><div className="skeleton h-28" /></div></main>
+      <main className="mx-auto max-w-2xl" aria-busy>
+        <div className="skeleton h-36 !rounded-none sm:h-48" />
+        <div className="space-y-4 p-4"><div className="skeleton h-8 w-2/3" /><div className="skeleton h-24" /><div className="skeleton h-24" /><div className="skeleton h-24" /></div>
+      </main>
     );
   if (phase === 'invalid') return <Notice title="Link não reconhecido" icon={<Lock size={30} />}>Este QR Code ou tag não é válido. Chame o garçom.</Notice>;
   if (phase === 'in_use') return <Notice title="Mesa em atendimento" icon={<Lock size={30} />}>Esta mesa já está aberta em outro aparelho. Chame o garçom se precisar.</Notice>;
@@ -125,6 +141,8 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
   const visible = filterMenu(state.menu, query);
   const total = cart.reduce((s, l) => s + lineUnit(l) * l.quantity, 0);
   const cartCount = cart.reduce((s, l) => s + l.quantity, 0);
+  const activeOrders = state.orders.filter((o) => !['ready', 'cancelled', 'returned'].includes(o.status)).length;
+  const showTabs = tableState !== 'closed' || state.orders.length > 0;
 
   const sendOrder = async () => {
     const ok = await act(() =>
@@ -142,7 +160,12 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     if (ok) {
       setCart([]);
       setCartOpen(false);
+      setView('orders');
     }
+  };
+
+  const openTable = async () => {
+    if (await act(() => api('/api/public/session/open', { body: {} }))) setCartOpen(false);
   };
 
   const callWaiter = async () => {
@@ -152,128 +175,124 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     }
   };
 
+  // Uma ação principal por estado da mesa.
+  const primary = (className: string) =>
+    tableState === 'closed' ? (
+      <button className={className} disabled={busy} onClick={openTable}>Abrir mesa</button>
+    ) : tableState === 'open' ? (
+      <button className={className} disabled={busy} onClick={sendOrder}>Enviar comanda</button>
+    ) : tableState === 'pending_open' ? (
+      <span className="px-3 text-sm font-semibold opacity-90">Aguardando o garçom</span>
+    ) : null;
+
   return (
-    <div className="relative min-h-dvh">
-      <Aurora />
-      <main className="mx-auto max-w-3xl space-y-8 px-4 pb-44 pt-4">
-        <motion.header initial={{ opacity: 0, y: -24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}>
-          <GlassCard strong className="relative overflow-hidden !rounded-xl p-6 sm:p-8">
-            <div className="flex items-start justify-between gap-3">
-              <Logo />
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={callWaiter}
-                  disabled={busy || tableState === 'closed'}
-                  aria-label="Chamar garçom"
-                  className="glass relative flex h-11 items-center gap-2 !rounded-pill px-4 text-sm font-semibold transition active:scale-95 disabled:opacity-50"
-                >
-                  {called ? <Check size={18} className="text-success" /> : <BellRing size={18} />}
-                  <span className="hidden sm:inline">{called ? 'Garçom avisado' : 'Chamar garçom'}</span>
-                </button>
-                <ThemeToggle />
-              </div>
-            </div>
-            <h1 className="mt-8 text-5xl font-extrabold leading-[0.98] sm:text-6xl">{state.restaurant.name}</h1>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <span className="btn-glass inline-flex items-center gap-2 rounded-pill px-4 py-1.5 text-sm font-bold">{state.table.name}</span>
-              <span className="flex items-center gap-2 text-sm text-muted"><span className="pulse-dot" aria-hidden /> {HINT[tableState]}</span>
-            </div>
-          </GlassCard>
-        </motion.header>
+    <div className="mx-auto min-h-dvh max-w-2xl pb-28">
+      <MenuHeader
+        name={state.restaurant.name}
+        coverUrl={state.restaurant.coverUrl}
+        logoUrl={state.restaurant.logoUrl}
+        action={
+          <button onClick={callWaiter} disabled={busy || tableState === 'closed'} aria-label="Chamar garçom" className="glass flex h-10 items-center gap-2 !rounded-pill px-3.5 text-sm font-semibold transition active:scale-95 disabled:opacity-50">
+            {called ? <Check size={18} className="text-success" /> : <BellRing size={18} />}
+            <span className="hidden sm:inline">{called ? 'Garçom avisado' : 'Chamar garçom'}</span>
+          </button>
+        }
+      >
+        <span className="rounded-pill bg-brand px-3 py-1 text-xs font-bold text-brand-fg">{state.table.name}</span>
+        <span className="flex items-center gap-2"><span className="pulse-dot" aria-hidden /> {HINT[tableState]}</span>
+      </MenuHeader>
 
-        {message && <p role="alert" className="rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
+      <RestaurantInfo profile={state.restaurant} />
 
-        {state.orders.length > 0 && (
-          <section aria-labelledby="orders-title">
-            <h2 id="orders-title" className="mb-4 text-3xl font-extrabold">Seus pedidos</h2>
-            <div className="space-y-3">
-              <AnimatePresence initial={false}>
-                {state.orders.map((o) => (
-                  <motion.div key={o.id} layout initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                    <OrderTracker order={o} onCancel={() => act(() => api(`/api/public/session/orders/${o.id}/cancel`, { body: {} }))} />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          </section>
+      {message && <p role="alert" className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
+
+      {showTabs && (
+        <div className="px-4 pt-4">
+          <div className="surface flex !rounded-pill p-1 text-sm font-semibold" role="tablist">
+            {([['menu', 'Cardápio', 0], ['orders', 'Pedidos', activeOrders], ['bill', 'Conta', 0]] as const).map(([key, label, n]) => (
+              <button key={key} role="tab" aria-selected={view === key} onClick={() => setView(key)} className={`flex flex-1 items-center justify-center gap-1.5 rounded-pill px-3 py-2.5 transition ${view === key ? 'bg-brand text-brand-fg shadow-sm' : 'text-muted hover:text-fg'}`}>
+                {label}
+                {n > 0 && <span className="grid min-w-5 place-items-center rounded-pill bg-accent px-1 text-xs font-bold text-accent-fg">{n}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === 'menu' && (
+        <>
+          <div className="px-4 pb-1 pt-4"><MenuSearch value={query} onChange={setQuery} /></div>
+          {!query && <Highlights menu={state.menu} onPick={setPicked} />}
+          <CategoryTabs menu={visible} />
+          <MenuList menu={visible} onPick={setPicked} searching={!!query} />
+          <div className="px-4 pt-6"><MenuFooter name={state.restaurant.name} /></div>
+        </>
+      )}
+
+      {view === 'orders' && (
+        <div className="space-y-3 px-4 pt-5">
+          {state.orders.length === 0 && <p className="surface px-4 py-8 text-center text-sm text-muted">Nenhum pedido enviado ainda.</p>}
+          {state.orders.map((o) => (
+            <OrderTracker key={o.id} order={o} onCancel={() => act(() => api(`/api/public/session/orders/${o.id}/cancel`, { body: {} }))} />
+          ))}
+        </div>
+      )}
+
+      {view === 'bill' && (
+        <BillPanel active version={billVersion}>
+          {(tableState === 'open' || tableState === 'pending_close') && <ReviewForm />}
+          {tableState === 'open' && <Button className="w-full !py-3.5" disabled={busy} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>}
+          {tableState === 'pending_close' && <p className="surface px-4 py-3 text-sm">Conta pedida. O garçom vai fechar a mesa.</p>}
+        </BillPanel>
+      )}
+
+      <AnimatePresence>
+        {view === 'menu' && cartCount > 0 && tableState !== 'pending_close' && (
+          <CartBar key="cart" count={cartCount} totalCents={total} onOpen={() => setCartOpen(true)} action={primary(ACTION)} />
         )}
-
-        <MenuSearch value={query} onChange={setQuery} />
-        <CategoryNav menu={visible} />
-        <MenuList menu={visible} onPick={setPicked} searching={!!query} />
-        <MenuFooter name={state.restaurant.name} />
-      </main>
-
-      {/* Barra de ação flutuante */}
-      <div className="fixed inset-x-0 bottom-0 z-30 px-4 pb-4">
-        <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.5, type: 'spring', stiffness: 260, damping: 26 }}>
-          <GlassCard strong className="mx-auto flex max-w-3xl items-center justify-between gap-3 !rounded-pill py-2.5 pl-3 pr-2.5">
-            <button onClick={() => cartCount && setCartOpen(true)} className="flex items-center gap-3 rounded-pill py-1 pl-1 pr-3 text-left transition hover:bg-brand/10" aria-label="Ver itens escolhidos">
-              <span className="relative grid h-11 w-11 place-items-center rounded-pill bg-brand/15 text-brand">
-                <ShoppingBag size={20} />
-                {cartCount > 0 && <motion.span key={cartCount} initial={{ scale: 1.6 }} animate={{ scale: 1 }} className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-pill bg-accent px-1 text-xs font-bold text-accent-fg">{cartCount}</motion.span>}
-              </span>
-              <span className="leading-tight">
-                <span className="block text-xs text-muted">{cartCount ? 'Total escolhido' : 'Nenhum item ainda'}</span>
-                <span className="block font-display text-lg font-bold tabular-nums">{formatBRL(total)}</span>
-              </span>
-            </button>
-
-            {tableState === 'closed' && <Button disabled={busy || cartCount === 0} loading={busy} onClick={() => act(() => api('/api/public/session/open', { body: {} }))}><DoorOpen size={18} /> Abrir mesa</Button>}
-            {tableState === 'pending_open' && <span className="px-4 text-sm font-medium text-muted">Aguardando o garçom…</span>}
-            {tableState === 'open' && (
-              <div className="flex gap-2">
-                <Button variant="ghost" disabled={busy} onClick={() => setBillOpen(true)} aria-label="Ver a conta"><Receipt size={17} /> Conta</Button>
-                <Button variant="ghost" disabled={busy} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>
-                <Button disabled={busy || cartCount === 0} loading={busy} onClick={sendOrder}>Enviar comanda</Button>
-              </div>
-            )}
-            {tableState === 'pending_close' && (
-              <div className="flex items-center gap-2">
-                <Button variant="ghost" onClick={() => setBillOpen(true)}><Receipt size={17} /> Ver conta</Button>
-                <span className="pr-3 text-sm font-medium text-muted">Aguardando fechamento…</span>
-              </div>
-            )}
-          </GlassCard>
-        </motion.div>
-      </div>
-
-      <BillSheet open={billOpen} onClose={() => setBillOpen(false)} version={billVersion} />
+      </AnimatePresence>
 
       <ProductSheet product={picked} onClose={() => setPicked(null)} onAdd={(line) => { setCart((c) => [...c, line]); setPicked(null); }} />
 
-      <Modal open={cartOpen} onClose={() => setCartOpen(false)} title="Seus itens" sheet>
-        <ul className="space-y-3">
+      <Sheet
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
+        title="Sua sacola"
+        footer={
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted">Total</span>
+              <span className="font-display text-2xl font-extrabold tabular-nums">{formatBRL(total)}</span>
+            </div>
+            {tableState === 'open' && <Button className="w-full !py-3.5" loading={busy} onClick={sendOrder}>Enviar comanda</Button>}
+            {tableState === 'closed' && <Button className="w-full !py-3.5" loading={busy} onClick={openTable}>Abrir mesa</Button>}
+            {tableState === 'pending_open' && <p className="surface px-4 py-3 text-center text-sm">Aguardando o garçom confirmar a mesa.</p>}
+            {tableState === 'closed' && <p className="text-center text-xs text-muted">O garçom confirma a abertura antes de você enviar a comanda.</p>}
+            {state.restaurant.serviceFeeBps > 0 && <p className="text-center text-xs text-muted">Taxa de serviço de {(state.restaurant.serviceFeeBps / 100).toLocaleString('pt-BR')}% na conta. Você pode recusá-la na aba Conta.</p>}
+          </div>
+        }
+      >
+        {cart.length === 0 && <p className="mt-4 text-sm text-muted">Sua sacola está vazia.</p>}
+        <ul className="mt-4 divide-y divide-line/40">
           {cart.map((l, idx) => (
-            <li key={idx} className="flex items-start justify-between gap-3 rounded-md bg-leaf-100/40 px-4 py-3">
-              <div className="min-w-0 text-sm">
+            <li key={idx} className="flex items-start gap-3 py-3">
+              <div className="min-w-0 flex-1 text-sm">
                 <div className="font-semibold">{l.product.name}</div>
                 {l.options.length > 0 && <div className="text-muted">{l.options.map((o) => o.label).join(' · ')}</div>}
-                {l.notes && <div className="text-muted">Obs: {l.notes}</div>}
+                {l.notes && <div className="text-muted">Obs.: {l.notes}</div>}
+                <div className="mt-1 font-semibold tabular-nums text-brand">{formatBRL(lineUnit(l) * l.quantity)}</div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="glass flex items-center !rounded-pill p-0.5">
-                  <button aria-label="Menos" className="grid h-7 w-7 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => c.map((x, i) => (i === idx ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x)))}><Minus size={14} /></button>
-                  <span className="w-6 text-center text-sm font-bold tabular-nums">{l.quantity}</span>
-                  <button aria-label="Mais" className="grid h-7 w-7 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => c.map((x, i) => (i === idx ? { ...x, quantity: Math.min(50, x.quantity + 1) } : x)))}><Plus size={14} /></button>
-                </span>
-                <span className="w-20 text-right font-semibold tabular-nums">{formatBRL(lineUnit(l) * l.quantity)}</span>
-                <button aria-label={`Remover ${l.product.name}`} className="grid h-8 w-8 place-items-center rounded-pill text-muted hover:bg-danger/10 hover:text-danger" onClick={() => setCart((c) => c.filter((_, i) => i !== idx))}><Trash2 size={16} /></button>
+              <div className="surface flex items-center !rounded-pill p-0.5">
+                <button aria-label={l.quantity === 1 ? `Remover ${l.product.name}` : 'Menos'} className="grid h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => (l.quantity === 1 ? c.filter((_, i) => i !== idx) : c.map((x, i) => (i === idx ? { ...x, quantity: x.quantity - 1 } : x))))}>
+                  {l.quantity === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
+                </button>
+                <span className="w-6 text-center text-sm font-bold tabular-nums">{l.quantity}</span>
+                <button aria-label="Mais" className="grid h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => c.map((x, i) => (i === idx ? { ...x, quantity: Math.min(50, x.quantity + 1) } : x)))}><Plus size={15} /></button>
               </div>
             </li>
           ))}
         </ul>
-        <div className="mt-4 flex items-center justify-between border-t border-line/40 pt-4">
-          <span className="text-muted">Total</span>
-          <span className="font-display text-2xl font-bold tabular-nums">{formatBRL(total)}</span>
-        </div>
-        {state.restaurant.serviceFeeBps > 0 && <p className="mt-1 text-xs text-muted">Taxa de serviço de {(state.restaurant.serviceFeeBps / 100).toLocaleString('pt-BR')}% na conta. Você pode recusá-la em Conta.</p>}
-        {tableState === 'open' ? (
-          <Button className="mt-4 w-full !py-3.5" loading={busy} onClick={sendOrder}>Enviar comanda</Button>
-        ) : (
-          <p className="mt-4 rounded-md bg-accent/30 px-4 py-3 text-sm">Abra a mesa para enviar a comanda.</p>
-        )}
-      </Modal>
+      </Sheet>
     </div>
   );
 }
