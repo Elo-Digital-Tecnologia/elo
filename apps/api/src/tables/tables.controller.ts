@@ -44,15 +44,15 @@ export class TablesController {
 
   @Roles(Role.RestaurantAdmin)
   @Post()
-  create(@TenantId() rid: string, @Body() dto: CreateTableDto) {
-    return this.tables.create(rid, dto.name);
+  create(@TenantId() rid: string, @Body() dto: CreateTableDto, @CurrentUser() user: JwtUser) {
+    return this.tables.create(rid, dto.name, user);
   }
 
   @Roles(Role.RestaurantAdmin)
   @HttpCode(204)
   @Delete(':id')
-  remove(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
-    return this.tables.remove(rid, id);
+  remove(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return this.tables.remove(rid, id, user);
   }
 
   @Roles(Role.RestaurantAdmin)
@@ -109,7 +109,8 @@ export class AdminTablesController {
   rotate(
     @Param('restaurantId', ParseUUIDPipe) restaurantId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtUser,
   ) {
-    return this.tables.rotateToken(restaurantId, id);
+    return this.tables.rotateToken(restaurantId, id, user);
   }
 }

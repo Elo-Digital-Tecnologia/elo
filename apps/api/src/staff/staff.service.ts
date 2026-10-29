@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { ArrayContains, In, IsNull, Not, Repository } from 'typeorm';
 import { guestFacingName, Role, type StaffAction, staffRule, TableState } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
+import { AuditService } from '../audit/audit.service';
 import { DiningTable, StaffUser } from '../database/entities';
 
 export interface NewStaff {
@@ -47,9 +48,10 @@ export class StaffService {
   constructor(
     @InjectRepository(StaffUser) private readonly users: Repository<StaffUser>,
     @InjectRepository(DiningTable) private readonly tables: Repository<DiningTable>,
+    private readonly audit: AuditService,
   ) {}
 
-  async create(data: NewStaff): Promise<PublicStaff> {
+  async create(data: NewStaff, actor?: JwtUser): Promise<PublicStaff> {
     const scope = { username: data.username, restaurantId: data.restaurantId ?? IsNull(), ...notArchived };
     if (await this.users.findOne({ where: scope })) throw new ConflictException('username_taken');
     const user = await this.users.save(
@@ -63,6 +65,7 @@ export class StaffService {
         permissions: data.permissions ?? [],
       }),
     );
+    if (actor) await this.audit.record(actor, 'staff_created', user.restaurantId, { target: user.name, meta: { roles: user.roles } });
     return strip(user);
   }
 
@@ -79,20 +82,34 @@ export class StaffService {
     const user = await this.find(id, restaurantId);
     if (changes.roles) await this.authorize(actor, user, 'change_roles', changes.roles);
     else await this.authorize(actor, user, 'edit');
+    const before = { name: user.name, displayName: user.displayName, roles: [...user.roles], permissions: [...user.permissions] };
     if (changes.name !== undefined) user.name = changes.name.trim();
     if (changes.displayName !== undefined) user.displayName = changes.displayName?.trim() || null;
     if (changes.roles) user.roles = changes.roles;
     if (changes.permissions && !user.restaurantId) user.permissions = changes.permissions;
-    return strip(await this.users.save(user));
+    const saved = await this.users.save(user);
+    const same = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
+    if (!same(before.roles, user.roles)) {
+      await this.audit.record(actor, 'staff_roles_changed', user.restaurantId, { target: user.name, meta: { from: before.roles, to: user.roles } });
+    }
+    if (!same(before.permissions, user.permissions)) {
+      await this.audit.record(actor, 'staff_updated', user.restaurantId, { target: user.name, meta: { permissions: user.permissions } });
+    }
+    if (before.name !== user.name || before.displayName !== user.displayName) {
+      await this.audit.record(actor, 'staff_updated', user.restaurantId, { target: user.name, meta: before.name !== user.name ? { formerName: before.name } : undefined });
+    }
+    return strip(saved);
   }
 
   async setActive(id: string, restaurantId: string | null, actor: JwtUser, active: boolean): Promise<void> {
     const user = await this.find(id, restaurantId);
     if (!active) await this.authorize(actor, user, 'set_active');
     else await this.authorize(actor, user, 'edit');
+    const changed = user.active !== active;
     user.active = active;
     await this.users.save(user);
     this.activeCache.delete(id);
+    if (changed) await this.audit.record(actor, active ? 'staff_activated' : 'staff_deactivated', user.restaurantId, { target: user.name });
   }
 
   /** Administrator sets a new password for a team member (there is no e-mail in the system). */
@@ -101,6 +118,7 @@ export class StaffService {
     await this.authorize(actor, user, 'reset_password');
     user.passwordHash = await bcrypt.hash(next, 10);
     await this.users.save(user);
+    await this.audit.record(actor, 'staff_password_reset', user.restaurantId, { target: user.name });
   }
 
   /**
@@ -124,6 +142,7 @@ export class StaffService {
     user.active = false;
     await this.users.save(user);
     this.activeCache.delete(id);
+    await this.audit.record(actor, 'staff_archived', user.restaurantId, { target: user.name });
   }
 
   /** Names of several members at once, archived ones included, for history and realtime payloads. */

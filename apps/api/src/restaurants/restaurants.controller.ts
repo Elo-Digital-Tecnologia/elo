@@ -62,8 +62,8 @@ export class AdminRestaurantsController {
 
   @RequirePermission(Permission.RestaurantsEdit)
   @Patch('restaurants/:id')
-  edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditRestaurantDto) {
-    return this.restaurants.edit(id, dto);
+  edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditRestaurantDto, @CurrentUser() user: JwtUser) {
+    return this.restaurants.edit(id, dto, user);
   }
 
   @RequirePermission(Permission.RestaurantsSuspend)
@@ -119,7 +119,7 @@ export class AdminRestaurantsController {
     @Body() dto: RecordPaymentDto,
     @CurrentUser() user: JwtUser,
   ) {
-    return this.restaurants.recordPayment(id, dto, user.sub);
+    return this.restaurants.recordPayment(id, dto, user);
   }
 }
 
@@ -145,8 +145,8 @@ export class RestaurantSelfController {
 
   @Roles(Role.RestaurantAdmin)
   @Patch('settings')
-  async settings(@TenantId() restaurantId: string, @Body() dto: UpdateSettingsDto) {
-    return this.profile(await this.restaurants.updateSettings(restaurantId, dto));
+  async settings(@TenantId() restaurantId: string, @Body() dto: UpdateSettingsDto, @CurrentUser() user: JwtUser) {
+    return this.profile(await this.restaurants.updateSettings(restaurantId, dto, user));
   }
 
   private profile(r: Restaurant) {

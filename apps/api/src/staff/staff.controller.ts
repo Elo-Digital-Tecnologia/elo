@@ -28,8 +28,8 @@ export class StaffController {
 
   @Roles(Role.RestaurantAdmin)
   @Post()
-  create(@TenantId() restaurantId: string, @Body() dto: CreateRestaurantStaffDto) {
-    return this.staff.create({ restaurantId, ...dto });
+  create(@TenantId() restaurantId: string, @Body() dto: CreateRestaurantStaffDto, @CurrentUser() actor: JwtUser) {
+    return this.staff.create({ restaurantId, ...dto }, actor);
   }
 
   @Roles(Role.RestaurantAdmin)
@@ -115,7 +115,7 @@ export class EloStaffController {
       name: dto.name,
       roles: [Role.EloAdmin],
       permissions: grantable(actor, dto.permissions),
-    });
+    }, actor);
   }
 
   @Patch(':id')

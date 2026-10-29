@@ -16,6 +16,7 @@ import { TenantRepo } from '../common/tenant-repo';
 import { DiningTable, Restaurant, type SessionClosedReason, TableSession } from '../database/entities';
 import type { Env } from '../config/env';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import { StaffService } from '../staff/staff.service';
 
 const newToken = () => randomBytes(24).toString('base64url');
@@ -36,6 +37,7 @@ export class TablesService {
     private readonly realtime: RealtimeService,
     private readonly config: ConfigService<Env, true>,
     private readonly staff: StaffService,
+    private readonly audit: AuditService,
   ) {}
 
   private scoped(rid: string) {
@@ -44,8 +46,10 @@ export class TablesService {
 
   // ---- gestão (painel do restaurante) ----
 
-  create(rid: string, name: string) {
-    return this.scoped(rid).create({ name, token: newToken(), state: TableState.Closed, waiterId: null });
+  async create(rid: string, name: string, actor: JwtUser) {
+    const table = await this.scoped(rid).create({ name, token: newToken(), state: TableState.Closed, waiterId: null });
+    await this.audit.record(actor, 'table_created', rid, { target: table.name });
+    return table;
   }
 
   list(rid: string) {
@@ -58,21 +62,24 @@ export class TablesService {
     return all.filter((t) => t.state === TableState.PendingOpen || t.state === TableState.PendingClose);
   }
 
-  async remove(rid: string, id: string) {
+  async remove(rid: string, id: string, actor: JwtUser) {
     const table = await this.get(rid, id);
     if (table.state !== TableState.Closed) throw new ConflictException('table_in_use');
     await this.scoped(rid).remove({ id });
+    await this.audit.record(actor, 'table_removed', rid, { target: table.name });
   }
 
   /** Regravação do token: só equipe Elo com permissão (controle na rota). */
-  async rotateToken(rid: string, id: string) {
+  async rotateToken(rid: string, id: string, actor: JwtUser) {
     const repo = this.scoped(rid);
     const table = await this.get(rid, id);
     table.token = newToken();
     await this.closeSessions(table.id, 'closed');
     table.state = TableState.Closed;
     table.waiterId = null;
-    return repo.save(table);
+    const saved = await repo.save(table);
+    await this.audit.record(actor, 'table_token_rotated', rid, { target: table.name });
+    return saved;
   }
 
   /** Painel Elo: mesas com token e slug para montar o link impresso. */
@@ -144,6 +151,8 @@ export class TablesService {
     if (current.waiterId === staffId(actor)) return current;
     const table = await this.move(rid, tableId, [TableState.Open, TableState.PendingClose], null, { waiterId: staffId(actor) });
     if (!table) throw new ConflictException('invalid_table_state');
+    const previous = (await this.staff.names([current.waiterId])).get(current.waiterId ?? '')?.name ?? null;
+    await this.audit.record(actor, 'table_taken', rid, { target: table.name, meta: previous ? { from: previous } : undefined });
     return this.persist(table, actor);
   }
 

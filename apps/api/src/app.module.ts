@@ -12,6 +12,7 @@ import {
 } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Injectable } from '@nestjs/common';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard, RolesGuard, SubscriptionGuard } from './auth/guards';
 import { BillsModule } from './bills/bills.module';
@@ -91,6 +92,7 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
         migrationsRun: false,
       }),
     }),
+    AuditModule,
     AuthModule,
     StaffModule,
     RestaurantsModule,

@@ -16,7 +16,6 @@ import { AccessState } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import type { Env } from '../config/env';
 import {
-  AuditLog,
   Category,
   DiningTable,
   Media,
@@ -29,6 +28,7 @@ import {
   WaiterCall,
 } from '../database/entities';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import { RestaurantsService } from './restaurants.service';
 
 const DAY_MS = 86_400_000;
@@ -47,10 +47,10 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
 
   constructor(
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
-    @InjectRepository(AuditLog) private readonly audit: Repository<AuditLog>,
     @InjectDataSource() private readonly db: DataSource,
     private readonly service: RestaurantsService,
     private readonly realtime: RealtimeService,
+    private readonly audit: AuditService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -67,7 +67,7 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
   async setSuspended(id: string, suspended: boolean, actor: JwtUser): Promise<Restaurant> {
     const r = await this.service.setSuspended(id, suspended);
     if (suspended) this.realtime.disconnectRestaurant(id);
-    await this.record(actor.sub, suspended ? 'restaurant_suspended' : 'restaurant_reactivated', id);
+    await this.audit.record(actor, suspended ? 'restaurant_suspended' : 'restaurant_reactivated', id);
     return r;
   }
 
@@ -77,7 +77,7 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
     if ((await this.service.accessStateOf(id)) !== AccessState.Suspended) throw new ConflictException('not_suspended');
     await this.restaurants.update({ id }, { deletedAt: new Date(), deletedBy: actor.sub });
     this.realtime.disconnectRestaurant(id);
-    await this.record(actor.sub, 'restaurant_deleted', id);
+    await this.audit.record(actor, 'restaurant_deleted', id, { target: r.name });
   }
 
   /** Back as a suspended restaurant: someone still has to reactivate it on purpose. */
@@ -85,7 +85,7 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
     const r = await this.restaurants.findOne({ where: { id, deletedAt: Not(IsNull()) }, withDeleted: true });
     if (!r) throw new NotFoundException();
     await this.restaurants.update({ id }, { deletedAt: null, deletedBy: null, suspended: true });
-    await this.record(actor.sub, 'restaurant_restored', id);
+    await this.audit.record(actor, 'restaurant_restored', id, { target: r.name });
     return this.service.get(id);
   }
 
@@ -151,14 +151,10 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
       );
       for (const { table_name } of tables) await em.query(`DELETE FROM "${table_name}" WHERE "restaurant_id" = $1`, [id]);
       await em.query(`DELETE FROM "restaurants" WHERE "id" = $1`, [id]);
-      await em.getRepository(AuditLog).save(em.getRepository(AuditLog).create({ actor: 'system', action: 'restaurant_purged', restaurantId: id }));
     });
+    await this.audit.record('system', 'restaurant_purged', id);
     const dir = this.config.get('UPLOAD_DIR', { infer: true });
     const files = media.flatMap((m) => [`${m.id}.webp`, `${m.id}-sm.webp`]);
     await Promise.all(files.map((f) => unlink(path.join(dir, f)).catch(() => undefined)));
-  }
-
-  private record(actor: string, action: string, restaurantId: string) {
-    return this.audit.save(this.audit.create({ actor, action, restaurantId }));
   }
 }

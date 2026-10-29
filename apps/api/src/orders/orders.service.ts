@@ -13,6 +13,7 @@ import type { JwtUser } from '../common/auth-types';
 import { Order } from '../database/entities';
 import { CatalogService } from '../catalog/catalog.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AuditService } from '../audit/audit.service';
 import { SessionContext, TablesService } from '../tables/tables.service';
 import { priceItem } from './pricing';
 import { CreateOrderDto, ListOrdersQuery } from './orders.dto';
@@ -24,6 +25,7 @@ export class OrdersService {
     private readonly catalog: CatalogService,
     private readonly tables: TablesService,
     private readonly realtime: RealtimeService,
+    private readonly audit: AuditService,
   ) {}
 
   private scoped(rid: string) {
@@ -119,11 +121,13 @@ export class OrdersService {
     const rid = user.restaurantId!;
     const order = await this.get(rid, id);
     const table = await this.tables.get(rid, order.tableId);
-    return this.cancel(
+    const saved = await this.cancel(
       order,
       { kind: 'staff', roles: user.roles, managesTable: table.waiterId === user.sub },
       reason,
     );
+    await this.audit.record(user, 'order_cancelled', rid, { target: table.name, meta: { reason: saved.cancelReason, items: summarize(order) } });
+    return saved;
   }
 
   /** Pedido já "pronto" que o cliente recusou/devolveu: status separado, nunca cancelamento. */
@@ -141,6 +145,7 @@ export class OrdersService {
     order.cancelReason = reason.trim();
     const saved = await this.scoped(rid).save(order);
     await this.emit('order.updated', saved);
+    await this.audit.record(user, 'order_returned', rid, { target: table.name, meta: { reason: saved.cancelReason, items: summarize(order) } });
     return saved;
   }
 
@@ -182,4 +187,9 @@ export class OrdersService {
       payload: { tableId: order.tableId },
     });
   }
+}
+
+/** "2x Margherita, 1x Coca" for activity records. */
+function summarize(order: Order): string {
+  return order.items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
 }

@@ -18,7 +18,8 @@ import {
 } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
-import { AuditLog, Payment, Restaurant } from '../database/entities';
+import { AuditService } from '../audit/audit.service';
+import { Payment, Restaurant } from '../database/entities';
 import { StaffService } from '../staff/staff.service';
 import type { RestaurantListQuery } from './restaurants.dto';
 
@@ -60,10 +61,10 @@ export class RestaurantsService {
   constructor(
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     @InjectRepository(Payment) private readonly payments: Repository<Payment>,
-    @InjectRepository(AuditLog) private readonly audit: Repository<AuditLog>,
     private readonly staff: StaffService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<Env, true>,
+    private readonly audit: AuditService,
   ) {}
 
   /** Perfil que qualquer cliente pode ver no cardápio. O Wi-Fi fica de fora. */
@@ -82,7 +83,7 @@ export class RestaurantsService {
   /** Token de administrador do restaurante para a equipe Elo; dura 45 min e fica registrado. */
   async accessAs(id: string, actor: JwtUser): Promise<{ accessToken: string; slug: string }> {
     const restaurant = await this.get(id);
-    await this.audit.save(this.audit.create({ actor: actor.sub, action: 'restaurant_access', restaurantId: id }));
+    await this.audit.record(actor, 'restaurant_access', id);
     const payload: JwtUser = {
       sub: `elo:${actor.sub}`,
       roles: [Role.RestaurantAdmin],
@@ -196,10 +197,13 @@ export class RestaurantsService {
     };
   }
 
-  async edit(id: string, data: { name?: string; managerName?: string; managerContact?: string }): Promise<Restaurant> {
+  async edit(id: string, data: { name?: string; managerName?: string; managerContact?: string }, actor: JwtUser): Promise<Restaurant> {
     const r = await this.get(id);
+    const fields = changedFields(r, data);
     Object.assign(r, Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)));
-    return this.restaurants.save(r);
+    const saved = await this.restaurants.save(r);
+    if (fields.length) await this.audit.record(actor, 'restaurant_edited', id, { meta: { fields } });
+    return saved;
   }
 
   async get(id: string): Promise<Restaurant> {
@@ -240,11 +244,15 @@ export class RestaurantsService {
     id: string,
     data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'wifiName' | 'wifiPassword' | 'openingHours'>> &
       Pick<Restaurant, 'name' | 'managerName' | 'managerContact' | 'serviceFeeBps'>,
+    actor?: JwtUser,
   ): Promise<Restaurant> {
     const r = await this.get(id);
+    const fields = changedFields(r, data);
     // Campos não enviados ficam como estão; só o que veio (inclusive nulo) é gravado.
     Object.assign(r, Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)));
-    return this.restaurants.save(r);
+    const saved = await this.restaurants.save(r);
+    if (fields.length && actor) await this.audit.record(actor, 'settings_updated', id, { meta: { fields } });
+    return saved;
   }
 
   async setSuspended(id: string, suspended: boolean): Promise<Restaurant> {
@@ -256,15 +264,20 @@ export class RestaurantsService {
   async recordPayment(
     id: string,
     data: { amountCents: number; paidAt: Date; newDueDate: Date; note?: string },
-    recordedBy: string,
+    actor: JwtUser,
   ): Promise<Payment> {
     const r = await this.get(id);
     r.dueDate = data.newDueDate;
     await this.restaurants.save(r);
-    const recordedByName = await this.staff.actorName(recordedBy);
-    return this.payments.save(
+    const recordedBy = actor.sub;
+    const recordedByName = actor.name ?? (await this.staff.actorName(recordedBy));
+    const payment = await this.payments.save(
       this.payments.create({ restaurantId: id, ...data, note: data.note ?? null, recordedBy, recordedByName }),
     );
+    await this.audit.record(actor, 'payment_recorded', id, {
+      meta: { amountCents: data.amountCents, newDueDate: data.newDueDate.toISOString() },
+    });
+    return payment;
   }
 
   paymentHistory(restaurantId: string): Promise<Payment[]> {
@@ -281,4 +294,12 @@ export class RestaurantsService {
   private stateOf(r: Restaurant): AccessState {
     return accessState(r.dueDate, new Date(), r.suspended);
   }
+}
+
+/** Names of the fields a change really alters, for the activity log (values stay out of it). */
+function changedFields(current: object, next: object): string[] {
+  const now = current as Record<string, unknown>;
+  return Object.entries(next)
+    .filter(([k, v]) => v !== undefined && JSON.stringify(v) !== JSON.stringify(now[k] instanceof Date ? (now[k] as Date).toISOString() : now[k]))
+    .map(([k]) => k);
 }
