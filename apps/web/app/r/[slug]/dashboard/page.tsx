@@ -1,6 +1,8 @@
 'use client';
 
-import { BellRing, ClipboardList, Table2, Wallet } from 'lucide-react';
+import { BellRing, ClipboardList, Star, Table2, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, useRealtime } from '@elo/client';
 import { formatBRL, type OrderView, type ReportView, type TableView, type WaiterCallView } from '@elo/core';
@@ -39,6 +41,8 @@ function Overview() {
   const [calls, setCalls] = useState<WaiterCallView[]>([]);
   const [tables, setTables] = useState<TableView[]>([]);
   const [failed, setFailed] = useState(false);
+  const [rating, setRating] = useState<{ average: number; count: number } | null>(null);
+  const { slug } = useParams<{ slug: string }>();
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +67,10 @@ function Overview() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    api<{ average: number; count: number }>('/api/reviews', { token }).then(setRating).catch(() => undefined);
+  }, [token]);
 
   // Vários eventos seguidos viram uma única atualização.
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -103,7 +111,17 @@ function Overview() {
 
   return (
     <>
-      <PageHeader title="Visão geral" description="Movimento de hoje." />
+      <PageHeader
+        title="Visão geral"
+        description="Movimento de hoje."
+        actions={
+          rating && rating.count > 0 ? (
+            <Link href={`/r/${slug}/dashboard/reviews`} className="surface inline-flex items-center gap-2 !rounded-pill px-4 py-2 text-sm font-semibold transition hover:text-brand">
+              <Star size={16} className="fill-accent text-accent" aria-hidden /> {rating.average.toLocaleString('pt-BR', { minimumFractionDigits: 1 })} · {rating.count} {rating.count === 1 ? 'avaliação' : 'avaliações'}
+            </Link>
+          ) : undefined
+        }
+      />
 
       <Stagger className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StaggerItem><Stat label="Pedidos em andamento" value={view.inProgress} icon={ClipboardList} trend={view.byHour.map((h) => h.value)} hint={`${view.total} hoje`} /></StaggerItem>

@@ -6,6 +6,7 @@ import {
   ChefHat,
   CreditCard,
   KeyRound,
+  Star,
   LayoutDashboard,
   Receipt,
   Settings,
@@ -18,10 +19,10 @@ import {
 import { useParams, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, ApiError, useAuth } from '@elo/client';
-import type { SubscriptionView } from '@elo/core';
+import type { RestaurantSettingsView, SubscriptionView } from '@elo/core';
 import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, SkeletonCards } from '@elo/ui';
 
-interface Me {
+interface Me extends RestaurantSettingsView {
   id: string;
   slug: string;
   name: string;
@@ -70,6 +71,7 @@ function navFor(base: string, role: string): NavItem[] {
       return [
         item('/dashboard', 'Visão geral', LayoutDashboard),
         item('/dashboard/reports', 'Relatórios', BarChart3),
+        item('/dashboard/reviews', 'Avaliações', Star),
         item('/dashboard/menu', 'Cardápio', UtensilsCrossed),
         item('/dashboard/tables', 'Mesas e QR Codes', Table2),
         salon,
@@ -180,7 +182,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
         headerExtra={
           <span className="flex items-center gap-2 pl-2 text-sm text-muted">
             <span className="pulse-dot" aria-hidden />
-            Ao vivo
+            <span className="sr-only sm:not-sr-only">Ao vivo</span>
           </span>
         }
         footerLinks={[{ label: 'Cardápio dos clientes', href: `/${me.slug}` }]}
