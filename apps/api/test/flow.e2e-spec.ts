@@ -76,8 +76,29 @@ suite('fluxo da mesa (e2e)', () => {
   it('abandoned scan on a closed table does not lock it', async () => {
     const a = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
     const b = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
-    await http().get('/public/session').set('Cookie', cookieOf(a)).expect(401);
+    // o aparelho que perdeu a mesa recebe o motivo, não um "encerrado" genérico
+    const lost = await http().get('/public/session').set('Cookie', cookieOf(a)).expect(401);
+    expect(lost.body.message).toBe('session_taken_over');
+    await http().post('/public/session/open').set('Cookie', cookieOf(a)).expect(401);
     await http().get('/public/session').set('Cookie', cookieOf(b)).expect(200);
+    await http().get('/public/session').expect(401);
+  });
+
+  it('session ends with a specific reason: waiter rejects the opening, waiter closes the table', async () => {
+    const auth = { Authorization: `Bearer ${waiter}` };
+    const a = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    await http().post('/public/session/open').set('Cookie', cookieOf(a)).expect(201);
+    // com a abertura pedida, outro aparelho é bloqueado com conflito, sem derrubar o primeiro
+    await http().post(`/public/${slug}/${tableToken}/session`).expect(409);
+    await http().get('/public/session').set('Cookie', cookieOf(a)).expect(200);
+    await http().post(`/tables/${tableId}/reject-open`).set(auth).expect(201);
+    expect((await http().get('/public/session').set('Cookie', cookieOf(a)).expect(401)).body.message).toBe('session_rejected');
+
+    const b = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    await http().post('/public/session/open').set('Cookie', cookieOf(b)).expect(201);
+    await http().post(`/tables/${tableId}/validate-open`).set(auth).expect(201);
+    await http().post(`/tables/${tableId}/close`).set(auth).expect(201);
+    expect((await http().get('/public/session').set('Cookie', cookieOf(b)).expect(401)).body.message).toBe('session_closed');
   });
 
   it('rejects invalid token and unvalidated ordering', async () => {

@@ -1,6 +1,9 @@
 import { FeeWaivedBy } from '@elo/core';
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
+/** Por que a sessão terminou: o cliente mostra uma mensagem diferente para cada motivo. */
+export type SessionClosedReason = 'closed' | 'rejected' | 'taken_over';
+
 export interface StoredAdjustment {
   label: string;
   cents: number;
@@ -18,6 +21,7 @@ export class TableSession {
   @Index() @Column({ type: 'uuid' }) tableId: string;
   @Column({ type: 'timestamptz' }) expiresAt: Date;
   @Column({ type: 'timestamptz', nullable: true }) closedAt: Date | null;
+  @Column({ type: 'varchar', nullable: true }) closedReason: SessionClosedReason | null;
   /** Taxa de serviço removida: pelo cliente (recusa) ou por funcionário. */
   @Column({ type: 'varchar', nullable: true }) feeWaivedBy: FeeWaivedBy | null;
   /** Ajustes manuais da conta (desconto/acréscimo), feitos por garçom ou caixa. */

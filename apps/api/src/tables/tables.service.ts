@@ -12,7 +12,7 @@ import * as QRCode from 'qrcode';
 import { IsNull, Repository } from 'typeorm';
 import { canTransitionTable, canWaiterClose, TableState } from '@elo/core';
 import { TenantRepo } from '../common/tenant-repo';
-import { DiningTable, Restaurant, TableSession } from '../database/entities';
+import { DiningTable, Restaurant, type SessionClosedReason, TableSession } from '../database/entities';
 import type { Env } from '../config/env';
 import { RealtimeService } from '../realtime/realtime.service';
 
@@ -66,7 +66,7 @@ export class TablesService {
     const repo = this.scoped(rid);
     const table = await this.get(rid, id);
     table.token = newToken();
-    await this.closeSessions(table.id);
+    await this.closeSessions(table.id, 'closed');
     table.state = TableState.Closed;
     table.waiterId = null;
     return repo.save(table);
@@ -114,7 +114,7 @@ export class TablesService {
   /** Garçom recusa o pedido de abertura: mesa volta a fechada e a sessão cai. */
   async rejectOpen(rid: string, tableId: string) {
     const table = await this.transition(rid, tableId, TableState.Closed);
-    await this.closeSessions(table.id);
+    await this.closeSessions(table.id, 'rejected');
     table.waiterId = null;
     return this.persist(table);
   }
@@ -123,7 +123,7 @@ export class TablesService {
   async close(rid: string, tableId: string) {
     const table = await this.get(rid, tableId);
     if (!canWaiterClose(table.state)) throw new ConflictException('invalid_table_state');
-    await this.closeSessions(table.id);
+    await this.closeSessions(table.id, 'closed');
     table.state = TableState.Closed;
     table.waiterId = null;
     return this.persist(table);
@@ -149,7 +149,7 @@ export class TablesService {
       // Mesa ainda fechada: sessão abandonada (só escaneou). Novo scan assume a mesa.
       // Com a mesa em abertura/aberta/fechamento, outros aparelhos ficam bloqueados.
       if (table.state !== TableState.Closed) throw new ConflictException('table_in_use');
-      await this.closeSessions(table.id);
+      await this.closeSessions(table.id, 'taken_over');
     }
     const hours = this.config.get('TABLE_SESSION_HOURS', { infer: true });
     const session = await this.sessions.save(
@@ -158,6 +158,7 @@ export class TablesService {
         tableId: table.id,
         expiresAt: new Date(Date.now() + hours * 3_600_000),
         closedAt: null,
+        closedReason: null,
       }),
     );
     return { session, table, restaurant };
@@ -165,9 +166,12 @@ export class TablesService {
 
   /** Valida o cookie: sessão existe, não expirou, não foi encerrada. */
   async resolveSession(sessionId: string | undefined): Promise<SessionContext> {
-    if (!sessionId || !/^[0-9a-f-]{36}$/.test(sessionId)) throw new UnauthorizedException();
+    if (!sessionId || !/^[0-9a-f-]{36}$/.test(sessionId)) throw new UnauthorizedException('session_invalid');
     const s = await this.sessions.findOne({ where: { id: sessionId } });
-    if (!s || s.closedAt || s.expiresAt.getTime() < Date.now()) throw new UnauthorizedException();
+    if (!s) throw new UnauthorizedException('session_invalid');
+    // Cada motivo tem seu código: o cliente explica o que aconteceu em vez de dizer só "encerrado".
+    if (s.closedAt) throw new UnauthorizedException(`session_${s.closedReason ?? 'closed'}`);
+    if (s.expiresAt.getTime() < Date.now()) throw new UnauthorizedException('session_expired');
     return { sessionId: s.id, tableId: s.tableId, restaurantId: s.restaurantId };
   }
 
@@ -206,8 +210,8 @@ export class TablesService {
       .getOne();
   }
 
-  private closeSessions(tableId: string) {
-    return this.sessions.update({ tableId, closedAt: IsNull() }, { closedAt: new Date() });
+  private closeSessions(tableId: string, reason: SessionClosedReason) {
+    return this.sessions.update({ tableId, closedAt: IsNull() }, { closedAt: new Date(), closedReason: reason });
   }
 
   private async transition(rid: string, tableId: string, to: TableState) {
