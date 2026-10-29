@@ -15,4 +15,5 @@ export * from './components/fields';
 export * from './components/charts';
 export * from './components/app-shell';
 export * from './components/auth-layout';
+export * from './components/alerts';
 export { themeInitScript, THEME_KEY } from './components/theme-script';
