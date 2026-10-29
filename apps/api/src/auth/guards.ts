@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { AccessState, Role } from '@elo/core';
+import { AccessState, hasAnyRole, Role, rolesOf, upgradePermissions } from '@elo/core';
 import {
   ALLOW_SUSPENDED,
   IS_PUBLIC,
@@ -34,7 +34,8 @@ export class JwtAuthGuard implements CanActivate {
     const header: string | undefined = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) throw new UnauthorizedException();
     try {
-      req.user = await this.jwt.verifyAsync<JwtUser>(header.slice(7));
+      const payload = await this.jwt.verifyAsync<JwtUser & { role?: Role }>(header.slice(7));
+      req.user = { ...payload, roles: rolesOf(payload), permissions: upgradePermissions(payload.permissions ?? []) };
     } catch {
       throw new UnauthorizedException();
     }
@@ -63,10 +64,10 @@ export class RolesGuard implements CanActivate {
     }
 
     const roles = this.reflector.getAllAndOverride<Role[] | undefined>(ROLES, targets);
-    if (roles && !roles.includes(user.role)) throw new ForbiddenException();
+    if (roles && !hasAnyRole(user.roles, roles)) throw new ForbiddenException();
 
     const needed = this.reflector.getAllAndOverride<string[] | undefined>(PERMISSIONS, targets);
-    if (needed && user.role !== Role.Superadmin) {
+    if (needed && !user.roles.includes(Role.Superadmin)) {
       if (!needed.every((p) => user.permissions.includes(p))) throw new ForbiddenException();
     }
     return true;
@@ -87,8 +88,11 @@ export class SubscriptionGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(ALLOW_SUSPENDED, targets)) return true;
     const user: JwtUser = ctx.switchToHttp().getRequest().user;
     if (!user.restaurantId) return true;
-    // Suporte da Elo pode entrar mesmo com o restaurante suspenso.
-    if (user.impersonatedBy) return true;
+    // Elo support may enter a suspended restaurant, but not a deleted one.
+    if (user.impersonatedBy) {
+      if (await this.restaurants.isDeleted(user.restaurantId)) throw new ForbiddenException('restaurant_deleted');
+      return true;
+    }
     const state = await this.restaurants.accessStateOf(user.restaurantId);
     if (state === AccessState.Suspended) throw new ForbiddenException('subscription_suspended');
     return true;

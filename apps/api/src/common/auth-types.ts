@@ -1,11 +1,13 @@
 import { Role } from '@elo/core';
 
-/** Conteúdo do JWT dos funcionários. */
+/** Staff JWT payload. */
 export interface JwtUser {
   sub: string;
-  role: Role;
+  roles: Role[];
+  /** Person's name, shown in headers and history records. */
+  name?: string;
   restaurantId: string | null;
   permissions: string[];
-  /** Presente quando a equipe Elo entra no painel de um restaurante: id de quem entrou ('superadmin' ou usuário). */
+  /** Set when the Elo team enters a restaurant panel: id of who entered ('superadmin' or a user id). */
   impersonatedBy?: string;
 }

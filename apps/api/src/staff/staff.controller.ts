@@ -1,10 +1,18 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Permission, Role } from '@elo/core';
+import { canGrant, Permission, Role, withRequired } from '@elo/core';
 import { CurrentUser, NoImpersonation, RequirePermission, Roles, TenantId } from '../common/decorators';
 import { StaffService } from './staff.service';
 import type { JwtUser } from '../common/auth-types';
-import { ChangePasswordDto, CreateEloStaffDto, CreateRestaurantStaffDto, ResetPasswordDto, SetActiveDto } from './staff.dto';
+import {
+  ChangePasswordDto,
+  CreateEloStaffDto,
+  CreateRestaurantStaffDto,
+  ResetPasswordDto,
+  SetActiveDto,
+  UpdateEloStaffDto,
+  UpdateRestaurantStaffDto,
+} from './staff.dto';
 
 @ApiTags('staff')
 @ApiBearerAuth()
@@ -21,19 +29,38 @@ export class StaffController {
   @Roles(Role.RestaurantAdmin)
   @Post()
   create(@TenantId() restaurantId: string, @Body() dto: CreateRestaurantStaffDto) {
-    return this.staff.create({ restaurantId, ...dto, role: dto.role as Role });
+    return this.staff.create({ restaurantId, ...dto });
+  }
+
+  @Roles(Role.RestaurantAdmin)
+  @Patch(':id')
+  update(
+    @TenantId() restaurantId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtUser,
+    @Body() dto: UpdateRestaurantStaffDto,
+  ) {
+    return this.staff.update(id, restaurantId, actor, dto);
+  }
+
+  @Roles(Role.RestaurantAdmin)
+  @HttpCode(204)
+  @Delete(':id')
+  archive(@TenantId() restaurantId: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser) {
+    return this.staff.archive(id, restaurantId, actor);
   }
 
   @Roles(Role.RestaurantAdmin)
   @NoImpersonation()
   @HttpCode(204)
   @Patch(':id/password')
-  async resetPassword(
+  resetPassword(
     @TenantId() restaurantId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtUser,
     @Body() dto: ResetPasswordDto,
   ) {
-    if (!(await this.staff.resetPassword(id, restaurantId, dto.password))) throw new NotFoundException();
+    return this.staff.resetPassword(id, restaurantId, actor, dto.password);
   }
 
   @Roles(Role.RestaurantAdmin)
@@ -41,9 +68,10 @@ export class StaffController {
   async setActive(
     @TenantId() restaurantId: string,
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtUser,
     @Body() dto: SetActiveDto,
   ) {
-    if (!(await this.staff.setActive(id, restaurantId, dto.active))) throw new NotFoundException();
+    await this.staff.setActive(id, restaurantId, actor, dto.active);
     return { ok: true };
   }
 }
@@ -68,7 +96,7 @@ export class MeController {
 @ApiTags('admin-staff')
 @ApiBearerAuth()
 @Roles(Role.Superadmin, Role.EloAdmin)
-@RequirePermission(Permission.Settings)
+@RequirePermission(Permission.TeamManage)
 @Controller('admin/staff')
 export class EloStaffController {
   constructor(private readonly staff: StaffService) {}
@@ -79,25 +107,50 @@ export class EloStaffController {
   }
 
   @Post()
-  create(@Body() dto: CreateEloStaffDto) {
+  create(@Body() dto: CreateEloStaffDto, @CurrentUser() actor: JwtUser) {
     return this.staff.create({
       restaurantId: null,
       username: dto.username,
       password: dto.password,
-      role: Role.EloAdmin,
-      permissions: dto.permissions,
+      name: dto.name,
+      roles: [Role.EloAdmin],
+      permissions: grantable(actor, dto.permissions),
+    });
+  }
+
+  @Patch(':id')
+  update(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser, @Body() dto: UpdateEloStaffDto) {
+    if (dto.permissions && actor.sub === id) throw new ForbiddenException('self');
+    return this.staff.update(id, null, actor, {
+      name: dto.name,
+      ...(dto.permissions ? { permissions: grantable(actor, dto.permissions) } : {}),
     });
   }
 
   @HttpCode(204)
   @Patch(':id/password')
-  async resetPassword(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ResetPasswordDto) {
-    if (!(await this.staff.resetPassword(id, null, dto.password))) throw new NotFoundException();
+  resetPassword(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser, @Body() dto: ResetPasswordDto) {
+    return this.staff.resetPassword(id, null, actor, dto.password);
   }
 
   @Patch(':id/active')
-  async setActive(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetActiveDto) {
-    if (!(await this.staff.setActive(id, null, dto.active))) throw new NotFoundException();
+  async setActive(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser, @Body() dto: SetActiveDto) {
+    await this.staff.setActive(id, null, actor, dto.active);
     return { ok: true };
   }
+
+  @HttpCode(204)
+  @Delete(':id')
+  archive(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser) {
+    return this.staff.archive(id, null, actor);
+  }
+}
+
+/** Adds what each permission depends on, then refuses anything the actor may not hand out. */
+function grantable(actor: JwtUser, requested: string[]): string[] {
+  const perms = withRequired(requested);
+  const superadmin = actor.roles.includes(Role.Superadmin);
+  const denied = perms.filter((p) => !canGrant({ superadmin, permissions: actor.permissions }, p));
+  if (denied.length) throw new ForbiddenException({ statusCode: 403, message: 'cannot_grant', permissions: denied });
+  return perms;
 }

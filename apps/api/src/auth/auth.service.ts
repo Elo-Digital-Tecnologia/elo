@@ -5,7 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { IsNull, Repository } from 'typeorm';
-import { ALL_PERMISSIONS, EloStaffRoles, Role } from '@elo/core';
+import { ALL_PERMISSIONS, EloStaffRoles, hasAnyRole, Role } from '@elo/core';
 import { Restaurant, StaffUser } from '../database/entities';
 import type { JwtUser } from '../common/auth-types';
 import type { Env } from '../config/env';
@@ -25,14 +25,14 @@ export class AuthService {
   /** Login da equipe de um restaurante: o usuário só vale dentro do restaurante do endereço. */
   async restaurantLogin(slug: string, username: string, password: string): Promise<{ accessToken: string }> {
     const restaurant = await this.restaurants.findOne({ where: { slug } });
-    const user = restaurant ? await this.users.findOne({ where: { username, restaurantId: restaurant.id } }) : null;
-    return this.check(user, password, (u) => !EloStaffRoles.includes(u.role));
+    const user = restaurant ? await this.users.findOne({ where: { username, restaurantId: restaurant.id, deletedAt: IsNull() } }) : null;
+    return this.check(user, password, (u) => !hasAnyRole(u.roles, EloStaffRoles));
   }
 
   /** Login da equipe Elo Digital (sem restaurante). */
   async teamLogin(username: string, password: string): Promise<{ accessToken: string }> {
-    const user = await this.users.findOne({ where: { username, restaurantId: IsNull() } });
-    return this.check(user, password, (u) => EloStaffRoles.includes(u.role));
+    const user = await this.users.findOne({ where: { username, restaurantId: IsNull(), deletedAt: IsNull() } });
+    return this.check(user, password, (u) => hasAnyRole(u.roles, EloStaffRoles));
   }
 
   /** Mesma resposta e mesmo custo de hash para usuário ou restaurante inexistente, senha errada e conta inativa. */
@@ -41,7 +41,8 @@ export class AuthService {
     if (!user || !ok || !user.active || !roleOk(user)) throw new UnauthorizedException('invalid_credentials');
     return this.sign({
       sub: user.id,
-      role: user.role,
+      roles: user.roles,
+      name: user.name,
       restaurantId: user.restaurantId,
       permissions: user.permissions,
     });
@@ -56,7 +57,8 @@ export class AuthService {
     }
     return this.sign({
       sub: 'superadmin',
-      role: Role.Superadmin,
+      roles: [Role.Superadmin],
+      name: 'Superadmin',
       restaurantId: null,
       permissions: ALL_PERMISSIONS,
     });
