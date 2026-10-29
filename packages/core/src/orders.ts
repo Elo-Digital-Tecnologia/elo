@@ -20,6 +20,17 @@ export function nextOrderStatus(status: OrderStatus): OrderStatus | null {
   return NEXT[status] ?? null;
 }
 
+const PREVIOUS: Partial<Record<OrderStatus, OrderStatus>> = {
+  received: 'sent',
+  preparing: 'received',
+  ready: 'preparing',
+};
+
+/** One step back, for a status advanced by mistake. */
+export function previousOrderStatus(status: OrderStatus): OrderStatus | null {
+  return PREVIOUS[status] ?? null;
+}
+
 export const TableState = {
   Closed: 'closed',
   PendingOpen: 'pending_open',

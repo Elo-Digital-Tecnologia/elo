@@ -10,3 +10,5 @@ export * from './bill';
 export * from './api-types';
 export * from './catalog';
 export * from './open-status';
+export * from './staff-rules';
+export * from './duration';

@@ -1,6 +1,7 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
 import type { OpeningHours, OpenStatus } from './open-status';
+import type { Role } from './roles';
 import type { AccessState } from './subscription';
 
 export interface OptionChoice {
@@ -62,6 +63,8 @@ export interface TableView {
   name: string;
   state: TableState;
   waiterId: string | null;
+  /** Full name of the waiter serving the table. */
+  waiterName?: string | null;
   /** Só para administrador do restaurante. */
   token?: string;
 }
@@ -87,7 +90,7 @@ export interface PublicMenuView {
 export interface SessionStateView {
   readOnly: false;
   restaurant: { name: string; slug: string; serviceFeeBps: number; wifi: { name: string | null; password: string | null } | null } & RestaurantProfileView;
-  table: { name: string; state: TableState };
+  table: { name: string; state: TableState; waiterName: string | null };
   orders: OrderView[];
   menu: CategoryView[];
 }
@@ -155,6 +158,26 @@ export interface ReportView {
   topProducts: { name: string; quantity: number; revenueCents: number }[];
 }
 
+export interface StaffPerformanceRow {
+  id: string;
+  name: string;
+  roles: Role[];
+  archived: boolean;
+  callsAnswered: number;
+  /** Average seconds from the guest's call to a waiter taking it; null without calls. */
+  avgCallSeconds: number | null;
+  tablesOpened: number;
+  /** Average seconds from the opening request to the waiter's validation. */
+  avgOpenSeconds: number | null;
+  tablesClosed: number;
+}
+
+export interface StaffReportView {
+  from: string;
+  to: string;
+  rows: StaffPerformanceRow[];
+}
+
 /** Dados completos do restaurante para o painel. */
 export interface RestaurantSettingsView extends RestaurantProfileView {
   wifiName: string | null;
@@ -175,4 +198,32 @@ export interface ReviewSummaryView {
   /** Média de 1 a 5 com uma casa; 0 sem avaliações. */
   average: number;
   reviews: ReviewView[];
+}
+
+/** Filters of the Elo restaurant list. `attention` = in grace or suspended. */
+export const RESTAURANT_LIST_STATUSES = ['active', 'grace', 'suspended', 'attention', 'deleted'] as const;
+export type RestaurantListStatus = (typeof RESTAURANT_LIST_STATUSES)[number];
+
+export interface RestaurantListItem {
+  id: string;
+  slug: string;
+  name: string;
+  managerName: string;
+  managerContact: string;
+  dueDate: string;
+  suspended: boolean;
+  createdAt: string;
+  subscription: SubscriptionView;
+  deletedAt: string | null;
+  /** When the data of a deleted restaurant is erased for good. */
+  purgeAt: string | null;
+}
+
+export interface RestaurantListView {
+  items: RestaurantListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Totals per status, ignoring the status filter, for the filter chips. `deleted` only for who may see it. */
+  counts: { all: number; active: number; grace: number; suspended: number; deleted?: number };
 }

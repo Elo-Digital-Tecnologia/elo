@@ -2,7 +2,11 @@ import { openStatus } from './open-status';
 import { cancellationRule, returnRule } from './cancellation';
 import { calculateBill, splitBillByItems, splitBillEqually } from './bill';
 import { canTransitionTable, canWaiterClose } from './table-state';
-import { Role } from './roles';
+import { Role, rolesOf } from './roles';
+import { staffRule } from './staff-rules';
+import { previousOrderStatus } from './orders';
+import { formatDuration } from './duration';
+import { canGrant, upgradePermissions, withRequired } from './permissions';
 
 describe('cancellationRule', () => {
   it('customer only before preparing', () => {
@@ -10,7 +14,7 @@ describe('cancellationRule', () => {
     expect(cancellationRule({ kind: 'customer' }, 'preparing')).toMatchObject({ allowed: false });
   });
   it('waiter: own table, reason required, notifies kitchen when preparing', () => {
-    const w = { kind: 'staff', role: Role.Waiter, managesTable: true } as const;
+    const w = { kind: 'staff', roles: [Role.Waiter], managesTable: true } as const;
     expect(cancellationRule(w, 'preparing')).toEqual({
       allowed: true,
       reasonRequired: true,
@@ -22,14 +26,14 @@ describe('cancellationRule', () => {
     });
   });
   it('admin cancels up to preparing; after ready only a return is possible', () => {
-    const a = { kind: 'staff', role: Role.RestaurantAdmin } as const;
+    const a = { kind: 'staff', roles: [Role.RestaurantAdmin] } as const;
     expect(cancellationRule(a, 'preparing')).toMatchObject({ allowed: true, reasonRequired: true });
     expect(cancellationRule(a, 'ready')).toEqual({ allowed: false, why: 'use_return' });
     expect(cancellationRule(a, 'cancelled')).toMatchObject({ allowed: false });
     expect(cancellationRule(a, 'returned')).toMatchObject({ allowed: false });
   });
   it('kitchen/cashier cannot cancel', () => {
-    expect(cancellationRule({ kind: 'staff', role: Role.Kitchen }, 'sent')).toMatchObject({
+    expect(cancellationRule({ kind: 'staff', roles: [Role.Kitchen] }, 'sent')).toMatchObject({
       allowed: false,
     });
   });
@@ -37,12 +41,12 @@ describe('cancellationRule', () => {
 
 describe('returnRule', () => {
   it('only from ready, with reason, waiter on own table or admin', () => {
-    const w = { kind: 'staff', role: Role.Waiter, managesTable: true } as const;
+    const w = { kind: 'staff', roles: [Role.Waiter], managesTable: true } as const;
     expect(returnRule(w, 'ready')).toEqual({ allowed: true, reasonRequired: true });
     expect(returnRule(w, 'preparing')).toMatchObject({ allowed: false });
     expect(returnRule({ ...w, managesTable: false }, 'ready')).toMatchObject({ allowed: false });
-    expect(returnRule({ kind: 'staff', role: Role.RestaurantAdmin }, 'ready')).toMatchObject({ allowed: true });
-    expect(returnRule({ kind: 'staff', role: Role.Kitchen }, 'ready')).toMatchObject({ allowed: false });
+    expect(returnRule({ kind: 'staff', roles: [Role.RestaurantAdmin] }, 'ready')).toMatchObject({ allowed: true });
+    expect(returnRule({ kind: 'staff', roles: [Role.Kitchen] }, 'ready')).toMatchObject({ allowed: false });
     expect(returnRule({ kind: 'customer' }, 'ready')).toMatchObject({ allowed: false });
   });
 });
@@ -138,5 +142,73 @@ describe('openStatus', () => {
   });
   it('semana toda fechada', () => {
     expect(openStatus([null, null, null, null, null, null, null], new Date(), TZ)).toEqual({ open: false, label: 'Fechado' });
+  });
+});
+
+describe('staffRule', () => {
+  const admin = { sub: 'a', roles: [Role.RestaurantAdmin] };
+  const otherAdmin = { id: 'b', roles: [Role.RestaurantAdmin, Role.Waiter] };
+  const waiter = { id: 'w', roles: [Role.Waiter] };
+  it('an admin manages non-admins but never another admin', () => {
+    expect(staffRule(admin, waiter, 'archive')).toEqual({ allowed: true });
+    expect(staffRule(admin, otherAdmin, 'reset_password')).toEqual({ allowed: false, why: 'other_admin' });
+    expect(staffRule({ ...admin, impersonatedBy: 'superadmin' }, otherAdmin, 'archive', { activeAdmins: 2 })).toEqual({ allowed: true });
+  });
+  it('nobody archives, deactivates or changes the roles of their own account', () => {
+    const me = { id: 'a', roles: admin.roles };
+    expect(staffRule(admin, me, 'edit')).toEqual({ allowed: true });
+    for (const a of ['archive', 'set_active', 'change_roles', 'reset_password'] as const) {
+      expect(staffRule(admin, me, a)).toEqual({ allowed: false, why: 'self' });
+    }
+  });
+  it('the restaurant keeps one active admin', () => {
+    const support = { sub: 'elo:x', roles: [Role.RestaurantAdmin], impersonatedBy: 'x' };
+    expect(staffRule(support, otherAdmin, 'archive', { activeAdmins: 1 })).toEqual({ allowed: false, why: 'last_admin' });
+    expect(staffRule(support, otherAdmin, 'change_roles', { activeAdmins: 1, nextRoles: [Role.Waiter] })).toEqual({ allowed: false, why: 'last_admin' });
+    expect(staffRule(support, otherAdmin, 'change_roles', { activeAdmins: 1, nextRoles: [Role.RestaurantAdmin] })).toEqual({ allowed: true });
+  });
+});
+
+describe('order status steps', () => {
+  it('goes back one step and never past sent or out of a closed status', () => {
+    expect(previousOrderStatus('ready')).toBe('preparing');
+    expect(previousOrderStatus('received')).toBe('sent');
+    expect(previousOrderStatus('sent')).toBeNull();
+    expect(previousOrderStatus('cancelled')).toBeNull();
+  });
+  it('rolesOf reads tokens issued with a single role', () => {
+    expect(rolesOf({ role: Role.Waiter })).toEqual([Role.Waiter]);
+    expect(rolesOf({ roles: [Role.Kitchen, Role.Cashier] })).toEqual([Role.Kitchen, Role.Cashier]);
+  });
+});
+
+describe('formatDuration', () => {
+  it('picks the unit that reads best', () => {
+    expect(formatDuration(null)).toBe('—');
+    expect(formatDuration(42)).toBe('42 s');
+    expect(formatDuration(185)).toBe('3 min');
+    expect(formatDuration(3900)).toBe('1 h 05 min');
+  });
+});
+
+describe('permissions', () => {
+  it('adds what each permission depends on', () => {
+    expect(withRequired(['payments.record'])).toEqual(['restaurants.view', 'payments.view', 'payments.record']);
+    expect(withRequired(['team.manage'])).toEqual(['team.manage']);
+  });
+  it('reads the names used before the split', () => {
+    expect(upgradePermissions(['subscriptions', 'access_control'])).toEqual([
+      'restaurants.view',
+      'restaurants.suspend',
+      'payments.view',
+      'payments.record',
+    ]);
+    expect(upgradePermissions(['settings', 'restaurants.view'])).toEqual(['restaurants.view', 'team.manage']);
+  });
+  it('only the superadmin grants deletion; others grant what they hold', () => {
+    expect(canGrant({ superadmin: true, permissions: [] }, 'restaurants.delete')).toBe(true);
+    expect(canGrant({ superadmin: false, permissions: ['restaurants.delete'] }, 'restaurants.delete')).toBe(false);
+    expect(canGrant({ superadmin: false, permissions: ['payments.view'] }, 'payments.view')).toBe(true);
+    expect(canGrant({ superadmin: false, permissions: ['payments.view'] }, 'payments.record')).toBe(false);
   });
 });

@@ -3,7 +3,9 @@ import type { OrderStatus } from './orders';
 
 export type CancelActor =
   | { kind: 'customer' }
-  | { kind: 'staff'; role: Role; managesTable?: boolean };
+  | { kind: 'staff'; roles: readonly Role[]; managesTable?: boolean };
+
+const MANAGERS: Role[] = [Role.RestaurantAdmin, Role.EloAdmin, Role.Superadmin];
 
 export type CancelDecision =
   | { allowed: true; reasonRequired: boolean; notifyKitchen: boolean }
@@ -26,15 +28,11 @@ export function cancellationRule(actor: CancelActor, status: OrderStatus): Cance
       ? { allowed: true, reasonRequired: false, notifyKitchen }
       : { allowed: false, why: 'preparation_started' };
   }
-  if (actor.role === Role.Waiter) {
-    if (!actor.managesTable) return { allowed: false, why: 'not_your_table' };
+  if (actor.roles.some((r) => MANAGERS.includes(r))) {
     return { allowed: true, reasonRequired: true, notifyKitchen };
   }
-  if (
-    actor.role === Role.RestaurantAdmin ||
-    actor.role === Role.EloAdmin ||
-    actor.role === Role.Superadmin
-  ) {
+  if (actor.roles.includes(Role.Waiter)) {
+    if (!actor.managesTable) return { allowed: false, why: 'not_your_table' };
     return { allowed: true, reasonRequired: true, notifyKitchen };
   }
   return { allowed: false, why: 'role_not_allowed' };
@@ -50,9 +48,9 @@ export type ReturnDecision = { allowed: true; reasonRequired: true } | { allowed
 export function returnRule(actor: CancelActor, status: OrderStatus): ReturnDecision {
   if (status !== 'ready') return { allowed: false, why: 'not_ready' };
   if (actor.kind === 'customer') return { allowed: false, why: 'role_not_allowed' };
-  if (actor.role === Role.Waiter) {
+  if (actor.roles.includes(Role.RestaurantAdmin)) return { allowed: true, reasonRequired: true };
+  if (actor.roles.includes(Role.Waiter)) {
     return actor.managesTable ? { allowed: true, reasonRequired: true } : { allowed: false, why: 'not_your_table' };
   }
-  if (actor.role === Role.RestaurantAdmin) return { allowed: true, reasonRequired: true };
   return { allowed: false, why: 'role_not_allowed' };
 }
