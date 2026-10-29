@@ -32,14 +32,14 @@ export class TablesController {
   @Roles(Role.RestaurantAdmin, Role.Waiter, Role.Cashier, Role.Kitchen)
   @Get()
   async list(@TenantId() rid: string, @CurrentUser() user: JwtUser) {
-    const rows = await this.tables.list(rid);
-    return rows.map((t) => view(t as never, user.role === Role.RestaurantAdmin));
+    const rows = await this.tables.withWaiterNames(await this.tables.list(rid));
+    return rows.map((t) => view(t as never, user.roles.includes(Role.RestaurantAdmin)));
   }
 
   @Roles(Role.Waiter, Role.RestaurantAdmin)
   @Get('pending')
   async pending(@TenantId() rid: string) {
-    return (await this.tables.pending(rid)).map((t) => view(t as never, false));
+    return (await this.tables.withWaiterNames(await this.tables.pending(rid))).map((t) => view(t as never, false));
   }
 
   @Roles(Role.RestaurantAdmin)
@@ -68,19 +68,26 @@ export class TablesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: JwtUser,
   ) {
-    return view((await this.tables.validateOpen(rid, id, user.sub)) as never, false);
+    return view((await this.tables.validateOpen(rid, id, user)) as never, false);
   }
 
   @Roles(Role.Waiter)
   @Post(':id/reject-open')
-  async rejectOpen(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
-    return view((await this.tables.rejectOpen(rid, id)) as never, false);
+  async rejectOpen(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return view((await this.tables.rejectOpen(rid, id, user)) as never, false);
   }
 
   @Roles(Role.Waiter)
   @Post(':id/close')
-  async close(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
-    return view((await this.tables.close(rid, id)) as never, false);
+  async close(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return view((await this.tables.close(rid, id, user)) as never, false);
+  }
+
+  /** Shift change: the waiter becomes responsible for the table. */
+  @Roles(Role.Waiter)
+  @Post(':id/take')
+  async take(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return view((await this.tables.take(rid, id, user)) as never, false);
   }
 }
 
@@ -88,7 +95,7 @@ export class TablesController {
 @ApiTags('admin-tables')
 @ApiBearerAuth()
 @Roles(Role.Superadmin, Role.EloAdmin)
-@RequirePermission(Permission.TableTokens)
+@RequirePermission(Permission.RestaurantsTables)
 @Controller('admin/restaurants/:restaurantId/tables')
 export class AdminTablesController {
   constructor(private readonly tables: TablesService) {}

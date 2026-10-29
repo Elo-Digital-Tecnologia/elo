@@ -1,7 +1,8 @@
 import { Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@elo/core';
-import { Roles, TenantId } from '../common/decorators';
+import { CurrentUser, Roles, TenantId } from '../common/decorators';
+import type { JwtUser } from '../common/auth-types';
 import { CallsService } from './calls.service';
 
 @ApiTags('calls')
@@ -17,7 +18,7 @@ export class CallsController {
   }
 
   @Post(':id/resolve')
-  resolve(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
-    return this.calls.resolve(rid, id);
+  resolve(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return this.calls.resolve(rid, id, user);
   }
 }

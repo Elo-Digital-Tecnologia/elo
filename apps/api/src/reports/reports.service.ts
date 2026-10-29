@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import type { ReportView } from '@elo/core';
+import type { ReportView, StaffPerformanceRow, StaffReportView } from '@elo/core';
 import type { Env } from '../config/env';
 import { daysBetween, fillDays, fillHours } from './report-shape';
 
@@ -21,7 +21,8 @@ export class ReportsService {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
-  async build(rid: string, from?: string, to?: string): Promise<ReportView> {
+  /** Calendar days in the restaurant time zone; the last 30 days by default. */
+  private async period(from?: string, to?: string) {
     const tz = this.config.get('REPORT_TZ', { infer: true });
     const [today] = await this.db.query(`SELECT (now() AT TIME ZONE $1)::date::text AS d`, [tz]);
     const end = to ?? today.d;
@@ -29,6 +30,53 @@ export class ReportsService {
       from ?? new Date(Date.parse(`${end}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
     if (start > end) throw new BadRequestException('invalid_period');
     if (daysBetween(start, end) > MAX_DAYS) throw new BadRequestException('period_too_long');
+    return { start, end, tz };
+  }
+
+  /**
+   * Per-person service numbers: calls answered, tables opened and closed, and
+   * how long guests waited. Archived members show up only when they have
+   * activity in the period.
+   */
+  async staff(rid: string, from?: string, to?: string): Promise<StaffReportView> {
+    const { start, end, tz } = await this.period(from, to);
+    const within = (col: string) =>
+      `${col} >= ($2::date)::timestamp AT TIME ZONE $4 AND ${col} < (($3::date) + 1)::timestamp AT TIME ZONE $4`;
+    const rows = await this.db.query(
+      `WITH calls AS (
+         SELECT resolved_by AS id, COUNT(*)::int AS n, AVG(EXTRACT(EPOCH FROM resolved_at - created_at))::float AS secs
+         FROM waiter_calls WHERE restaurant_id = $1 AND resolved_by IS NOT NULL AND ${within('resolved_at')} GROUP BY 1
+       ), opened AS (
+         SELECT opened_by AS id, COUNT(*)::int AS n,
+                AVG(EXTRACT(EPOCH FROM opened_at - open_requested_at)) FILTER (WHERE open_requested_at IS NOT NULL)::float AS secs
+         FROM table_sessions WHERE restaurant_id = $1 AND opened_by IS NOT NULL AND ${within('opened_at')} GROUP BY 1
+       ), closed AS (
+         SELECT closed_by AS id, COUNT(*)::int AS n
+         FROM table_sessions WHERE restaurant_id = $1 AND closed_by IS NOT NULL AND closed_reason = 'closed' AND ${within('closed_at')} GROUP BY 1
+       )
+       SELECT u.id, u.name, u.roles, u.deleted_at IS NOT NULL AS archived,
+              COALESCE(c.n, 0) AS "callsAnswered", c.secs AS "avgCallSeconds",
+              COALESCE(o.n, 0) AS "tablesOpened", o.secs AS "avgOpenSeconds",
+              COALESCE(cl.n, 0) AS "tablesClosed"
+       FROM staff_users u
+       LEFT JOIN calls c ON c.id = u.id
+       LEFT JOIN opened o ON o.id = u.id
+       LEFT JOIN closed cl ON cl.id = u.id
+       WHERE u.restaurant_id = $1
+         AND (u.deleted_at IS NULL OR c.n IS NOT NULL OR o.n IS NOT NULL OR cl.n IS NOT NULL)
+       ORDER BY COALESCE(c.n, 0) + COALESCE(o.n, 0) + COALESCE(cl.n, 0) DESC, u.name ASC`,
+      [rid, start, end, tz],
+    );
+    const round = (n: number | null) => (n === null ? null : Math.round(n));
+    return {
+      from: start,
+      to: end,
+      rows: (rows as StaffPerformanceRow[]).map((r) => ({ ...r, avgCallSeconds: round(r.avgCallSeconds), avgOpenSeconds: round(r.avgOpenSeconds) })),
+    };
+  }
+
+  async build(rid: string, from?: string, to?: string): Promise<ReportView> {
+    const { start, end, tz } = await this.period(from, to);
 
     // $1 restaurante, $2 início (dia), $3 fim (dia, inclusivo), $4 fuso.
     const params = [rid, start, end, tz];

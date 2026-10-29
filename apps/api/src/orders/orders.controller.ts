@@ -25,6 +25,12 @@ export class OrdersController {
     return this.orders.advance(rid, id, dto.status);
   }
 
+  @Roles(Role.Kitchen, Role.RestaurantAdmin)
+  @Patch(':id/revert')
+  revert(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.orders.revert(rid, id);
+  }
+
   @Roles(Role.Waiter, Role.RestaurantAdmin)
   @Post(':id/cancel')
   cancel(@CurrentUser() user: JwtUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelStaffDto) {

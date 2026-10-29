@@ -22,6 +22,11 @@ export class TableSession {
   @Column({ type: 'timestamptz' }) expiresAt: Date;
   @Column({ type: 'timestamptz', nullable: true }) closedAt: Date | null;
   @Column({ type: 'varchar', nullable: true }) closedReason: SessionClosedReason | null;
+  @Column({ type: 'timestamptz', nullable: true }) openRequestedAt: Date | null;
+  @Column({ type: 'timestamptz', nullable: true }) openedAt: Date | null;
+  @Column({ type: 'uuid', nullable: true }) openedBy: string | null;
+  @Column({ type: 'timestamptz', nullable: true }) closeRequestedAt: Date | null;
+  @Column({ type: 'uuid', nullable: true }) closedBy: string | null;
   /** Taxa de serviço removida: pelo cliente (recusa) ou por funcionário. */
   @Column({ type: 'varchar', nullable: true }) feeWaivedBy: FeeWaivedBy | null;
   /** Ajustes manuais da conta (desconto/acréscimo), feitos por garçom ou caixa. */

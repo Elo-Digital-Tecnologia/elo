@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus, returnRule } from '@elo/core';
+import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus, previousOrderStatus, returnRule } from '@elo/core';
 import { TenantRepo } from '../common/tenant-repo';
 import type { JwtUser } from '../common/auth-types';
 import { Order } from '../database/entities';
@@ -65,7 +65,13 @@ export class OrdersService {
       .orderBy('o.createdAt', 'DESC')
       .take(q.limit ?? 300)
       .getMany();
-    return rows.reverse();
+    return this.withTableNames(rid, rows.reverse());
+  }
+
+  /** Staff screens identify orders by table; the name travels with every order they receive. */
+  private async withTableNames(rid: string, rows: Order[]) {
+    const names = new Map((await this.tables.list(rid)).map((t) => [t.id, t.name]));
+    return rows.map((o) => ({ ...o, tableName: names.get(o.tableId) }));
   }
 
   /** Pedidos que contam na conta: tudo da sessão menos cancelados e devolvidos. */
@@ -79,14 +85,28 @@ export class OrdersService {
     return rows;
   }
 
-  /** Só a cozinha avança, um passo por vez. */
+  /** Only the kitchen moves an order, one step at a time. */
   async advance(rid: string, id: string, to: OrderStatus): Promise<Order> {
     const order = await this.get(rid, id);
     if (nextOrderStatus(order.status) !== to) throw new ConflictException('invalid_status_transition');
-    order.status = to;
-    const saved = await this.scoped(rid).save(order);
+    return this.step(order, to);
+  }
+
+  /** Undoes one step marked by mistake; the guest sees the corrected status. */
+  async revert(rid: string, id: string): Promise<Order> {
+    const order = await this.get(rid, id);
+    const to = previousOrderStatus(order.status);
+    if (!to) throw new ConflictException('invalid_status_transition');
+    return this.step(order, to);
+  }
+
+  /** Guarded by the status read, so two kitchen screens cannot apply the same step twice. */
+  private async step(order: Order, to: OrderStatus): Promise<Order> {
+    const result = await this.orders.update({ id: order.id, restaurantId: order.restaurantId, status: order.status }, { status: to });
+    if (!result.affected) throw new ConflictException('invalid_status_transition');
+    const saved = await this.get(order.restaurantId, order.id);
     await this.emit('order.updated', saved);
-    return saved;
+    return (await this.withTableNames(order.restaurantId, [saved]))[0];
   }
 
   async cancelByCustomer(ctx: SessionContext, id: string, reason?: string) {
@@ -101,7 +121,7 @@ export class OrdersService {
     const table = await this.tables.get(rid, order.tableId);
     return this.cancel(
       order,
-      { kind: 'staff', role: user.role, managesTable: table.waiterId === user.sub },
+      { kind: 'staff', roles: user.roles, managesTable: table.waiterId === user.sub },
       reason,
     );
   }
@@ -112,7 +132,7 @@ export class OrdersService {
     const order = await this.get(rid, id);
     const table = await this.tables.get(rid, order.tableId);
     const decision = returnRule(
-      { kind: 'staff', role: user.role, managesTable: table.waiterId === user.sub },
+      { kind: 'staff', roles: user.roles, managesTable: table.waiterId === user.sub },
       order.status,
     );
     if (!decision.allowed) throw new ForbiddenException(decision.why);

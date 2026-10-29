@@ -164,7 +164,7 @@ export class PublicController {
         // Só quem está numa mesa recebe o Wi-Fi; o link de consulta nunca.
         wifi: restaurant.wifiName || restaurant.wifiPassword ? { name: restaurant.wifiName, password: restaurant.wifiPassword } : null,
       },
-      table: { name: table.name, state: table.state },
+      table: { name: table.name, state: table.state, waiterName: await this.tables.waiterNameOf(table) },
       orders,
       menu: await this.catalog.publicMenu(ctx.restaurantId),
     };

@@ -9,12 +9,14 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import * as QRCode from 'qrcode';
-import { IsNull, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { canTransitionTable, canWaiterClose, TableState } from '@elo/core';
+import type { JwtUser } from '../common/auth-types';
 import { TenantRepo } from '../common/tenant-repo';
 import { DiningTable, Restaurant, type SessionClosedReason, TableSession } from '../database/entities';
 import type { Env } from '../config/env';
 import { RealtimeService } from '../realtime/realtime.service';
+import { StaffService } from '../staff/staff.service';
 
 const newToken = () => randomBytes(24).toString('base64url');
 
@@ -33,6 +35,7 @@ export class TablesService {
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     private readonly realtime: RealtimeService,
     private readonly config: ConfigService<Env, true>,
+    private readonly staff: StaffService,
   ) {}
 
   private scoped(rid: string) {
@@ -105,28 +108,54 @@ export class TablesService {
 
   // ---- garçom ----
 
-  async validateOpen(rid: string, tableId: string, waiterId: string) {
-    const table = await this.transition(rid, tableId, TableState.Open);
-    table.waiterId = waiterId;
-    return this.persist(table);
+  /**
+   * The first waiter to validate wins; anyone else gets 409 `already_handled`
+   * with the winner's name instead of a second, conflicting update.
+   */
+  async validateOpen(rid: string, tableId: string, actor: JwtUser) {
+    const table = await this.move(rid, tableId, [TableState.PendingOpen], TableState.Open, { waiterId: staffId(actor) }, (em) =>
+      this.stampSession(em, tableId, { openedAt: new Date(), openedBy: staffId(actor) }),
+    );
+    if (!table) throw await this.lost(rid, tableId);
+    return this.persist(table, actor);
   }
 
-  /** Garçom recusa o pedido de abertura: mesa volta a fechada e a sessão cai. */
-  async rejectOpen(rid: string, tableId: string) {
-    const table = await this.transition(rid, tableId, TableState.Closed);
-    await this.closeSessions(table.id, 'rejected');
-    table.waiterId = null;
-    return this.persist(table);
+  /** The waiter turns down the opening request: the table goes back to closed and the guest session ends. */
+  async rejectOpen(rid: string, tableId: string, actor: JwtUser) {
+    const table = await this.move(rid, tableId, [TableState.PendingOpen], TableState.Closed, { waiterId: null }, (em) =>
+      this.closeSessions(tableId, 'rejected', staffId(actor), em),
+    );
+    if (!table) throw await this.lost(rid, tableId);
+    return this.persist(table, actor);
   }
 
-  /** Somente o garçom encerra a mesa; a sessão do cliente também termina. */
-  async close(rid: string, tableId: string) {
-    const table = await this.get(rid, tableId);
-    if (!canWaiterClose(table.state)) throw new ConflictException('invalid_table_state');
-    await this.closeSessions(table.id, 'closed');
-    table.state = TableState.Closed;
-    table.waiterId = null;
-    return this.persist(table);
+  /** Only staff close a table; the guest session ends with it. */
+  async close(rid: string, tableId: string, actor: JwtUser) {
+    const table = await this.move(rid, tableId, [TableState.Open, TableState.PendingClose], TableState.Closed, { waiterId: null }, (em) =>
+      this.closeSessions(tableId, 'closed', staffId(actor), em),
+    );
+    if (!table) throw await this.lost(rid, tableId);
+    return this.persist(table, actor);
+  }
+
+  /** Another waiter takes over an open table (shift change); they become the one who can cancel its orders. */
+  async take(rid: string, tableId: string, actor: JwtUser) {
+    const current = await this.get(rid, tableId);
+    if (current.waiterId === staffId(actor)) return current;
+    const table = await this.move(rid, tableId, [TableState.Open, TableState.PendingClose], null, { waiterId: staffId(actor) });
+    if (!table) throw new ConflictException('invalid_table_state');
+    return this.persist(table, actor);
+  }
+
+  /** Adds the full name of the waiter serving each table, for the staff panels. */
+  async withWaiterNames(rows: DiningTable[]) {
+    const names = await this.staff.names(rows.map((t) => t.waiterId));
+    return rows.map((t) => ({ ...t, waiterName: names.get(t.waiterId ?? '')?.name ?? null }));
+  }
+
+  /** Guest-facing name of the waiter serving the table, if any. */
+  async waiterNameOf(table: DiningTable): Promise<string | null> {
+    return (await this.staff.names([table.waiterId])).get(table.waiterId ?? '')?.guestName ?? null;
   }
 
   // ---- cliente ----
@@ -180,12 +209,16 @@ export class TablesService {
   }
 
   async requestOpen(ctx: SessionContext) {
-    const table = await this.transition(ctx.restaurantId, ctx.tableId, TableState.PendingOpen);
+    const table = await this.move(ctx.restaurantId, ctx.tableId, [TableState.Closed], TableState.PendingOpen);
+    if (!table) throw new ConflictException('invalid_table_state');
+    await this.sessions.update({ id: ctx.sessionId }, { openRequestedAt: new Date() });
     return this.persist(table);
   }
 
   async requestClose(ctx: SessionContext) {
-    const table = await this.transition(ctx.restaurantId, ctx.tableId, TableState.PendingClose);
+    const table = await this.move(ctx.restaurantId, ctx.tableId, [TableState.Open], TableState.PendingClose);
+    if (!table) throw new ConflictException('invalid_table_state');
+    await this.sessions.update({ id: ctx.sessionId }, { closeRequestedAt: new Date() });
     return this.persist(table);
   }
 
@@ -210,25 +243,81 @@ export class TablesService {
       .getOne();
   }
 
-  private closeSessions(tableId: string, reason: SessionClosedReason) {
-    return this.sessions.update({ tableId, closedAt: IsNull() }, { closedAt: new Date(), closedReason: reason });
+  private async closeSessions(tableId: string, reason: SessionClosedReason, closedBy: string | null = null, em?: EntityManager) {
+    const repo = em ? em.getRepository(TableSession) : this.sessions;
+    await repo.update({ tableId, closedAt: IsNull() }, { closedAt: new Date(), closedReason: reason, closedBy });
   }
 
-  private async transition(rid: string, tableId: string, to: TableState) {
+  private async stampSession(em: EntityManager, tableId: string, fields: Partial<TableSession>) {
+    await em
+      .getRepository(TableSession)
+      .createQueryBuilder()
+      .update()
+      .set(fields)
+      .where('table_id = :tableId AND closed_at IS NULL AND expires_at > now()', { tableId })
+      .execute();
+  }
+
+  /**
+   * Compare-and-set on the table state: a single UPDATE guarded by the
+   * expected states, so two staff members acting at the same instant cannot
+   * both succeed. Returns null when the table was no longer in `from`.
+   * `to` null keeps the current state and only applies `set`. `alongside`
+   * runs in the same transaction, so whoever loses the race only reads the
+   * table after the winner's session record is committed.
+   */
+  private async move(
+    rid: string,
+    tableId: string,
+    from: TableState[],
+    to: TableState | null,
+    set: Partial<Pick<DiningTable, 'waiterId'>> = {},
+    alongside?: (em: EntityManager) => Promise<unknown>,
+  ): Promise<DiningTable | null> {
+    const allowed = (f: TableState) => !to || canTransitionTable(f, to) || (to === TableState.Closed && canWaiterClose(f));
+    if (!from.every(allowed)) throw new Error(`invalid table transition to ${to}`);
+    const moved = await this.tables.manager.transaction(async (em) => {
+      const result = await em
+        .getRepository(DiningTable)
+        .update({ id: tableId, restaurantId: rid, state: In(from) }, { ...set, ...(to ? { state: to } : {}) });
+      if (!result.affected) return false;
+      await alongside?.(em);
+      return true;
+    });
     const table = await this.get(rid, tableId);
-    if (!canTransitionTable(table.state, to)) throw new ConflictException('invalid_table_state');
-    table.state = to;
-    return table;
+    return moved ? table : null;
   }
 
-  private async persist(table: DiningTable) {
-    const saved = await this.scoped(table.restaurantId).save(table);
+  /** 409 for the staff member who lost the race, naming who handled the table first. */
+  private async lost(rid: string, tableId: string) {
+    const table = await this.get(rid, tableId);
+    const last = await this.sessions.findOne({ where: { tableId }, order: { createdAt: 'DESC' } });
+    const by = table.state === TableState.Closed ? last?.closedBy : last?.openedBy;
+    const name = (await this.staff.names([by])).get(by ?? '')?.name ?? null;
+    return new ConflictException({ statusCode: 409, message: 'already_handled', state: table.state, by: name });
+  }
+
+  private async persist(table: DiningTable, actor?: JwtUser) {
+    const id = actor ? staffId(actor) : null;
+    const names = await this.staff.names([table.waiterId, id]);
     this.realtime.publish({
       type: 'table.updated',
-      restaurantId: saved.restaurantId,
-      tableId: saved.id,
-      payload: { id: saved.id, name: saved.name, state: saved.state, waiterId: saved.waiterId },
+      restaurantId: table.restaurantId,
+      tableId: table.id,
+      payload: {
+        id: table.id,
+        name: table.name,
+        state: table.state,
+        waiterId: table.waiterId,
+        waiterName: names.get(table.waiterId ?? '')?.guestName ?? null,
+        handledBy: id ? { id, name: names.get(id)?.guestName ?? null } : null,
+      },
     });
-    return saved;
+    return table;
   }
+}
+
+/** Elo support inside a restaurant panel has no staff row; only real team members are recorded. */
+function staffId(actor: JwtUser): string | null {
+  return /^[0-9a-f-]{36}$/.test(actor.sub) ? actor.sub : null;
 }

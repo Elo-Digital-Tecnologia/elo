@@ -16,4 +16,9 @@ export class ReportsController {
   get(@TenantId() rid: string, @Query() q: ReportQuery) {
     return this.reports.build(rid, q.from, q.to);
   }
+
+  @Get('staff')
+  staff(@TenantId() rid: string, @Query() q: ReportQuery) {
+    return this.reports.staff(rid, q.from, q.to);
+  }
 }

@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
+import type { JwtUser } from '../common/auth-types';
 import { TenantRepo } from '../common/tenant-repo';
 import { WaiterCall } from '../database/entities';
 import { RealtimeService } from '../realtime/realtime.service';
+import { StaffService } from '../staff/staff.service';
 import { SessionContext, TablesService } from '../tables/tables.service';
 
 @Injectable()
@@ -11,6 +13,7 @@ export class CallsService {
   constructor(
     @InjectRepository(WaiterCall) private readonly calls: Repository<WaiterCall>,
     private readonly tables: TablesService,
+    private readonly staff: StaffService,
     private readonly realtime: RealtimeService,
   ) {}
 
@@ -18,12 +21,12 @@ export class CallsService {
     return new TenantRepo(this.calls, rid);
   }
 
-  /** Idempotente: se já há chamado pendente da mesa, devolve o mesmo. */
+  /** Idempotent: a table with a pending call gets the same call back. */
   async create(ctx: SessionContext): Promise<WaiterCall> {
     const repo = this.scoped(ctx.restaurantId);
     const open = (await repo.find({ tableId: ctx.tableId })).find((c) => !c.resolvedAt);
     if (open) return open;
-    const call = await repo.create({ tableId: ctx.tableId, resolvedAt: null });
+    const call = await repo.create({ tableId: ctx.tableId, resolvedAt: null, resolvedBy: null });
     const table = await this.tables.get(ctx.restaurantId, ctx.tableId);
     this.realtime.publish({
       type: 'call.created',
@@ -39,18 +42,25 @@ export class CallsService {
     return calls.filter((c) => !c.resolvedAt).map((c) => ({ ...c, tableName: names.get(c.tableId) }));
   }
 
-  async resolve(rid: string, id: string) {
-    const repo = this.scoped(rid);
-    const call = await repo.findOne({ id });
+  /**
+   * First to answer wins, in a single guarded UPDATE. The others get 409
+   * `already_handled` with the name of who took the call.
+   */
+  async resolve(rid: string, id: string, actor: JwtUser) {
+    const by = /^[0-9a-f-]{36}$/.test(actor.sub) ? actor.sub : null;
+    const result = await this.calls.update({ id, restaurantId: rid, resolvedAt: IsNull() }, { resolvedAt: new Date(), resolvedBy: by });
+    const call = await this.scoped(rid).findOne({ id });
     if (!call) throw new NotFoundException();
-    call.resolvedAt ??= new Date();
-    const saved = await repo.save(call);
+    const names = await this.staff.names([call.resolvedBy]);
+    if (!result.affected) {
+      throw new ConflictException({ statusCode: 409, message: 'already_handled', by: names.get(call.resolvedBy ?? '')?.name ?? null });
+    }
     this.realtime.publish({
       type: 'call.resolved',
       restaurantId: rid,
       tableId: call.tableId,
-      payload: { id: saved.id },
+      payload: { id: call.id, handledBy: by ? { id: by, name: names.get(by)?.guestName ?? null } : null },
     });
-    return saved;
+    return call;
   }
 }
