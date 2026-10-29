@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsIn,
   IsDate,
   IsInt,
   IsOptional,
@@ -13,7 +14,7 @@ import {
   registerDecorator,
   type ValidationOptions,
 } from 'class-validator';
-import { isHHMM, SLUG_PATTERN } from '@elo/core';
+import { isHHMM, RESTAURANT_LIST_STATUSES, type RestaurantListStatus, SLUG_PATTERN } from '@elo/core';
 import { IMAGE_URL_PATTERN } from '../common/image-url';
 
 /** Texto vazio vira nulo: é como o formulário limpa um campo. */
@@ -72,4 +73,25 @@ export class UpdateSettingsDto {
   @emptyToNull() @IsOptional() @IsString() @MaxLength(60) wifiName?: string | null;
   @emptyToNull() @IsOptional() @IsString() @MaxLength(80) wifiPassword?: string | null;
   @IsOptional() @IsArray() @IsOpeningHours() openingHours?: ({ open: string; close: string } | null)[] | null;
+}
+
+export class EditRestaurantDto {
+  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(2) @MaxLength(120) name?: string;
+  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(2) @MaxLength(120) managerName?: string;
+  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(5) @MaxLength(120) managerContact?: string;
+}
+
+export class RestaurantListQuery {
+  @IsOptional() @IsString() @MaxLength(80) q?: string;
+  @IsOptional() @IsIn(RESTAURANT_LIST_STATUSES) status?: RestaurantListStatus;
+  /** Only restaurants whose payment is due within this many days. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(90) dueWithin?: number;
+  @IsOptional() @IsIn(['name', 'due', 'created']) sort?: 'name' | 'due' | 'created';
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(5) @Max(100) pageSize?: number;
+}
+
+/** Deleting asks for the slug typed back, so a misclick cannot remove a restaurant. */
+export class DeleteRestaurantDto {
+  @IsString() @MaxLength(60) confirmSlug: string;
 }

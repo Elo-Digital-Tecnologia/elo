@@ -2,12 +2,25 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { AccessState, accessState, GRACE_DAYS, isReservedSlug, openStatus, type RestaurantProfileView, Role, slugify } from '@elo/core';
+import { Brackets, Repository, type SelectQueryBuilder } from 'typeorm';
+import {
+  AccessState,
+  accessState,
+  GRACE_DAYS,
+  isReservedSlug,
+  openStatus,
+  type RestaurantListItem,
+  type RestaurantListStatus,
+  type RestaurantListView,
+  type RestaurantProfileView,
+  Role,
+  slugify,
+} from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditLog, Payment, Restaurant } from '../database/entities';
 import { StaffService } from '../staff/staff.service';
+import type { RestaurantListQuery } from './restaurants.dto';
 
 export interface NewRestaurant {
   name: string;
@@ -29,6 +42,18 @@ export interface SubscriptionInfo {
 }
 
 const DAY_MS = 86_400_000;
+
+/** SQL twin of `accessState` from core; `:grace` is `GRACE_DAYS`. */
+const STATUS_SQL: Record<'active' | 'grace' | 'suspended', string> = {
+  active: `(r.suspended = false AND r.dueDate >= now())`,
+  grace: `(r.suspended = false AND r.dueDate < now() AND r.dueDate >= now() - make_interval(days => :grace))`,
+  suspended: `(r.suspended = true OR r.dueDate < now() - make_interval(days => :grace))`,
+};
+
+function applyStatus(qb: SelectQueryBuilder<Restaurant>, status: Exclude<RestaurantListStatus, 'deleted'>) {
+  const sql = status === 'attention' ? `(${STATUS_SQL.grace} OR ${STATUS_SQL.suspended})` : STATUS_SQL[status];
+  qb.andWhere(sql, { grace: GRACE_DAYS });
+}
 
 @Injectable()
 export class RestaurantsService {
@@ -60,7 +85,8 @@ export class RestaurantsService {
     await this.audit.save(this.audit.create({ actor: actor.sub, action: 'restaurant_access', restaurantId: id }));
     const payload: JwtUser = {
       sub: `elo:${actor.sub}`,
-      role: Role.RestaurantAdmin,
+      roles: [Role.RestaurantAdmin],
+      name: `${actor.name ?? 'Equipe'} (Elo Digital)`,
       restaurantId: id,
       permissions: [],
       impersonatedBy: actor.sub,
@@ -72,7 +98,8 @@ export class RestaurantsService {
     const slug = data.slug ?? slugify(data.name);
     if (!slug) throw new ConflictException('invalid_slug');
     if (isReservedSlug(slug)) throw new ConflictException('slug_reserved');
-    if (await this.restaurants.findOne({ where: { slug } })) {
+    // A deleted restaurant keeps its slug until it is purged.
+    if (await this.restaurants.findOne({ where: { slug }, withDeleted: true })) {
       throw new ConflictException('slug_taken');
     }
     const restaurant = await this.restaurants.save(
@@ -89,13 +116,90 @@ export class RestaurantsService {
       restaurantId: restaurant.id,
       username: data.adminUsername,
       password: data.adminPassword,
-      role: Role.RestaurantAdmin,
+      name: data.managerName,
+      roles: [Role.RestaurantAdmin],
     });
     return restaurant;
   }
 
-  list(): Promise<Restaurant[]> {
-    return this.restaurants.find({ order: { name: 'ASC' } });
+  /**
+   * Elo restaurant list: search, subscription status, due soon, sorting and
+   * pages, all in the database so it keeps up as the list grows.
+   */
+  async search(q: RestaurantListQuery, canSeeDeleted: boolean): Promise<RestaurantListView> {
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 20;
+    const base = () => {
+      const qb = this.restaurants.createQueryBuilder('r');
+      const term = q.q?.trim();
+      if (term) {
+        qb.andWhere(
+          new Brackets((w) =>
+            w.where('r.name ILIKE :term', { term: `%${term}%` })
+              .orWhere('r.slug ILIKE :term')
+              .orWhere('r.managerName ILIKE :term'),
+          ),
+        );
+      }
+      if (q.dueWithin) {
+        qb.andWhere(`r.suspended = false AND r.dueDate >= now() AND r.dueDate < now() + make_interval(days => :within)`, { within: q.dueWithin });
+      }
+      return qb;
+    };
+
+    const counted = await base()
+      .withDeleted()
+      .select(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL)::int`, 'all')
+      .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.active})::int`, 'active')
+      .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.grace})::int`, 'grace')
+      .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.suspended})::int`, 'suspended')
+      .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NOT NULL)::int`, 'deleted')
+      .setParameter('grace', GRACE_DAYS)
+      .getRawOne<{ all: number; active: number; grace: number; suspended: number; deleted: number }>();
+
+    const qb = base();
+    if (q.status === 'deleted') qb.withDeleted().andWhere('r.deletedAt IS NOT NULL');
+    else if (q.status) applyStatus(qb, q.status);
+    const order = q.sort === 'due' ? ['r.dueDate', 'ASC'] : q.sort === 'created' ? ['r.createdAt', 'DESC'] : ['r.name', 'ASC'];
+    const [rows, total] = await qb
+      .orderBy(order[0], order[1] as 'ASC' | 'DESC')
+      .addOrderBy('r.name', 'ASC')
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount();
+
+    const { deleted, ...counts } = counted ?? { all: 0, active: 0, grace: 0, suspended: 0, deleted: 0 };
+    return {
+      items: rows.map((r) => this.listItem(r)),
+      total,
+      page,
+      pageSize,
+      counts: canSeeDeleted ? { ...counts, deleted } : counts,
+    };
+  }
+
+  listItem(r: Restaurant): RestaurantListItem {
+    const purgeDays = this.config.get('RESTAURANT_PURGE_DAYS', { infer: true });
+    const sub = this.subscriptionOf(r);
+    return {
+      id: r.id,
+      slug: r.slug,
+      name: r.name,
+      managerName: r.managerName,
+      managerContact: r.managerContact,
+      dueDate: r.dueDate.toISOString(),
+      suspended: r.suspended,
+      createdAt: r.createdAt.toISOString(),
+      subscription: { ...sub, dueDate: sub.dueDate.toISOString(), graceEndsAt: sub.graceEndsAt.toISOString() },
+      deletedAt: r.deletedAt?.toISOString() ?? null,
+      purgeAt: r.deletedAt ? new Date(r.deletedAt.getTime() + purgeDays * DAY_MS).toISOString() : null,
+    };
+  }
+
+  async edit(id: string, data: { name?: string; managerName?: string; managerContact?: string }): Promise<Restaurant> {
+    const r = await this.get(id);
+    Object.assign(r, Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)));
+    return this.restaurants.save(r);
   }
 
   async get(id: string): Promise<Restaurant> {
@@ -110,8 +214,16 @@ export class RestaurantsService {
     return r;
   }
 
+  async isDeleted(restaurantId: string): Promise<boolean> {
+    const r = await this.restaurants.findOne({ where: { id: restaurantId }, withDeleted: true, select: { id: true, deletedAt: true } });
+    return !r || !!r.deletedAt;
+  }
+
+  /** A deleted restaurant counts as suspended: its team is locked out, Elo support included. */
   async accessStateOf(restaurantId: string): Promise<AccessState> {
-    return this.stateOf(await this.get(restaurantId));
+    const r = await this.restaurants.findOne({ where: { id: restaurantId }, withDeleted: true });
+    if (!r) throw new NotFoundException();
+    return r.deletedAt ? AccessState.Suspended : this.stateOf(r);
   }
 
   subscriptionOf(r: Restaurant, now = new Date()): SubscriptionInfo {

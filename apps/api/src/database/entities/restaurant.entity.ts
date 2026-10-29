@@ -1,5 +1,5 @@
 import type { OpeningHours } from '@elo/core';
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('restaurants')
 export class Restaurant {
@@ -25,4 +25,10 @@ export class Restaurant {
   @Column({ type: 'varchar', length: 80, nullable: true }) wifiPassword: string | null;
   @Column({ type: 'jsonb', nullable: true }) openingHours: OpeningHours | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
+  /**
+   * Soft delete: lookups skip the restaurant (menu, logins, sockets) while its
+   * data waits for `RESTAURANT_PURGE_DAYS`. The slug stays taken until then.
+   */
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true }) deletedAt: Date | null;
+  @Column({ type: 'varchar', nullable: true }) deletedBy: string | null;
 }

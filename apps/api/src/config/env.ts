@@ -13,6 +13,8 @@ export interface Env {
   REPORT_TZ: string;
   /** Pasta das imagens enviadas pelos restaurantes. */
   UPLOAD_DIR: string;
+  /** Days a deleted restaurant's data is kept before it is erased for good. */
+  RESTAURANT_PURGE_DAYS: number;
 }
 
 const required = ['DATABASE_URL', 'JWT_SECRET', 'SUPERADMIN_KEY'] as const;
@@ -35,5 +37,13 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
     TABLE_SESSION_HOURS: Number(raw.TABLE_SESSION_HOURS ?? 4),
     REPORT_TZ: raw.REPORT_TZ ?? 'America/Sao_Paulo',
     UPLOAD_DIR: raw.UPLOAD_DIR ?? path.resolve(process.cwd(), 'uploads'),
+    RESTAURANT_PURGE_DAYS: positive(raw.RESTAURANT_PURGE_DAYS, 90, 'RESTAURANT_PURGE_DAYS'),
   };
+}
+
+function positive(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined || value === '') return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive whole number of days`);
+  return n;
 }

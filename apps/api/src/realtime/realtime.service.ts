@@ -24,6 +24,11 @@ export class RealtimeService {
     this.server = server;
   }
 
+  /** Drops the staff sockets of a restaurant; on reconnect the gateway tells them why they are refused. */
+  disconnectRestaurant(restaurantId: string): void {
+    this.server?.in(staffRoom(restaurantId)).disconnectSockets(true);
+  }
+
   publish(event: RealtimeEvent): void {
     if (!this.server) return;
     let target = this.server.to(staffRoom(event.restaurantId));
