@@ -7,6 +7,7 @@ export * from './components/badge';
 export * from './components/states';
 export * from './components/motion';
 export * from './components/modal';
+export * from './components/sheet';
 export * from './components/stat';
 export * from './components/table';
 export * from './components/section';
