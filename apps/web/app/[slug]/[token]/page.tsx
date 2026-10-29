@@ -1,6 +1,6 @@
 'use client';
 
-import { BellRing, Check, Lock, Minus, Plus, Trash2, WifiOff } from 'lucide-react';
+import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Timer, Trash2, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
 import { formatBRL, type ProductView, type SessionStateView } from '@elo/core';
@@ -16,7 +16,7 @@ import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
 import { CartLine, lineUnit, ProductSheet } from '../../_components/product-sheet';
 
-type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'ended' | 'error';
+type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'taken' | 'rejected' | 'expired' | 'ended' | 'error';
 type View = 'menu' | 'orders' | 'bill';
 
 const HINT: Record<string, string> = {
@@ -25,6 +25,10 @@ const HINT: Record<string, string> = {
   open: 'Mesa aberta. Envie a comanda quando quiser.',
   pending_close: 'Conta pedida. O garçom vai fechar a mesa.',
 };
+
+/** O servidor diz por que a sessão caiu; cada motivo tem sua mensagem. */
+const phaseFor = (code: string): Phase =>
+  code === 'session_taken_over' ? 'taken' : code === 'session_rejected' ? 'rejected' : code === 'session_expired' ? 'expired' : 'ended';
 
 const ACTION = 'rounded-[18px] bg-white/95 px-5 py-3 text-sm font-bold text-leaf-700 shadow-sm transition active:scale-95 disabled:opacity-60';
 
@@ -47,7 +51,7 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     try {
       setState(await api<SessionStateView>('/api/public/session'));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setPhase('ended');
+      if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
     }
   }, []);
 
@@ -117,7 +121,7 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       await refresh();
       return true;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401) setPhase('ended');
+      if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
       else setMessage(e instanceof ApiError ? e.code : 'Falha de conexão. Tente de novo.');
       return false;
     } finally {
@@ -134,6 +138,20 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     );
   if (phase === 'invalid') return <Notice title="Link não reconhecido" icon={<Lock size={30} />}>Este QR Code ou tag não é válido. Chame o garçom.</Notice>;
   if (phase === 'in_use') return <Notice title="Mesa em atendimento" icon={<Lock size={30} />}>Esta mesa já está aberta em outro aparelho. Chame o garçom se precisar.</Notice>;
+  const reload = <Button onClick={() => location.reload()}>Recarregar a página</Button>;
+  if (phase === 'taken')
+    return (
+      <Notice title="Mesa aberta em outro aparelho" icon={<Smartphone size={30} />} action={reload}>
+        Outra pessoa abriu o link desta mesa depois de você, e este aparelho foi desconectado. Para pedir por aqui, recarregue a página. Se o outro aparelho já tiver aberto a mesa, chame o garçom.
+      </Notice>
+    );
+  if (phase === 'rejected')
+    return (
+      <Notice title="Abertura não confirmada" icon={<DoorClosed size={30} />} action={reload}>
+        O garçom não confirmou a abertura da mesa. Chame o garçom ou tente abrir de novo.
+      </Notice>
+    );
+  if (phase === 'expired') return <Notice title="Sessão expirada" icon={<Timer size={30} />}>Escaneie o QR Code da mesa de novo para continuar.</Notice>;
   if (phase === 'ended') return <Notice title="Atendimento encerrado" icon={<Check size={30} />}>Obrigado pela visita! Para pedir de novo, escaneie o QR Code da mesa.</Notice>;
   if (phase === 'error' || !state) return <Notice title="Algo deu errado" icon={<WifiOff size={30} />}>Não foi possível carregar o cardápio. Tente de novo em instantes.</Notice>;
 

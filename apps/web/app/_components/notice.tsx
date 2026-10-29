@@ -1,7 +1,7 @@
 import { Logo, ThemeToggle } from '@elo/ui';
 
 /** Aviso de tela cheia: link inválido, mesa em uso, atendimento encerrado, erro. */
-export function Notice({ title, children, icon }: { title: string; children?: React.ReactNode; icon?: React.ReactNode }) {
+export function Notice({ title, children, icon, action }: { title: string; children?: React.ReactNode; icon?: React.ReactNode; action?: React.ReactNode }) {
   return (
     <main className="relative grid min-h-dvh place-items-center px-6 py-10">
       <div className="absolute right-3 top-3"><ThemeToggle className="!h-10 !w-10" /></div>
@@ -10,6 +10,7 @@ export function Notice({ title, children, icon }: { title: string; children?: Re
         {icon && <div className="mx-auto grid h-16 w-16 place-items-center rounded-pill bg-brand/12 text-brand">{icon}</div>}
         <h1 className="font-display text-2xl font-extrabold">{title}</h1>
         {children && <p className="text-muted">{children}</p>}
+        {action}
       </div>
     </main>
   );
