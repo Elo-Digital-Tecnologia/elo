@@ -3,11 +3,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import cookieParser from 'cookie-parser';
 import { io, Socket } from 'socket.io-client';
 import request from 'supertest';
 import sharp from 'sharp';
 import { AppModule } from '../src/app.module';
+import { RestaurantLifecycleService } from '../src/restaurants/restaurant-lifecycle.service';
 
 /**
  * Fluxos críticos contra Postgres real (migrations aplicadas).
@@ -29,7 +31,11 @@ suite('fluxo da mesa (e2e)', () => {
   let slug: string, tableId: string, tableToken: string, productId: string;
 
   beforeAll(async () => {
-    const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    // The suite signs in far more than the 10/min login limit allows from one address.
+    const unlimited: ThrottlerStorage = {
+      increment: async () => ({ totalHits: 1, timeToExpire: 0, isBlocked: false, timeToBlockExpire: 0 }),
+    };
+    const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(ThrottlerStorage).useValue(unlimited).compile();
     app = mod.createNestApplication<NestExpressApplication>();
     app.use(cookieParser());
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
@@ -48,7 +54,7 @@ suite('fluxo da mesa (e2e)', () => {
     slug = r.body.slug;
     admin = await login(`adm${suf}`);
     for (const [u, role] of [['wai', 'waiter'], ['kit', 'kitchen']]) {
-      await http().post('/staff').set('Authorization', `Bearer ${admin}`).send({ username: u + suf, password: 'senha12345', role }).expect(201);
+      await http().post('/staff').set('Authorization', `Bearer ${admin}`).send({ username: u + suf, password: 'senha12345', name: `Pessoa ${u}`, roles: [role] }).expect(201);
     }
     waiter = await login(`wai${suf}`);
     kitchen = await login(`kit${suf}`);
@@ -184,7 +190,7 @@ suite('fluxo da mesa (e2e)', () => {
 
   it('bill: fee refusal, adjustments, return after ready, reports, deactivation, tenant isolation', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
-    await http().post('/staff').set(auth(admin)).send({ username: 'cax' + suf, password: 'senha12345', role: 'cashier' }).expect(201);
+    await http().post('/staff').set(auth(admin)).send({ username: 'cax' + suf, password: 'senha12345', name: 'Caio Caixa', roles: ['cashier'] }).expect(201);
     const cashier = await login(`cax${suf}`);
 
     const s = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
@@ -254,12 +260,12 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post(`/auth/restaurants/${outro.body.slug}/login`).send({ username: `adm${suf}`, password: 'senha12345' }).expect(401);
     await http().post('/auth/restaurants/nao-existe/login').send({ username: `adm${suf}`, password: 'senha12345' }).expect(401);
     await http().post('/auth/team/login').send({ username: `adm${suf}`, password: 'senha12345' }).expect(401);
-    await http().post('/staff').set(auth(other)).send({ username: `adm${suf}`, password: 'senha12345', role: 'waiter' }).expect(201);
-    await http().post('/staff').set(auth(other)).send({ username: `adm${suf}`, password: 'senha12345', role: 'waiter' }).expect(409);
+    await http().post('/staff').set(auth(other)).send({ username: `adm${suf}`, password: 'senha12345', name: 'Outro Garçom', roles: ['waiter'] }).expect(201);
+    await http().post('/staff').set(auth(other)).send({ username: `adm${suf}`, password: 'senha12345', name: 'Outro Garçom', roles: ['waiter'] }).expect(409);
     expect(await login(`adm${suf}`, outro.body.slug)).toBeTruthy();
     // acesso da equipe Elo ao restaurante: exige permissão, vale como admin, não mexe em senhas e é auditado
     const eloUser = `elo${suf}`;
-    await http().post('/admin/staff').set(auth(sa)).send({ username: eloUser, password: 'senha12345', permissions: ['restaurants'] }).expect(201);
+    await http().post('/admin/staff').set(auth(sa)).send({ username: eloUser, name: 'Equipe Elo', password: 'senha12345', permissions: ['restaurants.view'] }).expect(201);
     const eloToken = (await http().post('/auth/team/login').send({ username: eloUser, password: 'senha12345' }).expect(201)).body.accessToken;
     const rid = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body.id;
     await http().post(`/admin/restaurants/${rid}/access`).set(auth(eloToken)).expect(403);
@@ -408,5 +414,171 @@ suite('fluxo da mesa (e2e)', () => {
     expect(sum.reviews[0]).toMatchObject({ stars: 5, comment: 'Ótimo', tableName: 'Mesa 01' });
     await http().get('/reviews').set(auth(waiter)).expect(403);
     await http().post(`/tables/${tableId}/close`).set(auth(waiter)).expect(201);
+  }, 30_000);
+
+  it('equipe: vários perfis, regras entre administradores, disputa entre garçons, arquivamento e desempenho', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const create = (body: Record<string, unknown>) => http().post('/staff').set(auth(admin)).send({ password: 'senha12345', ...body });
+
+    // vários perfis numa pessoa; nome obrigatório
+    await create({ username: `sem${suf}`, roles: ['waiter'] }).expect(400);
+    await create({ username: `vaz${suf}`, name: 'Sem Perfil', roles: [] }).expect(400);
+    await create({ username: `kc${suf}`, name: 'Kátia Cozinha', roles: ['kitchen', 'cashier'] }).expect(201);
+    const kc = await login(`kc${suf}`);
+    await http().get('/bills').set(auth(kc)).expect(200);
+    await http().get('/orders').set(auth(kc)).expect(200);
+    await http().get('/staff').set(auth(kc)).expect(403);
+
+    // administrador não mexe em outro administrador nem arquiva a si mesmo
+    const adm2 = (await create({ username: `ad2${suf}`, name: 'Bruna Gerente', roles: ['restaurant_admin', 'waiter'] }).expect(201)).body;
+    await http().patch(`/staff/${adm2.id}/password`).set(auth(admin)).send({ password: 'trocada12345' }).expect(403);
+    await http().delete(`/staff/${adm2.id}`).set(auth(admin)).expect(403);
+    const team = (await http().get('/staff').set(auth(admin)).expect(200)).body as { id: string; username: string; name: string; roles: string[] }[];
+    const me = team.find((u) => u.username === `adm${suf}`)!;
+    await http().delete(`/staff/${me.id}`).set(auth(admin)).expect(403);
+    expect(team.find((u) => u.username === `kc${suf}`)).toMatchObject({ name: 'Kátia Cozinha', roles: ['kitchen', 'cashier'] });
+
+    // dois garçons validam a mesma mesa ao mesmo tempo: só um passa, o outro sabe quem foi
+    const w2 = (await create({ username: `wb${suf}`, name: 'Ana Lima', displayName: 'Ana', roles: ['waiter'] }).expect(201)).body;
+    const waiter2 = await login(`wb${suf}`);
+    const sess = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    const cookie = cookieOf(sess);
+    await http().post('/public/session/open').set('Cookie', cookie).expect(201);
+    const [r1, r2] = await Promise.all([
+      http().post(`/tables/${tableId}/validate-open`).set(auth(waiter2)),
+      http().post(`/tables/${tableId}/validate-open`).set(auth(waiter)),
+    ]);
+    expect([r1.status, r2.status].sort()).toEqual([201, 409]);
+    const loser = r1.status === 409 ? r1 : r2;
+    expect(loser.body).toMatchObject({ message: 'already_handled', state: 'open' });
+    const winnerIsAna = r1.status === 201;
+    expect(loser.body.by).toBe(winnerIsAna ? 'Ana Lima' : 'Pessoa wai');
+    const state = (await http().get('/public/session').set('Cookie', cookie).expect(200)).body;
+    expect(state.table.waiterName).toBe(winnerIsAna ? 'Ana' : 'Pessoa');
+
+    // chamado: o primeiro a atender leva; o cliente fica sabendo quem vem
+    const call = (await http().post('/public/session/call').set('Cookie', cookie).expect(201)).body;
+    const guest = io(url, { extraHeaders: { cookie }, transports: ['websocket'] });
+    await waitFor(guest, 'connect');
+    await new Promise((r) => setTimeout(r, 200));
+    const resolved = waitFor(guest, 'call.resolved');
+    const [c1, c2] = await Promise.all([
+      http().post(`/calls/${call.id}/resolve`).set(auth(waiter2)),
+      http().post(`/calls/${call.id}/resolve`).set(auth(waiter)),
+    ]);
+    expect([c1.status, c2.status].sort()).toEqual([201, 409]);
+    const callWinner = c1.status === 201 ? { name: 'Ana Lima', guest: 'Ana' } : { name: 'Pessoa wai', guest: 'Pessoa' };
+    expect((c1.status === 409 ? c1 : c2).body).toMatchObject({ message: 'already_handled', by: callWinner.name });
+    expect(((await resolved) as { handledBy: { name: string } }).handledBy.name).toBe(callWinner.guest);
+    guest.close();
+
+    // cozinha volta um passo marcado por engano
+    const order = (await http().post('/public/session/orders').set('Cookie', cookie).send({ items: [{ productId, quantity: 1 }] }).expect(201)).body;
+    await http().patch(`/orders/${order.id}/revert`).set(auth(kitchen)).expect(409);
+    // the kitchen identifies each order by table, in the list and in every response
+    const listed = (await http().get('/orders').set(auth(kitchen)).expect(200)).body as { id: string; tableName: string }[];
+    expect(listed.find((o) => o.id === order.id)?.tableName).toBe('Mesa 01');
+    await http().patch(`/orders/${order.id}/status`).set(auth(kitchen)).send({ status: 'received' }).expect(200);
+    expect((await http().patch(`/orders/${order.id}/status`).set(auth(kitchen)).send({ status: 'preparing' }).expect(200)).body.tableName).toBe('Mesa 01');
+    await http().patch(`/orders/${order.id}/revert`).set(auth(waiter)).expect(403);
+    expect((await http().patch(`/orders/${order.id}/revert`).set(auth(kitchen)).expect(200)).body.status).toBe('received');
+    await http().post(`/public/session/orders/${order.id}/cancel`).set('Cookie', cookie).send({}).expect(201);
+
+    // quem atende uma mesa aberta não pode ser arquivado; outro garçom assume e aí pode
+    const servingId = winnerIsAna ? w2.id : team.find((u) => u.username === `wai${suf}`)!.id;
+    const other = winnerIsAna ? waiter : waiter2;
+    const busy = await http().delete(`/staff/${servingId}`).set(auth(admin)).expect(409);
+    expect(busy.body).toMatchObject({ message: 'staff_busy', tables: ['Mesa 01'] });
+    await http().post(`/tables/${tableId}/take`).set(auth(other)).expect(201);
+    await http().post(`/tables/${tableId}/close`).set(auth(other)).expect(201);
+
+    const rep = (await http().get('/reports/staff').set(auth(admin)).expect(200)).body as { rows: { id: string; tablesOpened: number; tablesClosed: number; callsAnswered: number; avgOpenSeconds: number | null }[] };
+    const servingRow = rep.rows.find((r) => r.id === servingId)!;
+    expect(servingRow.tablesOpened).toBeGreaterThanOrEqual(1);
+    expect(servingRow.avgOpenSeconds).not.toBeNull();
+    expect(rep.rows.reduce((n, r) => n + r.callsAnswered, 0)).toBeGreaterThanOrEqual(1);
+    await http().get('/reports/staff').set(auth(waiter)).expect(403);
+
+    // arquivado: some da equipe, não entra, o nome de usuário fica livre e o histórico continua
+    await http().delete(`/staff/${w2.id}`).set(auth(admin)).expect(204);
+    await http().post(`/auth/restaurants/${slug}/login`).send({ username: `wb${suf}`, password: 'senha12345' }).expect(401);
+    await http().get('/tables').set(auth(waiter2)).expect(401);
+    expect(((await http().get('/staff').set(auth(admin)).expect(200)).body as { id: string }[]).some((u) => u.id === w2.id)).toBe(false);
+    await create({ username: `wb${suf}`, name: 'Ana Nova', roles: ['waiter'] }).expect(201);
+    if (winnerIsAna) {
+      const again = (await http().get('/reports/staff').set(auth(admin)).expect(200)).body as { rows: { id: string; archived: boolean }[] };
+      expect(again.rows.find((r) => r.id === w2.id)).toMatchObject({ archived: true });
+    }
+  }, 30_000);
+
+  it('painel Elo: permissões separadas, lista com filtros e exclusão em duas etapas', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const newRestaurant = (name: string, admin: string) =>
+      http().post('/admin/restaurants').set(auth(sa)).send({ name, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: admin, adminPassword: 'senha12345' }).expect(201);
+    const teamLogin = async (username: string) => (await http().post('/auth/team/login').send({ username, password: 'senha12345' }).expect(201)).body.accessToken as string;
+
+    // permissões: cada uma depende de "ver"; ninguém concede o que não tem; excluir só o superadmin concede
+    const viewer = (await http().post('/admin/staff').set(auth(sa)).send({ username: `vw${suf}`, name: 'Vera Leitura', password: 'senha12345', permissions: ['payments.record'] }).expect(201)).body;
+    expect(viewer.permissions).toEqual(['restaurants.view', 'payments.view', 'payments.record']);
+    await http().post('/admin/staff').set(auth(sa)).send({ username: `tm${suf}`, name: 'Tito Equipe', password: 'senha12345', permissions: ['team.manage', 'payments.view', 'restaurants.delete'] }).expect(201);
+    const manager = await teamLogin(`tm${suf}`);
+    await http().post('/admin/staff').set(auth(manager)).send({ username: `x1${suf}`, name: 'Xis Um', password: 'senha12345', permissions: ['payments.record'] }).expect(403);
+    await http().post('/admin/staff').set(auth(manager)).send({ username: `x1${suf}`, name: 'Xis Um', password: 'senha12345', permissions: ['payments.view'] }).expect(201);
+    await http().patch(`/admin/staff/${viewer.id}`).set(auth(manager)).send({ permissions: ['restaurants.delete'] }).expect(403);
+    const vw = await teamLogin(`vw${suf}`);
+    await http().post('/admin/restaurants').set(auth(vw)).send({}).expect(403);
+    await http().get('/admin/restaurants?status=deleted').set(auth(vw)).expect(403);
+    // tokens emitidos antes da separação continuam valendo pelo que cobriam
+    const legacy = app.get(JwtService).sign({ sub: viewer.id, role: 'elo_admin', restaurantId: null, permissions: ['subscriptions'] });
+    const any = (await http().get('/admin/restaurants?pageSize=5').set(auth(legacy)).expect(200)).body.items[0].id;
+    await http().get(`/admin/restaurants/${any}/payments`).set(auth(legacy)).expect(200);
+
+    // lista: busca, situação, página e contagens
+    const a = (await newRestaurant(`Busca ${suf} Alfa`, `ba${suf}`)).body;
+    const b = (await newRestaurant(`Busca ${suf} Beta`, `bb${suf}`)).body;
+    const found = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}&pageSize=5`).set(auth(vw)).expect(200)).body;
+    expect(found.items.map((r: { slug: string }) => r.slug)).toEqual([a.slug, b.slug]);
+    expect(found).toMatchObject({ total: 2, page: 1, pageSize: 5, counts: { all: 2, active: 2, grace: 0, suspended: 0 } });
+    expect(found.counts.deleted).toBeUndefined();
+    const page2 = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}&pageSize=5&page=2`).set(auth(vw)).expect(200)).body;
+    expect(page2.items).toEqual([]);
+    await http().patch(`/admin/restaurants/${a.id}`).set(auth(vw)).send({ name: 'Outro' }).expect(403);
+    await http().patch(`/admin/restaurants/${a.id}`).set(auth(sa)).send({ name: `Busca ${suf} Alfa Novo` }).expect(200);
+
+    // exclusão: só suspenso, com o slug digitado; some de tudo; pode voltar; some de vez depois do prazo
+    await http().delete(`/admin/restaurants/${b.id}`).set(auth(sa)).send({ confirmSlug: b.slug }).expect(409);
+    await http().post(`/admin/restaurants/${b.id}/suspend`).set(auth(sa)).expect(201);
+    const suspendedList = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}&status=suspended`).set(auth(sa)).expect(200)).body;
+    expect(suspendedList.items.map((r: { id: string }) => r.id)).toEqual([b.id]);
+    await http().delete(`/admin/restaurants/${b.id}`).set(auth(vw)).send({ confirmSlug: b.slug }).expect(403);
+    await http().delete(`/admin/restaurants/${b.id}`).set(auth(sa)).send({ confirmSlug: 'errado' }).expect(400);
+    await http().delete(`/admin/restaurants/${b.id}`).set(auth(manager)).send({ confirmSlug: b.slug }).expect(204);
+    await http().get(`/public/${b.slug}/menu`).expect(404);
+    await http().post(`/auth/restaurants/${b.slug}/login`).send({ username: `bb${suf}`, password: 'senha12345' }).expect(401);
+    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Xis', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: `bz${suf}`, adminPassword: 'senha12345' }).expect(409);
+    const afterDelete = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}`).set(auth(sa)).expect(200)).body;
+    expect(afterDelete.items.map((r: { id: string }) => r.id)).toEqual([a.id]);
+    expect(afterDelete.counts.deleted).toBe(1);
+    const deleted = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}&status=deleted`).set(auth(sa)).expect(200)).body;
+    expect(deleted.items[0]).toMatchObject({ id: b.id });
+    expect(Date.parse(deleted.items[0].purgeAt) - Date.parse(deleted.items[0].deletedAt)).toBe(90 * 86_400_000);
+    const exported = (await http().get(`/admin/restaurants/${b.id}/export`).set(auth(sa)).expect(200)).body;
+    expect(exported.restaurant.slug).toBe(b.slug);
+    expect(exported.staff[0].username).toBe(`bb${suf}`);
+    expect(exported.staff[0].passwordHash).toBeUndefined();
+
+    const restored = (await http().post(`/admin/restaurants/${b.id}/restore`).set(auth(sa)).expect(201)).body;
+    expect(restored).toMatchObject({ id: b.id, suspended: true });
+    await http().get(`/public/${b.slug}/menu`).expect(200);
+    await http().delete(`/admin/restaurants/${b.id}`).set(auth(sa)).send({ confirmSlug: b.slug }).expect(204);
+
+    const lifecycle = app.get(RestaurantLifecycleService);
+    expect(await lifecycle.purgeExpired({ ids: [b.id] })).toEqual([]);
+    expect(await lifecycle.purgeExpired({ now: new Date(Date.now() + 91 * 86_400_000), ids: [b.id] })).toEqual([b.id]);
+    await http().get(`/admin/restaurants/${b.id}/export`).set(auth(sa)).expect(404);
+    const slugFree = await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }).expect(201);
+    expect(slugFree.body.slug).toBe(b.slug);
   }, 30_000);
 });
