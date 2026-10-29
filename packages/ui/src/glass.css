@@ -7,6 +7,7 @@ html {
 }
 
 body {
+  overflow-x: clip;
   font-family: var(--elo-font-sans);
   background: hsl(var(--elo-bg));
   color: hsl(var(--elo-fg));
@@ -62,6 +63,7 @@ h1, h2, h3, .font-display {
 
 /* ---------- Vidro ---------- */
 .glass {
+  min-width: 0;
   position: relative;
   isolation: isolate;
   border-radius: var(--elo-radius-lg);
@@ -193,7 +195,8 @@ h1, h2, h3, .font-display {
 @keyframes shimmer { to { background-position: -220% 0; } }
 
 /* ---------- Campos ---------- */
-input, select, textarea {
+/* `html` na frente: o reset do Tailwind (padding:0, font-size:100%) vem depois e igualaria a especificidade. */
+html input, html select, html textarea {
   width: 100%;
   min-height: 2.9rem;
   border-radius: var(--elo-radius-sm);
@@ -214,13 +217,13 @@ input:focus, select:focus, textarea:focus {
   background: hsl(var(--elo-glass-hi) / 0.85);
 }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.6; cursor: not-allowed; background: hsl(var(--elo-bg-soft) / 0.6); }
-textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
+html textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
 input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] {
   border-color: hsl(var(--elo-danger));
   box-shadow: 0 0 0 4px hsl(var(--elo-danger) / 0.14);
 }
 /* Seta própria no select, na cor do tema (currentColor via máscara). */
-select {
+html select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 2.6rem;
@@ -230,7 +233,7 @@ select {
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
 }
-input[type='checkbox'], input[type='radio'] { width: 1.1rem; min-height: 0; accent-color: hsl(var(--elo-brand)); padding: 0; box-shadow: none; }
+html input[type='checkbox'], html input[type='radio'] { width: 1.1rem; min-height: 0; accent-color: hsl(var(--elo-brand)); padding: 0; box-shadow: none; }
 input[type='date'] { cursor: pointer; }
 
 /* Campo com ícone ou prefixo à esquerda e ação à direita. */
@@ -241,7 +244,7 @@ input[type='date'] { cursor: pointer; }
 
 /* Interruptor (checkbox estilizado). */
 .switch { position: relative; display: inline-flex; width: 2.75rem; height: 1.6rem; flex: none; cursor: pointer; }
-.switch input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
+.switch input[type='checkbox'] { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
 .switch i {
   position: absolute; inset: 0; border-radius: 999px; pointer-events: none;
   background: hsl(var(--elo-line) / 0.9); transition: background var(--elo-dur-fast);
@@ -254,6 +257,31 @@ input[type='date'] { cursor: pointer; }
 .switch input:checked + i::after { transform: translateX(1.15rem); }
 .switch input:focus-visible + i { box-shadow: 0 0 0 4px hsl(var(--elo-brand) / 0.25); }
 
+/* ---------- Cardápio do cliente: superfícies planas, vidro só nas barras ---------- */
+.surface {
+  border-radius: var(--elo-radius-md);
+  border: 1px solid hsl(var(--elo-line) / 0.5);
+  background: hsl(var(--elo-glass-hi) / 0.72);
+}
+[data-theme='dark'] .surface { background: hsl(var(--elo-bg-soft) / 0.9); }
+.glass-bar {
+  background: hsl(var(--elo-bg) / 0.8);
+  -webkit-backdrop-filter: blur(var(--elo-blur)) saturate(160%);
+  backdrop-filter: blur(var(--elo-blur)) saturate(160%);
+  border-bottom: 1px solid hsl(var(--elo-line) / 0.45);
+}
+.sheet {
+  background: hsl(var(--elo-bg));
+  box-shadow: 0 -12px 48px -12px hsl(var(--elo-shadow) / 0.45), inset 0 1px 0 hsl(var(--elo-glass-edge) / 0.8);
+}
+/* Cobertura padrão quando o restaurante ainda não enviou imagem. */
+.cover-fallback {
+  background:
+    radial-gradient(60% 90% at 85% 10%, hsl(var(--elo-lime) / 0.55), transparent 60%),
+    radial-gradient(70% 100% at 10% 100%, hsl(var(--elo-mint) / 0.7), transparent 65%),
+    linear-gradient(135deg, hsl(var(--elo-leaf-600)), hsl(var(--elo-leaf-500)) 55%, hsl(var(--elo-teal)));
+}
+
 /* ---------- Scroll ---------- */
 .scroll-soft { scrollbar-width: thin; scrollbar-color: hsl(var(--elo-leaf-400) / 0.5) transparent; }
 
@@ -265,7 +293,7 @@ input[type='date'] { cursor: pointer; }
 
 /*
  * ---------- Aparelho limitado (data-lite em <html>) ----------
- * Definido sozinho pelo script inicial (pouca memória/CPU ou economia de dados).
+ * Definido sozinho pelo script inicial (aparelho limitado ou economia de dados).
  * Sem blur nem animação contínua; cores e tipografia continuam as do tema.
  */
 [data-lite] .glass,
@@ -289,6 +317,7 @@ input[type='date'] { cursor: pointer; }
 }
 [data-lite] .skeleton, [data-lite] .flash-new, [data-lite] .btn-glass::before { animation: none; }
 [data-lite] .btn-glass:hover::before { left: -60%; }
+[data-lite] .glass-bar { -webkit-backdrop-filter: none; backdrop-filter: none; background: hsl(var(--elo-bg) / 0.96); }
 [data-lite] .modal-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
 
 @media (prefers-reduced-motion: reduce) {

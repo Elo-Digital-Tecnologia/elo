@@ -98,6 +98,12 @@
   --elo-fg-muted: 148 14% 68%;
   --elo-line: 154 30% 26%;
 
+  /* Verdes claros da rampa viram verdes profundos; sem isso, bg-leaf-100/50 fica cinza no escuro */
+  --elo-leaf-50: 158 42% 12%;
+  --elo-leaf-100: 156 40% 15%;
+  --elo-leaf-200: 154 36% 21%;
+  --elo-leaf-300: 152 34% 29%;
+
   --elo-brand: 150 58% 52%;
   --elo-brand-hover: 150 62% 60%;
   --elo-brand-fg: 160 70% 6%;

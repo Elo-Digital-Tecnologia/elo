@@ -186,9 +186,9 @@ export function ColumnChart({ data, format = String, height = 200 }: { data: Dat
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
     <div role="img" aria-label={data.map((d) => `${d.label} ${format(d.value)}`).join(', ')}>
-      <div className="flex items-end gap-2" style={{ height }}>
+      <div className={`flex items-end ${data.length > 12 ? 'gap-0.5 sm:gap-1.5' : 'gap-2'}`} style={{ height }}>
         {data.map((d, i) => (
-          <div key={d.label} className="relative flex h-full flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+          <div key={d.label} className="relative flex h-full min-w-0 flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             {hover === i && <div className="glass pointer-events-none absolute -top-1 left-1/2 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap !rounded-md px-2.5 py-1 text-xs font-semibold tabular-nums">{format(d.value)}</div>}
             <motion.div
               className="w-full rounded-t-md"
@@ -200,9 +200,9 @@ export function ColumnChart({ data, format = String, height = 200 }: { data: Dat
           </div>
         ))}
       </div>
-      <div className="mt-2 flex gap-2 text-xs text-muted">
-        {data.map((d) => (
-          <span key={d.label} className="flex-1 text-center">{d.label}</span>
+      <div className={`mt-2 flex text-[10px] text-muted sm:text-xs ${data.length > 12 ? 'gap-0.5 sm:gap-1.5' : 'gap-2'}`}>
+        {data.map((d, i) => (
+          <span key={d.label} className={`min-w-0 flex-1 overflow-hidden text-center ${data.length > 12 && i % 2 ? 'max-sm:invisible' : ''}`}>{d.label}</span>
         ))}
       </div>
     </div>

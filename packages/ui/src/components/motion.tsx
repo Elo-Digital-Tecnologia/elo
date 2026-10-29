@@ -42,7 +42,7 @@ export function Stagger({ children, className = '', gap = 0.06 }: { children: Re
 export function StaggerItem({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <motion.div
-      className={className}
+      className={`min-w-0 ${className}`}
       variants={{
         hidden: { opacity: 0, y: 22, scale: 0.97 },
         show: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.5, ease: EASE } },

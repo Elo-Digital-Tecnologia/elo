@@ -37,10 +37,14 @@ const COLLAPSE_KEY = 'elo.sidebar';
 
 function NavList({ nav, collapsed, onNavigate }: { nav: NavItem[]; collapsed: boolean; onNavigate?: () => void }) {
   const path = usePathname();
+  // Só o item mais específico fica marcado (/dashboard não acende em /dashboard/menu).
+  const current = nav
+    .filter((i) => path === i.href || path.startsWith(`${i.href}/`))
+    .sort((x, y) => y.href.length - x.href.length)[0]?.href;
   return (
     <nav aria-label="Principal" className="flex flex-col gap-1.5">
       {nav.map((item) => {
-        const active = path === item.href || (item.href !== '/' && path.startsWith(`${item.href}/`));
+        const active = item.href === current;
         const Icon = item.icon;
         return (
           <Link
@@ -92,6 +96,16 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, footerLin
 
   useEffect(() => setDrawer(false), [path]);
 
+  // Menu aberto no celular: a página atrás não rola.
+  useEffect(() => {
+    if (!drawer) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [drawer]);
+
   const toggleCollapsed = () =>
     setCollapsed((c) => {
       try {
@@ -132,10 +146,10 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, footerLin
       {/* Drawer mobile */}
       <AnimatePresence>
         {drawer && (
-          <motion.div className="fixed inset-0 z-50 lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.div className="fixed inset-x-0 top-0 z-50 h-dvh lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="modal-backdrop absolute inset-0 bg-leaf-900/40 backdrop-blur-md" onClick={() => setDrawer(false)} aria-hidden />
             <motion.aside
-              className="glass glass-strong absolute bottom-3 left-3 top-3 flex w-[min(300px,calc(100vw-24px))] flex-col p-3"
+              className="glass glass-strong absolute bottom-3 left-3 top-3 flex w-[min(300px,calc(100%-24px))] flex-col overflow-hidden p-3"
               initial={{ x: -320 }}
               animate={{ x: 0 }}
               exit={{ x: -320 }}
@@ -156,16 +170,16 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, footerLin
       </AnimatePresence>
 
       {/* Coluna principal */}
-      <div className="flex min-h-dvh flex-col transition-[padding] duration-500 ease-elo lg:pl-[var(--shell-pad)]" style={{ ['--shell-pad' as string]: `${(collapsed ? 88 : 272) + 32}px` }}>
-        <header className="sticky top-0 z-20 px-4 pt-4 lg:pr-6">
-          <div className="glass glass-strong flex items-center gap-3 !rounded-pill py-2 pl-3 pr-2.5">
+      <div className="flex min-h-dvh min-w-0 flex-col transition-[padding] duration-500 ease-elo lg:pl-[var(--shell-pad)]" style={{ ['--shell-pad' as string]: `${(collapsed ? 88 : 272) + 32}px` }}>
+        <header className="sticky top-0 z-20 px-3 pt-3 sm:px-4 sm:pt-4 lg:pr-6">
+          <div className="glass glass-strong flex items-center gap-2 !rounded-pill py-2 pl-2.5 pr-2 sm:gap-3 sm:pl-3 sm:pr-2.5">
             <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-pill transition hover:bg-brand/10 lg:hidden">
               <Menu size={20} />
             </button>
             <div className="lg:hidden">
               <Logo />
             </div>
-            <div className="min-w-0 flex-1">{headerExtra}</div>
+            <div className="min-w-0 flex-1 overflow-hidden">{headerExtra}</div>
             <ThemeToggle />
             <div className="flex items-center gap-2.5 rounded-pill bg-leaf-100/50 py-1 pl-1 pr-3.5">
               <span className="btn-glass grid h-9 w-9 place-items-center rounded-pill text-xs font-bold">{initials}</span>
@@ -180,12 +194,12 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, footerLin
           </div>
         </header>
 
-        <main className="flex-1 px-4 py-6 lg:pr-6">
+        <main className="min-w-0 flex-1 px-4 pb-8 pt-7 sm:px-5 lg:pr-6">
           {banner}
           <PageTransition>{children}</PageTransition>
         </main>
 
-        <footer className="px-4 pb-4 lg:pr-6">
+        <footer className="px-3 pb-3 sm:px-4 sm:pb-4 lg:pr-6">
           <div className="glass flex flex-wrap items-center justify-between gap-3 !rounded-pill px-6 py-3 text-xs text-muted">
             <span className="flex items-center gap-2">
               <Logo />

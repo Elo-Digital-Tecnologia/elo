@@ -41,20 +41,20 @@ export function Stat({
 }) {
   return (
     <GlassCard lift className="flex h-full flex-col gap-3 p-5">
-      <div className="flex items-center justify-between text-sm text-muted">
-        <span>{label}</span>
+      <div className="flex items-center justify-between gap-2 text-sm text-muted">
+        <span className="min-w-0">{label}</span>
         {Icon && (
           <span className="grid h-9 w-9 place-items-center rounded-pill bg-brand/15 text-brand">
             <Icon size={18} />
           </span>
         )}
       </div>
-      <div className="font-display text-4xl font-bold tracking-tight tabular-nums">
+      <div className="break-words font-display text-2xl font-bold tracking-tight tabular-nums sm:text-3xl">
         <CountUp value={value} format={format} />
       </div>
       <div className="flex items-end justify-between gap-3">
-        {hint && <span className="text-xs text-muted">{hint}</span>}
-        {trend && trend.length > 1 && <Sparkline data={trend} className="ml-auto h-8 w-24" />}
+        {hint && <span className="min-w-0 text-xs text-muted">{hint}</span>}
+        {trend && trend.length > 1 && <Sparkline data={trend} className="ml-auto h-8 w-20 shrink-0" />}
       </div>
     </GlassCard>
   );
