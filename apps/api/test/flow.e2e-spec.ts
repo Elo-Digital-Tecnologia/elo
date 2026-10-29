@@ -581,4 +581,56 @@ suite('fluxo da mesa (e2e)', () => {
     const slugFree = await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }).expect(201);
     expect(slugFree.body.slug).toBe(b.slug);
   }, 30_000);
+
+  it('registros, validações dos campos e inscrição para push', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Registro ${suf}`, managerName: 'Rita Souza', managerContact: '(11) 97777-7777', dueDate: due, adminUsername: `rg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const owner = await login(`rg${suf}`, r.slug);
+
+    // campos validados e normalizados com as mesmas regras do formulário
+    const base = { name: 'Registro', managerName: 'Rita Souza', managerContact: '11977777777', serviceFeeBps: 1000 };
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, serviceFeeBps: 2500 }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, managerContact: '1234' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, managerName: 'Rita 123' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, phone: '11 8123-45' }).expect(400);
+    const saved = (await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, phone: '+55 11 4000 1234', instagram: 'https://instagram.com/Casa.Registro/' }).expect(200)).body;
+    expect(saved).toMatchObject({ managerContact: '(11) 97777-7777', phone: '(11) 4000-1234', instagram: 'casa.registro' });
+    expect((await http().patch('/restaurant/settings').set(auth(owner)).send({ ...base, phone: '', instagram: '' }).expect(200)).body).toMatchObject({ phone: null, instagram: null });
+
+    // ações da equipe e da Elo ficam registradas, com nome e origem
+    await http().post('/tables').set(auth(owner)).send({ name: 'Mesa 9' }).expect(201);
+    await http().post('/staff').set(auth(owner)).send({ username: `rgw${suf}`, password: 'senha12345', name: 'Gabi Garçom', roles: ['waiter'] }).expect(201);
+    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ amountCents: 4990, paidAt: new Date().toISOString(), newDueDate: due }).expect(201);
+    await http().post(`/admin/restaurants/${r.id}/access`).set(auth(sa)).expect(201);
+    const log = (await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body as { total: number; items: { action: string; actorName: string; actorKind: string; target: string | null; meta: Record<string, unknown> | null }[] };
+    const byAction = (a: string) => log.items.find((i) => i.action === a);
+    expect(byAction('table_created')).toMatchObject({ actorName: 'Rita Souza', actorKind: 'staff', target: 'Mesa 9' });
+    expect(byAction('staff_created')).toMatchObject({ target: 'Gabi Garçom', meta: { roles: ['waiter'] } });
+    expect(byAction('settings_updated')?.meta).toMatchObject({ fields: expect.arrayContaining(['phone', 'instagram']) });
+    expect(JSON.stringify(log)).not.toContain('4000-1234');
+    expect(byAction('payment_recorded')).toMatchObject({ actorName: 'Superadmin', actorKind: 'elo', meta: { amountCents: 4990 } });
+    expect(byAction('restaurant_access')).toMatchObject({ actorKind: 'elo' });
+    const team = (await http().get('/restaurant/activity?category=team').set(auth(owner)).expect(200)).body;
+    expect(team.items.every((i: { action: string }) => i.action.startsWith('staff_'))).toBe(true);
+    await http().get('/restaurant/activity?category=nada').set(auth(owner)).expect(400);
+    const waiterTok = await login(`rgw${suf}`, r.slug);
+    await http().get('/restaurant/activity').set(auth(waiterTok)).expect(403);
+    await http().get(`/admin/restaurants/${r.id}/activity`).set(auth(sa)).expect(200);
+    const outsider = (await http().post('/admin/staff').set(auth(sa)).send({ username: `ou${suf}`, name: 'Otto Leitura', password: 'senha12345', permissions: ['restaurants.view'] }).expect(201)).body;
+    expect(outsider.permissions).toEqual(['restaurants.view']);
+    const out = (await http().post('/auth/team/login').send({ username: `ou${suf}`, password: 'senha12345' }).expect(201)).body.accessToken;
+    await http().get(`/admin/restaurants/${r.id}/activity`).set(auth(out)).expect(403);
+
+    // push: chave pública (vazia sem configuração), só endpoint https, uma linha por aparelho
+    expect((await http().get('/push/public-key').set(auth(waiterTok)).expect(200)).body).toHaveProperty('key');
+    const keys = { p256dh: 'BOr' + 'a'.repeat(84), auth: 'b'.repeat(22) };
+    await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: 'http://push.example/x', keys }).expect(400);
+    await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: `https://push.example/${suf}`, keys }).expect(204);
+    await http().post('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://push.example/${suf}`, keys }).expect(204);
+    const access = (await http().post(`/admin/restaurants/${r.id}/access`).set(auth(sa)).expect(201)).body.accessToken;
+    await http().post('/push/subscriptions').set(auth(access)).send({ endpoint: `https://push.example/elo${suf}`, keys }).expect(403);
+    await http().delete('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://push.example/${suf}` }).expect(204);
+  }, 30_000);
 });
