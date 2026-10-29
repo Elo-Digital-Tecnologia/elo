@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { Server } from 'socket.io';
+import { PushService } from '../push/push.service';
 
 export const staffRoom = (restaurantId: string) => `r:${restaurantId}`;
 export const tableRoom = (tableId: string) => `t:${tableId}`;
@@ -20,6 +21,8 @@ export interface RealtimeEvent {
 export class RealtimeService {
   private server?: Server;
 
+  constructor(private readonly push: PushService) {}
+
   attach(server: Server) {
     this.server = server;
   }
@@ -29,7 +32,9 @@ export class RealtimeService {
     this.server?.in(staffRoom(restaurantId)).disconnectSockets(true);
   }
 
+  /** Emits to the open screens and, for alerts, to the staff phones subscribed to push. */
   publish(event: RealtimeEvent): void {
+    this.push.dispatch(event.type, event.restaurantId, event.payload);
     if (!this.server) return;
     let target = this.server.to(staffRoom(event.restaurantId));
     if (event.tableId) target = target.to(tableRoom(event.tableId));

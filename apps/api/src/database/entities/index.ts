@@ -10,6 +10,7 @@ import { WaiterCall } from './waiter-call.entity';
 import { AuditLog } from './audit-log.entity';
 import { Media } from './media.entity';
 import { Review } from './review.entity';
+import { PushSubscription } from './push-subscription.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -23,6 +24,7 @@ export * from './waiter-call.entity';
 export * from './audit-log.entity';
 export * from './media.entity';
 export * from './review.entity';
+export * from './push-subscription.entity';
 
 export const ENTITIES = [
   Restaurant,
@@ -37,4 +39,5 @@ export const ENTITIES = [
   AuditLog,
   Media,
   Review,
+  PushSubscription,
 ];

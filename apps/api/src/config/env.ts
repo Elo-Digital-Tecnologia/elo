@@ -15,6 +15,11 @@ export interface Env {
   UPLOAD_DIR: string;
   /** Days a deleted restaurant's data is kept before it is erased for good. */
   RESTAURANT_PURGE_DAYS: number;
+  /** Web Push keys (`pnpm --filter @elo/api vapid:generate`). Without them, push stays off. */
+  VAPID_PUBLIC_KEY: string | null;
+  VAPID_PRIVATE_KEY: string | null;
+  /** Contact sent to push services: mailto: or https: URL. Defaults to PUBLIC_BASE_URL. */
+  VAPID_SUBJECT: string;
 }
 
 const required = ['DATABASE_URL', 'JWT_SECRET', 'SUPERADMIN_KEY'] as const;
@@ -36,8 +41,12 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
     NODE_ENV: raw.NODE_ENV ?? 'development',
     TABLE_SESSION_HOURS: Number(raw.TABLE_SESSION_HOURS ?? 4),
     REPORT_TZ: raw.REPORT_TZ ?? 'America/Sao_Paulo',
-    UPLOAD_DIR: raw.UPLOAD_DIR ?? path.resolve(process.cwd(), 'uploads'),
+    // Relative paths (like ./uploads in .env.example) resolve from where the API runs; files are served by absolute path.
+    UPLOAD_DIR: path.resolve(process.cwd(), raw.UPLOAD_DIR || 'uploads'),
     RESTAURANT_PURGE_DAYS: positive(raw.RESTAURANT_PURGE_DAYS, 90, 'RESTAURANT_PURGE_DAYS'),
+    VAPID_PUBLIC_KEY: raw.VAPID_PUBLIC_KEY || null,
+    VAPID_PRIVATE_KEY: raw.VAPID_PRIVATE_KEY || null,
+    VAPID_SUBJECT: raw.VAPID_SUBJECT || (raw.PUBLIC_BASE_URL ?? 'http://localhost:3000'),
   };
 }
 
