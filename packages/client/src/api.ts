@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /** Whole error body, for responses that carry details (who handled it, which tables). */
+    readonly data: Record<string, unknown> = {},
   ) {
     super(code);
   }
@@ -30,7 +32,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     const msg = Array.isArray(data.message) ? data.message[0] : data.message;
-    throw new ApiError(res.status, msg ?? res.statusText);
+    throw new ApiError(res.status, msg ?? res.statusText, data);
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
@@ -43,7 +45,7 @@ export async function apiUpload<T>(path: string, file: File, token: string): Pro
   const res = await fetch(path, { method: 'POST', credentials: 'include', headers: { authorization: `Bearer ${token}` }, body });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, (Array.isArray(data.message) ? data.message[0] : data.message) ?? res.statusText);
+    throw new ApiError(res.status, (Array.isArray(data.message) ? data.message[0] : data.message) ?? res.statusText, data);
   }
   return (await res.json()) as T;
 }

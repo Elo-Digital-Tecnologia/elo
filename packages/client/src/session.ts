@@ -6,7 +6,9 @@ const keyOf = (scope: string) => `${KEY}.${scope}`;
 
 export interface TokenPayload {
   sub: string;
-  role: string;
+  roles: string[];
+  /** Missing on tokens issued before team members had names. */
+  name?: string;
   restaurantId: string | null;
   permissions: string[];
   /** Presente quando a equipe Elo entrou no painel do restaurante. */
@@ -17,8 +19,11 @@ export interface TokenPayload {
 export function decodeToken(token: string): TokenPayload | null {
   try {
     const json = atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(json) as TokenPayload;
-    return payload.exp * 1000 > Date.now() ? payload : null;
+    const payload = JSON.parse(json) as Omit<TokenPayload, 'roles'> & { roles?: string[]; role?: string };
+    if (payload.exp * 1000 <= Date.now()) return null;
+    // Tokens issued before multiple roles carry a single `role`.
+    const roles = payload.roles ?? (payload.role ? [payload.role] : []);
+    return { ...payload, roles };
   } catch {
     return null;
   }
