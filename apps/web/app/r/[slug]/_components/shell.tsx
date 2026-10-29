@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, ApiError, useAuth } from '@elo/client';
+import { api, ApiError, type RealtimeStatus, useAuth, useRealtimeStatus } from '@elo/client';
 import type { RestaurantSettingsView, SubscriptionView } from '@elo/core';
 import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, SkeletonCards } from '@elo/ui';
 
@@ -102,6 +102,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
   const [me, setMe] = useState<Me | null>(null);
   const [suspended, setSuspended] = useState(false);
   const [failed, setFailed] = useState(false);
+  const live = useRealtimeStatus(token, !!me);
 
   useEffect(() => {
     if (!ready) return;
@@ -126,6 +127,15 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
     return () => clearTimeout(retry);
     // Depende de role/sub, não do objeto `user`.
   }, [ready, token, user?.role, user?.sub, roles.join(','), router, setToken, slug, base]);
+
+  // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
+  useEffect(() => {
+    if (live !== 'rejected' || !token) return;
+    api<Me>('/api/restaurant/me', { token }).catch((e) => {
+      if (e instanceof ApiError && e.status === 403) setSuspended(true);
+      else if (e instanceof ApiError && e.status === 401) setToken(null);
+    });
+  }, [live, token, setToken]);
 
   if (suspended)
     return (
@@ -179,12 +189,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
           if (user.impersonatedBy) router.replace(`/admin/restaurants/${me.id}`);
         }}
         defaultCollapsed={user.role === 'kitchen'}
-        headerExtra={
-          <span className="flex items-center gap-2 pl-2 text-sm text-muted">
-            <span className="pulse-dot" aria-hidden />
-            <span className="sr-only sm:not-sr-only">Ao vivo</span>
-          </span>
-        }
+        headerExtra={<LiveIndicator status={live} />}
         footerLinks={[{ label: 'Cardápio dos clientes', href: `/${me.slug}` }]}
         banner={
           user.impersonatedBy ? (
@@ -208,5 +213,24 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
         {children}
       </AppShell>
     </Ctx.Provider>
+  );
+}
+
+const LIVE: Record<RealtimeStatus, { label: string; dot: string }> = {
+  connected: { label: 'Ao vivo', dot: 'pulse-dot' },
+  connecting: { label: 'Conectando…', dot: 'h-2.5 w-2.5 rounded-pill bg-warning' },
+  reconnecting: { label: 'Reconectando…', dot: 'h-2.5 w-2.5 animate-pulse rounded-pill bg-warning' },
+  offline: { label: 'Sem internet', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
+  rejected: { label: 'Desconectado', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
+};
+
+function LiveIndicator({ status }: { status: RealtimeStatus }) {
+  const { label, dot } = LIVE[status];
+  const ok = status === 'connected';
+  return (
+    <span role="status" className={`flex items-center gap-2 pl-2 text-sm ${ok ? 'text-muted' : 'font-medium text-warning'}`}>
+      <span className={`shrink-0 ${dot}`} aria-hidden />
+      <span className={ok ? 'sr-only sm:not-sr-only' : 'truncate'}>{label}</span>
+    </span>
   );
 }

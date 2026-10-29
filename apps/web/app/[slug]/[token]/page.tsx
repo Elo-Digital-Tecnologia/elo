@@ -78,6 +78,12 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
     },
     null,
     phase === 'ready',
+    {
+      onResync: () => {
+        void refresh();
+        setBillVersion((v) => v + 1);
+      },
+    },
   );
 
   // Garçom encerrou a mesa: a sessão cai e o estado volta a falhar com 401.

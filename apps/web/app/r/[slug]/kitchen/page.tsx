@@ -76,6 +76,8 @@ function Board() {
       },
     },
     token,
+    true,
+    { onResync: load },
   );
 
   const advance = async (o: OrderView) => {

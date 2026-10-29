@@ -54,7 +54,7 @@ function Panel() {
 
   // Pedidos entram no estado pelo próprio evento; mesas e chamados são listas pequenas.
   const onOrder = useCallback((o: OrderView) => setOrders((list) => upsertOrder(list, o, (x) => ACTIVE.includes(x.status))), []);
-  useRealtime({ 'table.updated': reload, 'call.created': reload, 'call.resolved': reload, 'order.created': onOrder, 'order.updated': onOrder, 'order.cancelled': onOrder }, token);
+  useRealtime({ 'table.updated': reload, 'call.created': reload, 'call.resolved': reload, 'order.created': onOrder, 'order.updated': onOrder, 'order.cancelled': onOrder }, token, true, { onResync: reload });
 
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);

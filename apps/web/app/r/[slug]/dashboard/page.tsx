@@ -80,7 +80,7 @@ function Overview() {
   }, [load]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  useRealtime({ 'order.created': soon, 'order.updated': soon, 'order.cancelled': soon, 'call.created': soon, 'call.resolved': soon, 'table.updated': soon }, token);
+  useRealtime({ 'order.created': soon, 'order.updated': soon, 'order.cancelled': soon, 'call.created': soon, 'call.resolved': soon, 'table.updated': soon }, token, true, { onResync: soon });
 
   const view = useMemo(() => {
     if (!report) return null;

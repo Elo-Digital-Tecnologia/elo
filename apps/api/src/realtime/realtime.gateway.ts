@@ -19,8 +19,14 @@ function parseCookie(header: string | undefined, name: string): string | undefin
     .find(([k]) => k === name)?.[1];
 }
 
+/** Sent before the server drops a connection, so the client stops retrying and says why. */
+type AuthError = 'expired' | 'invalid' | 'suspended' | 'session';
+
 @WebSocketGateway({
   cors: { origin: corsOrigin, credentials: true },
+  // Phones freeze pages for a while when locked; a longer timeout keeps short freezes from dropping the socket.
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
 })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
   @WebSocketServer() server: Server;
@@ -41,24 +47,28 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
    * Mecanismos separados; sem credencial válida, a conexão cai.
    */
   async handleConnection(client: Socket) {
-    try {
-      const token = client.handshake.auth?.token as string | undefined;
-      if (token) {
-        const user = await this.jwt.verifyAsync<JwtUser>(token);
-        if (!user.restaurantId) return client.disconnect(true);
-        const state = await this.restaurants.accessStateOf(user.restaurantId);
-        if (state === AccessState.Suspended) return client.disconnect(true);
-        await client.join(staffRoom(user.restaurantId));
-        return;
-      }
-      const sessionId = parseCookie(client.handshake.headers.cookie, TABLE_COOKIE);
-      const session = sessionId ? await this.sessions.findOne({ where: { id: sessionId } }) : null;
-      if (!session || session.closedAt || session.expiresAt.getTime() < Date.now()) {
-        return client.disconnect(true);
-      }
-      await client.join(tableRoom(session.tableId));
-    } catch {
+    const reject = (reason: AuthError) => {
+      client.emit('auth_error', reason);
       client.disconnect(true);
+    };
+    const token = client.handshake.auth?.token as string | undefined;
+    if (token) {
+      let user: JwtUser;
+      try {
+        user = await this.jwt.verifyAsync<JwtUser>(token);
+      } catch (e) {
+        return reject((e as Error).name === 'TokenExpiredError' ? 'expired' : 'invalid');
+      }
+      if (!user.restaurantId) return reject('invalid');
+      const state = await this.restaurants.accessStateOf(user.restaurantId).catch(() => null);
+      if (!state) return reject('invalid');
+      if (state === AccessState.Suspended) return reject('suspended');
+      await client.join(staffRoom(user.restaurantId));
+      return;
     }
+    const sessionId = parseCookie(client.handshake.headers.cookie, TABLE_COOKIE);
+    const session = sessionId ? await this.sessions.findOne({ where: { id: sessionId } }).catch(() => null) : null;
+    if (!session || session.closedAt || session.expiresAt.getTime() < Date.now()) return reject('session');
+    await client.join(tableRoom(session.tableId));
   }
 }

@@ -29,7 +29,7 @@ function Cashier() {
     void load();
   }, [load]);
 
-  useRealtime({ 'bill.updated': load, 'table.updated': load }, token);
+  useRealtime({ 'bill.updated': load, 'table.updated': load }, token, true, { onResync: load });
 
   const current = bills?.find((b) => b.tableId === selected) ?? bills?.[0] ?? null;
 
