@@ -1,4 +1,6 @@
 import type { OrderStatus, TableState } from './orders';
+import type { ProductTag } from './catalog';
+import type { OpeningHours, OpenStatus } from './open-status';
 import type { AccessState } from './subscription';
 
 export interface OptionChoice {
@@ -21,6 +23,9 @@ export interface ProductView {
   priceCents: number;
   imageUrl: string | null;
   available: boolean;
+  featured: boolean;
+  tags: ProductTag[];
+  position: number;
   options: OptionGroup[];
 }
 
@@ -61,15 +66,27 @@ export interface TableView {
   token?: string;
 }
 
+/** Dados públicos do restaurante, mostrados no topo do cardápio. */
+export interface RestaurantProfileView {
+  description: string | null;
+  logoUrl: string | null;
+  coverUrl: string | null;
+  address: string | null;
+  phone: string | null;
+  instagram: string | null;
+  /** Calculado pelo servidor no fuso do restaurante; nulo sem horário cadastrado. */
+  openStatus: OpenStatus | null;
+}
+
 export interface PublicMenuView {
   readOnly: true;
-  restaurant: { name: string; slug: string };
+  restaurant: { name: string; slug: string } & RestaurantProfileView;
   menu: CategoryView[];
 }
 
 export interface SessionStateView {
   readOnly: false;
-  restaurant: { name: string; slug: string; serviceFeeBps: number };
+  restaurant: { name: string; slug: string; serviceFeeBps: number; wifi: { name: string | null; password: string | null } | null } & RestaurantProfileView;
   table: { name: string; state: TableState };
   orders: OrderView[];
   menu: CategoryView[];
@@ -136,4 +153,26 @@ export interface ReportView {
   byDay: { date: string; revenueCents: number; orders: number }[];
   byHour: { hour: number; orders: number }[];
   topProducts: { name: string; quantity: number; revenueCents: number }[];
+}
+
+/** Dados completos do restaurante para o painel. */
+export interface RestaurantSettingsView extends RestaurantProfileView {
+  wifiName: string | null;
+  wifiPassword: string | null;
+  openingHours: OpeningHours | null;
+}
+
+export interface ReviewView {
+  id: string;
+  stars: number;
+  comment: string | null;
+  tableName: string;
+  createdAt: string;
+}
+
+export interface ReviewSummaryView {
+  count: number;
+  /** Média de 1 a 5 com uma casa; 0 sem avaliações. */
+  average: number;
+  reviews: ReviewView[];
 }

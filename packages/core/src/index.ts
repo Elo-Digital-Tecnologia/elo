@@ -8,3 +8,5 @@ export * from './cancellation';
 export * from './table-state';
 export * from './bill';
 export * from './api-types';
+export * from './catalog';
+export * from './open-status';
