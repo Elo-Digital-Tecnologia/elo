@@ -7,6 +7,8 @@ import { staffRule } from './staff-rules';
 import { previousOrderStatus } from './orders';
 import { formatDuration } from './duration';
 import { canGrant, upgradePermissions, withRequired } from './permissions';
+import { alertOf, alertsRole } from './alerts';
+import { brazilPhone, contact, instagramHandle, maskPhone, personName } from './validation';
 
 describe('cancellationRule', () => {
   it('customer only before preparing', () => {
@@ -210,5 +212,46 @@ describe('permissions', () => {
     expect(canGrant({ superadmin: false, permissions: ['restaurants.delete'] }, 'restaurants.delete')).toBe(false);
     expect(canGrant({ superadmin: false, permissions: ['payments.view'] }, 'payments.view')).toBe(true);
     expect(canGrant({ superadmin: false, permissions: ['payments.view'] }, 'payments.record')).toBe(false);
+  });
+});
+
+describe('field validation', () => {
+  it('phones: landline and mobile, with or without +55', () => {
+    expect(brazilPhone('11912345678')).toBe('(11) 91234-5678');
+    expect(brazilPhone('+55 (11) 4000-1234')).toBe('(11) 4000-1234');
+    expect(brazilPhone('11812345678')).toBeNull();
+    expect(brazilPhone('1234')).toBeNull();
+    expect(brazilPhone('(01) 4000-1234')).toBeNull();
+  });
+  it('instagram: handle or profile link, normalized', () => {
+    expect(instagramHandle('@Casa.Verde')).toBe('casa.verde');
+    expect(instagramHandle('https://instagram.com/casaverde/')).toBe('casaverde');
+    expect(instagramHandle('casa..verde')).toBeNull();
+    expect(instagramHandle('casa verde')).toBeNull();
+  });
+  it('names and contacts', () => {
+    expect(personName('  Maria   da Silva ')).toBe('Maria da Silva');
+    expect(personName("João D'Ávila")).toBe("João D'Ávila");
+    expect(personName('Maria2')).toBeNull();
+    expect(contact('gerente@casa.com')).toBe('gerente@casa.com');
+    expect(contact('11 91234-5678')).toBe('(11) 91234-5678');
+    expect(contact('gerente@')).toBeNull();
+  });
+  it('masks a phone as it is typed', () => {
+    expect(maskPhone('119')).toBe('(11) 9');
+    expect(maskPhone('1191234567')).toBe('(11) 9123-4567');
+    expect(maskPhone('11912345678')).toBe('(11) 91234-5678');
+  });
+});
+
+describe('alerts', () => {
+  it('turns realtime events into alerts for the right roles', () => {
+    expect(alertOf('table.updated', { id: 't', name: 'Mesa 7', state: 'pending_open' })).toEqual({ kind: 'open_request', table: 'Mesa 7', tag: 'open:t' });
+    expect(alertOf('table.updated', { id: 't', name: 'Mesa 7', state: 'open' })).toBeNull();
+    expect(alertOf('order.updated', { id: 'o', tableName: 'Mesa 2', status: 'preparing' })).toBeNull();
+    expect(alertOf('order.cancelled', { id: 'o', tableName: 'Mesa 2', alertKitchen: false })).toBeNull();
+    expect(alertsRole('new_order', ['kitchen', 'cashier'])).toBe(true);
+    expect(alertsRole('call', ['kitchen'])).toBe(false);
+    expect(alertsRole('bill_request', ['cashier'])).toBe(true);
   });
 });
