@@ -203,6 +203,7 @@ html input, html select, html textarea {
   border: 1px solid hsl(var(--elo-line) / 0.8);
   background: hsl(var(--elo-glass-hi) / 0.55);
   padding: 0.7rem 1rem;
+  font-family: inherit;
   font-size: 0.95rem;
   color: hsl(var(--elo-fg));
   outline: none;
@@ -233,8 +234,21 @@ html select {
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
 }
-html input[type='checkbox'], html input[type='radio'] { width: 1.1rem; min-height: 0; accent-color: hsl(var(--elo-brand)); padding: 0; box-shadow: none; }
-input[type='date'] { cursor: pointer; }
+/* Checkboxes and radios drawn in the theme instead of the browser's own. */
+html input[type='checkbox'], html input[type='radio'] {
+  -webkit-appearance: none; appearance: none; flex: none; display: inline-grid; place-content: center;
+  width: 1.2rem; height: 1.2rem; min-height: 0; margin: 0; padding: 0; cursor: pointer;
+  border: 1.5px solid hsl(var(--elo-line)); border-radius: 0.4rem; background: hsl(var(--elo-glass-hi) / 0.7); box-shadow: none;
+  transition: background var(--elo-dur-fast), border-color var(--elo-dur-fast), box-shadow var(--elo-dur-fast);
+}
+html input[type='radio'] { border-radius: 999px; }
+html input[type='checkbox']::before, html input[type='radio']::before { content: ''; transform: scale(0); transition: transform 120ms var(--elo-ease); }
+html input[type='checkbox']::before { width: 0.72rem; height: 0.72rem; background: hsl(var(--elo-brand-fg)); clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); }
+html input[type='radio']::before { width: 0.55rem; height: 0.55rem; border-radius: 999px; background: hsl(var(--elo-brand)); }
+html input[type='checkbox']:checked { background: hsl(var(--elo-brand)); border-color: hsl(var(--elo-brand)); }
+html input[type='radio']:checked { border-color: hsl(var(--elo-brand)); }
+html input[type='checkbox']:checked::before, html input[type='radio']:checked::before { transform: scale(1); }
+html input[type='checkbox']:focus-visible, html input[type='radio']:focus-visible { box-shadow: 0 0 0 4px hsl(var(--elo-brand) / 0.25); }
 
 /* Campo com ícone ou prefixo à esquerda e ação à direita. */
 .field-wrap { position: relative; display: block; }

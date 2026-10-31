@@ -7,6 +7,11 @@ export interface Column<T> {
   cell: (row: T) => ReactNode;
   align?: 'left' | 'right';
   className?: string;
+  /**
+   * Place in the phone card (`mobile="cards"`): the card title, its action
+   * corner, left out, or a labelled line (default).
+   */
+  mobile?: 'title' | 'actions' | 'hidden';
 }
 
 /** Tabela dentro de vidro; linhas realçam no hover. */
@@ -15,14 +20,46 @@ export function DataTable<T>({
   rows,
   rowKey,
   onRowClick,
+  mobile = 'scroll',
 }: {
   columns: Column<T>[];
   rows: T[];
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
+  /** On phones: scroll the table sideways, or show one card per row. */
+  mobile?: 'scroll' | 'cards';
 }) {
+  const cards = mobile === 'cards';
+  const titled = columns.filter((c) => c.mobile === 'title');
+  const actions = columns.filter((c) => c.mobile === 'actions');
+  const lines = columns.filter((c) => !c.mobile);
   return (
-    <GlassCard className="overflow-hidden">
+    <>
+    {cards && (
+      <ul className="space-y-3 sm:hidden">
+        {rows.map((row) => (
+          <li key={rowKey(row)}>
+            <GlassCard className="p-4" onClick={onRowClick ? () => onRowClick(row) : undefined}>
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">{titled.map((c) => <div key={c.key}>{c.cell(row)}</div>)}</div>
+                {actions.map((c) => <div key={c.key} className="-mr-1 -mt-1 flex shrink-0 items-center gap-1">{c.cell(row)}</div>)}
+              </div>
+              {lines.length > 0 && (
+                <dl className="mt-3 grid gap-2 border-t border-line/30 pt-3 text-sm">
+                  {lines.map((c) => (
+                    <div key={c.key} className="flex items-center justify-between gap-3">
+                      <dt className="shrink-0 text-muted">{c.header}</dt>
+                      <dd className="min-w-0 text-right">{c.cell(row)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </GlassCard>
+          </li>
+        ))}
+      </ul>
+    )}
+    <GlassCard className={`overflow-hidden ${cards ? 'hidden sm:block' : ''}`}>
       <div className="overflow-x-auto scroll-soft">
         <table className="w-full min-w-[520px] text-sm">
           <thead>
@@ -52,5 +89,6 @@ export function DataTable<T>({
         </table>
       </div>
     </GlassCard>
+    </>
   );
 }

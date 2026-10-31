@@ -28,14 +28,14 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
 }
 
 /** Cabeçalho de página: título grande, descrição curta, ações e trilha opcional. */
-export function PageHeader({ title, description, actions, crumbs }: { title: string; description?: string; actions?: ReactNode; crumbs?: Crumb[] }) {
+export function PageHeader({ title, description, actions, crumbs }: { title: string; description?: ReactNode; actions?: ReactNode; crumbs?: Crumb[] }) {
   return (
     <>
       {crumbs && <Breadcrumbs items={crumbs} />}
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
         <h1 className="text-3xl font-bold sm:text-4xl">{title}</h1>
-        {description && <p className="mt-1 max-w-xl text-muted">{description}</p>}
+        {description && <div className="mt-1 max-w-xl text-muted">{description}</div>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>

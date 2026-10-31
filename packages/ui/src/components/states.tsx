@@ -20,6 +20,19 @@ export function SkeletonCards({ count = 3 }: { count?: number }) {
   );
 }
 
+/** A tab while its data loads: title and content placeholders, inside the panel that stays on screen. */
+export function PageLoading() {
+  return (
+    <div role="status" aria-label="Carregando" className="space-y-6">
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </div>
+      <SkeletonCards count={3} />
+    </div>
+  );
+}
+
 /** Estado vazio: explica e convida a agir. */
 export function EmptyState({
   icon: Icon = Inbox,

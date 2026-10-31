@@ -13,9 +13,11 @@ export function Logo({ sub }: { sub?: string }) {
   return (
     <span className="flex items-center gap-2.5">
       <LogoMark />
-      <span className="leading-none">
-        <span className="font-display text-lg font-bold tracking-tight">elo</span>
-        {sub && <span className="ml-1.5 inline-block max-w-[10rem] truncate align-bottom text-sm text-muted">{sub}</span>}
+      <span className="min-w-0 leading-tight">
+        <span className="block whitespace-nowrap font-display text-lg font-bold tracking-tight">
+          Elo <span className="text-brand">Cardápio</span>
+        </span>
+        {sub && <span className="block max-w-[11rem] truncate text-xs font-medium text-muted">{sub}</span>}
       </span>
     </span>
   );

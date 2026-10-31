@@ -6,22 +6,18 @@ import type { ReactNode } from 'react';
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-/** Transição entre rotas: entra subindo e aparecendo (só transform/opacity, sem filter). */
+/**
+ * Transição entre rotas: a página nova entra subindo e aparecendo (só transform/opacity).
+ * There is no exit animation on purpose: the shell stays mounted between tabs, and
+ * waiting for the old page to leave could hold the new one back, leaving it blank.
+ */
 export function PageTransition({ children }: { children: ReactNode }) {
   const path = usePathname();
   const reduce = useReducedMotion();
   return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={path}
-        initial={reduce ? false : { opacity: 0, y: 14 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={reduce ? undefined : { opacity: 0 }}
-        transition={{ duration: 0.4, ease: EASE }}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
+    <motion.div key={path} initial={reduce ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: EASE }}>
+      {children}
+    </motion.div>
   );
 }
 

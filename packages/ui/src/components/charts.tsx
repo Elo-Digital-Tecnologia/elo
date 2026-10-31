@@ -185,10 +185,11 @@ export function ColumnChart({ data, format = String, height = 200 }: { data: Dat
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div role="img" aria-label={data.map((d) => `${d.label} ${format(d.value)}`).join(', ')}>
+    // The top padding keeps the value shown on hover inside the chart, clear of the title above it.
+    <div role="img" aria-label={data.map((d) => `${d.label} ${format(d.value)}`).join(', ')} className="pt-8">
       <div className={`flex items-end ${data.length > 12 ? 'gap-0.5 sm:gap-1.5' : 'gap-2'}`} style={{ height }}>
         {data.map((d, i) => (
-          <div key={d.label} className="relative flex h-full min-w-0 flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+          <div key={i} className="relative flex h-full min-w-0 flex-1 flex-col justify-end" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
             {hover === i && <div className="glass pointer-events-none absolute -top-1 left-1/2 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap !rounded-md px-2.5 py-1 text-xs font-semibold tabular-nums">{format(d.value)}</div>}
             <motion.div
               className="w-full rounded-t-md"
