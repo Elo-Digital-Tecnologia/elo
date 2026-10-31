@@ -48,3 +48,15 @@ export const TableState = {
   PendingClose: 'pending_close',
 } as const;
 export type TableState = (typeof TableState)[keyof typeof TableState];
+
+/** Floor roles (waiter, cashier, kitchen) look back this many days in the order history: enough for the shift and a guest's question. */
+export const ORDER_HISTORY_FLOOR_DAYS = 2;
+
+/** Earliest moment a member may see in the order history; null means no limit (owner and managers). */
+export function orderHistoryStart(roles: readonly string[], now: Date): Date | null {
+  if (roles.includes('restaurant_admin') || roles.includes('manager')) return null;
+  return new Date(now.getTime() - ORDER_HISTORY_FLOOR_DAYS * 86_400_000);
+}
+
+/** What an order costs: unit price (options included) times quantity, summed. */
+export const orderTotalCents = (items: readonly { unitCents: number; quantity: number }[]) => items.reduce((sum, i) => sum + i.unitCents * i.quantity, 0);

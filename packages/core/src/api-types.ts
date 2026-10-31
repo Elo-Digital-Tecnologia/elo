@@ -252,3 +252,20 @@ export interface PauseList {
   /** Closures that already happened, newest first, one page at a time. */
   past: { items: PauseView[]; total: number; page: number; pageSize: number };
 }
+
+export interface OrderHistoryItem extends OrderView {
+  totalCents: number;
+  /** Who opened the table for this guest visit. */
+  servedBy: string | null;
+  /** When the waiter closed the table; null while the guests are still there. */
+  closedAt: string | null;
+}
+
+export interface OrderHistoryPage {
+  items: OrderHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Set when the member's role only sees recent orders. */
+  limitedFrom: string | null;
+}
