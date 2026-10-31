@@ -14,5 +14,6 @@ export * from './staff-rules';
 export * from './duration';
 export * from './activity';
 export * from './validation';
+export * from './fields';
 export * from './alerts';
 export * from './billing';
