@@ -60,7 +60,7 @@ export class AuditService {
   }
 
   /** Elo support inside a restaurant is recorded as the Elo member who entered, not as the restaurant. */
-  private async who(user: JwtUser): Promise<{ id: string; name: string; kind: ActorKind }> {
+  async who(user: JwtUser): Promise<{ id: string; name: string; kind: ActorKind }> {
     const elo = !!user.impersonatedBy || user.roles.includes(Role.Superadmin) || user.roles.includes(Role.EloAdmin);
     const id = user.impersonatedBy ?? user.sub;
     let name = user.name;

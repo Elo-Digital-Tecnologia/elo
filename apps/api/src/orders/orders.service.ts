@@ -10,7 +10,7 @@ import { Repository } from 'typeorm';
 import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus, previousOrderStatus, returnRule } from '@elo/core';
 import { TenantRepo } from '../common/tenant-repo';
 import type { JwtUser } from '../common/auth-types';
-import { Order } from '../database/entities';
+import { Order, TableSession } from '../database/entities';
 import { CatalogService } from '../catalog/catalog.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
@@ -63,6 +63,7 @@ export class OrdersService {
     if (q.status?.length) qb.andWhere('o.status IN (:...statuses)', { statuses: q.status });
     if (q.from) qb.andWhere('o.createdAt >= :from', { from: q.from });
     if (q.to) qb.andWhere('o.createdAt < :to', { to: q.to });
+    if (q.open) qb.innerJoin(TableSession, 's', 's.id = o.sessionId AND s.closedAt IS NULL');
     const rows = await qb
       .orderBy('o.createdAt', 'DESC')
       .take(q.limit ?? 300)

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BillView, calculateBill, FeeWaivedBy, TableState } from '@elo/core';
@@ -48,6 +48,7 @@ export class BillsService {
 
   /** Cliente recusa a taxa (ou volta atrás, desde que ele mesmo a tenha recusado). */
   async refuseFee(ctx: SessionContext, refuse: boolean): Promise<BillView> {
+    if (refuse && !(await this.restaurants.get(ctx.restaurantId)).guestFeeRefusal) throw new ForbiddenException('fee_refusal_disabled');
     const session = await this.sessions.findOne({ where: { id: ctx.sessionId } });
     if (!session) throw new NotFoundException();
     if (refuse) session.feeWaivedBy ??= 'customer';
@@ -113,6 +114,7 @@ export class BillsService {
       state: table.state,
       serviceFeeBps: restaurant.serviceFeeBps,
       feeWaivedBy,
+      guestCanRefuseFee: restaurant.guestFeeRefusal,
       lines,
       adjustments: adjustments.map(({ label, cents, reason, createdAt }) => ({ label, cents, reason, createdAt })),
       ...bill,

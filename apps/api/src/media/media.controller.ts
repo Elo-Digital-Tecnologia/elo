@@ -16,14 +16,14 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import * as path from 'path';
-import { Role } from '@elo/core';
+import { RestaurantManagerRoles } from '@elo/core';
 import { Public, Roles, TenantId } from '../common/decorators';
 import { MAX_UPLOAD_BYTES, MediaService } from './media.service';
 
 /** Gestão do banco de imagens do restaurante (só o administrador). */
 @ApiTags('media')
 @ApiBearerAuth()
-@Roles(Role.RestaurantAdmin)
+@Roles(...RestaurantManagerRoles)
 @Controller('catalog/media')
 export class MediaAdminController {
   constructor(private readonly media: MediaService) {}

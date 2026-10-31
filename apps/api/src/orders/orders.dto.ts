@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -62,4 +63,7 @@ export class ListOrdersQuery {
   @IsOptional() @Matches(DAY) to?: string;
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit?: number;
+
+  /** Only orders of guests still at their tables (session not closed), for the floor. */
+  @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() open?: boolean;
 }

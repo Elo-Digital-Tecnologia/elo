@@ -4,6 +4,8 @@ import { Role } from '@elo/core';
 @Entity('staff_users')
 @Index('UQ_staff_restaurant_username', ['restaurantId', 'username'], { unique: true, where: '"restaurant_id" IS NOT NULL AND "deleted_at" IS NULL' })
 @Index('UQ_staff_elo_username', ['username'], { unique: true, where: '"restaurant_id" IS NULL AND "deleted_at" IS NULL' })
+/** One owner (administrator) per restaurant. */
+@Index('UQ_staff_restaurant_owner', ['restaurantId'], { unique: true, where: `"deleted_at" IS NULL AND 'restaurant_admin' = ANY("roles")` })
 export class StaffUser {
   @PrimaryGeneratedColumn('uuid') id: string;
   /** Null for the Elo Digital team. */

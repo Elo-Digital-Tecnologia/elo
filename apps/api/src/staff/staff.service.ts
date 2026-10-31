@@ -9,10 +9,17 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcryptjs';
 import { ArrayContains, In, IsNull, Not, Repository } from 'typeorm';
-import { guestFacingName, Role, type StaffAction, staffRule, TableState } from '@elo/core';
+import { canTransferOwnership, guestFacingName, ownershipRoles, Role, type StaffAction, staffRule, TableState } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
 import { DiningTable, StaffUser } from '../database/entities';
+import { RealtimeService } from '../realtime/realtime.service';
+
+/** What an account may do right now, read from the database rather than from its token. */
+export interface CurrentAccess {
+  roles: Role[];
+  permissions: string[];
+}
 
 export interface NewStaff {
   restaurantId: string | null;
@@ -49,9 +56,17 @@ export class StaffService {
     @InjectRepository(StaffUser) private readonly users: Repository<StaffUser>,
     @InjectRepository(DiningTable) private readonly tables: Repository<DiningTable>,
     private readonly audit: AuditService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async create(data: NewStaff, actor?: JwtUser): Promise<PublicStaff> {
+    // The owner is created with the restaurant and only changes through a transfer; managers come from the owner.
+    if (actor && data.restaurantId) {
+      if (data.roles.includes(Role.RestaurantAdmin)) throw new ForbiddenException('owner');
+      if (data.roles.includes(Role.Manager) && !actor.impersonatedBy && !actor.roles.includes(Role.RestaurantAdmin)) {
+        throw new ForbiddenException('not_above');
+      }
+    }
     const scope = { username: data.username, restaurantId: data.restaurantId ?? IsNull(), ...notArchived };
     if (await this.users.findOne({ where: scope })) throw new ConflictException('username_taken');
     const user = await this.users.save(
@@ -88,9 +103,14 @@ export class StaffService {
     if (changes.roles) user.roles = changes.roles;
     if (changes.permissions && !user.restaurantId) user.permissions = changes.permissions;
     const saved = await this.users.save(user);
+    this.activeCache.delete(id);
     const same = (a: string[], b: string[]) => a.length === b.length && a.every((x) => b.includes(x));
     if (!same(before.roles, user.roles)) {
       await this.audit.record(actor, 'staff_roles_changed', user.restaurantId, { target: user.name, meta: { from: before.roles, to: user.roles } });
+    }
+    // The member's open screens fetch a token with the new roles and name; no new sign-in needed.
+    if (user.restaurantId && (!same(before.roles, user.roles) || before.name !== user.name)) {
+      this.realtime.publish({ type: 'staff.updated', restaurantId: user.restaurantId, payload: { id: user.id } });
     }
     if (!same(before.permissions, user.permissions)) {
       await this.audit.record(actor, 'staff_updated', user.restaurantId, { target: user.name, meta: { permissions: user.permissions } });
@@ -163,18 +183,56 @@ export class StaffService {
   }
 
   /**
-   * The JWT lasts 12 h; a deactivated or archived member loses access within
+   * The JWT lasts 12 h, but what it grants follows the account: a deactivated or
+   * archived member loses access, and changed roles or permissions apply, within
    * seconds. A short cache avoids a database read on every request.
    */
-  private readonly activeCache = new Map<string, { active: boolean; until: number }>();
+  private readonly activeCache = new Map<string, { access: CurrentAccess | null; until: number }>();
+
+  async access(id: string): Promise<CurrentAccess | null> {
+    const hit = this.activeCache.get(id);
+    if (hit && hit.until > Date.now()) return hit.access;
+    const user = await this.users.findOne({ where: { id }, select: { id: true, active: true, deletedAt: true, roles: true, permissions: true } });
+    const access = user?.active && !user.deletedAt ? { roles: user.roles, permissions: user.permissions } : null;
+    this.activeCache.set(id, { access, until: Date.now() + 10_000 });
+    return access;
+  }
 
   async isActive(id: string): Promise<boolean> {
-    const hit = this.activeCache.get(id);
-    if (hit && hit.until > Date.now()) return hit.active;
-    const user = await this.users.findOne({ where: { id }, select: { id: true, active: true, deletedAt: true } });
-    const active = !!user?.active && !user.deletedAt;
-    this.activeCache.set(id, { active, until: Date.now() + 10_000 });
-    return active;
+    return !!(await this.access(id));
+  }
+
+  /**
+   * Hands the restaurant to another member: the owner confirms with their
+   * password, Elo support gives a reason. The former owner stays on the team
+   * as a manager, and both get their new roles live.
+   */
+  async transferOwnership(
+    restaurantId: string,
+    toId: string,
+    actor: JwtUser,
+    confirm: { password: string } | { reason: string },
+  ): Promise<void> {
+    const target = await this.find(toId, restaurantId);
+    const owner = await this.users.findOne({ where: { restaurantId, roles: ArrayContains([Role.RestaurantAdmin]), ...notArchived } });
+    if ('password' in confirm && (!owner || owner.id !== actor.sub || !(await bcrypt.compare(confirm.password, owner.passwordHash)))) {
+      throw new ForbiddenException('wrong_password');
+    }
+    const from = owner ?? { id: '', roles: [] };
+    if (!canTransferOwnership(from, { ...target, archived: !!target.deletedAt })) throw new ConflictException('invalid_owner');
+    await this.users.manager.transaction(async (tx) => {
+      if (owner) await tx.update(StaffUser, owner.id, { roles: ownershipRoles(owner.roles, 'former') });
+      await tx.update(StaffUser, target.id, { roles: ownershipRoles(target.roles, 'owner') });
+    });
+    for (const u of [owner, target]) {
+      if (!u) continue;
+      this.activeCache.delete(u.id);
+      this.realtime.publish({ type: 'staff.updated', restaurantId, payload: { id: u.id } });
+    }
+    await this.audit.record(actor, 'ownership_transferred', restaurantId, {
+      target: target.name,
+      meta: { formerOwner: owner?.name ?? null, ...('reason' in confirm ? { reason: confirm.reason } : {}) },
+    });
   }
 
   async changePassword(id: string, current: string, next: string): Promise<void> {
@@ -199,10 +257,7 @@ export class StaffService {
       if (actor.sub === target.id && action !== 'edit') throw new ForbiddenException('self');
       return;
     }
-    const activeAdmins = await this.users.count({
-      where: { restaurantId: target.restaurantId, active: true, roles: ArrayContains([Role.RestaurantAdmin]), ...notArchived },
-    });
-    const decision = staffRule(actor, target, action, { activeAdmins, nextRoles });
+    const decision = staffRule(actor, target, action, { nextRoles });
     if (!decision.allowed) throw new ForbiddenException(decision.why);
   }
 }

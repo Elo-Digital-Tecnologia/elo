@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, ConflictException, Controller, Delete, Get, HttpCode, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { IsString, Matches, MaxLength } from 'class-validator';
-import { SLUG_PATTERN } from '@elo/core';
+import { canRequestBill, SLUG_PATTERN, TableState } from '@elo/core';
 import { Public } from '../common/decorators';
 import type { Env } from '../config/env';
 import { CatalogService } from '../catalog/catalog.service';
@@ -13,6 +13,8 @@ import { RefuseFeeDto } from '../bills/bills.dto';
 import { CallsService } from '../calls/calls.service';
 import { CancelCustomerDto, CreateOrderDto } from '../orders/orders.dto';
 import { OrdersService } from '../orders/orders.service';
+import { SubscribeDto, UnsubscribeDto } from '../push/push.controller';
+import { PushService } from '../push/push.service';
 import { TABLE_COOKIE } from '../realtime/realtime.gateway';
 import { ReviewDto } from '../reviews/reviews.dto';
 import { ReviewsService } from '../reviews/reviews.service';
@@ -47,6 +49,7 @@ export class PublicController {
     private readonly calls: CallsService,
     private readonly bills: BillsService,
     private readonly reviews: ReviewsService,
+    private readonly push: PushService,
     private readonly config: ConfigService<Env, true>,
   ) {}
 
@@ -56,7 +59,7 @@ export class PublicController {
     const r = await this.restaurants.getBySlug(slug);
     return {
       readOnly: true,
-      restaurant: { name: r.name, slug: r.slug, ...this.restaurants.publicProfile(r) },
+      restaurant: { name: r.name, slug: r.slug, ...(await this.restaurants.publicProfile(r)) },
       menu: await this.catalog.publicMenu(r.id),
     };
   }
@@ -100,6 +103,8 @@ export class PublicController {
   @UseGuards(TableSessionGuard)
   @Post('session/close')
   async requestClose(@Session() ctx: SessionContext) {
+    const orders = await this.orders.listForSession(ctx);
+    if (!canRequestBill(orders.map((o) => o.status))) throw new ConflictException('orders_in_progress');
     await this.tables.requestClose(ctx);
     return this.buildState(ctx);
   }
@@ -114,6 +119,29 @@ export class PublicController {
   @Post('session/orders/:id/cancel')
   cancel(@Session() ctx: SessionContext, @Param() { id }: OrderParams, @Body() dto: CancelCustomerDto) {
     return this.orders.cancelByCustomer(ctx, id, dto.reason);
+  }
+
+  /** Null when the server has no push keys: the page then offers only on-screen alerts. */
+  @Get('push-key')
+  pushKey() {
+    return { key: this.push.publicKey() };
+  }
+
+  /** The guest asks for news about the table; only while it is open, and erased when it closes. */
+  @UseGuards(TableSessionGuard)
+  @HttpCode(204)
+  @Post('session/push')
+  async subscribePush(@Session() ctx: SessionContext, @Body() dto: SubscribeDto) {
+    const table = await this.tables.tableOf(ctx);
+    if (table.state !== TableState.Open && table.state !== TableState.PendingClose) throw new ConflictException('table_not_open');
+    await this.push.subscribeGuest(ctx, dto);
+  }
+
+  @UseGuards(TableSessionGuard)
+  @HttpCode(204)
+  @Delete('session/push')
+  unsubscribePush(@Session() ctx: SessionContext, @Body() dto: UnsubscribeDto) {
+    return this.push.unsubscribeGuest(ctx.sessionId, dto.endpoint);
   }
 
   @UseGuards(TableSessionGuard)
@@ -160,7 +188,7 @@ export class PublicController {
         name: restaurant.name,
         slug: restaurant.slug,
         serviceFeeBps: restaurant.serviceFeeBps,
-        ...this.restaurants.publicProfile(restaurant),
+        ...(await this.restaurants.publicProfile(restaurant)),
         // Só quem está numa mesa recebe o Wi-Fi; o link de consulta nunca.
         wifi: restaurant.wifiName || restaurant.wifiPassword ? { name: restaurant.wifiName, password: restaurant.wifiPassword } : null,
       },

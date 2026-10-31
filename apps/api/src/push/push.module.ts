@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { PushSubscription, Restaurant, StaffUser } from '../database/entities';
+import { DiningTable, GuestPushSubscription, PushSubscription, Restaurant, StaffUser, TableSession } from '../database/entities';
 import { PushController } from './push.controller';
 import { PushService } from './push.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PushSubscription, StaffUser, Restaurant])],
+  imports: [TypeOrmModule.forFeature([PushSubscription, StaffUser, Restaurant, GuestPushSubscription, DiningTable, TableSession])],
   controllers: [PushController],
   providers: [PushService],
   exports: [PushService],

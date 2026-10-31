@@ -43,8 +43,14 @@ export class JwtAuthGuard implements CanActivate {
     const user: JwtUser = req.user;
     // Entrada da equipe Elo no restaurante: vale enquanto quem entrou continua ativo.
     const subject = user.impersonatedBy ?? user.sub;
-    if (subject !== 'superadmin' && !(await this.staff.isActive(subject))) {
-      throw new UnauthorizedException();
+    if (subject === 'superadmin') return true;
+    const current = await this.staff.access(subject);
+    if (!current) throw new UnauthorizedException();
+    // Roles and permissions follow the account, so a change applies without a new sign-in.
+    // Elo support keeps the restaurant-admin pass it was given.
+    if (!user.impersonatedBy) {
+      user.roles = current.roles;
+      user.permissions = upgradePermissions(current.permissions);
     }
     return true;
   }

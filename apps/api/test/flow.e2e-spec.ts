@@ -8,14 +8,15 @@ import cookieParser from 'cookie-parser';
 import { io, Socket } from 'socket.io-client';
 import request from 'supertest';
 import sharp from 'sharp';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { RestaurantLifecycleService } from '../src/restaurants/restaurant-lifecycle.service';
 
 /**
  * Fluxos críticos contra Postgres real (migrations aplicadas).
- * Ignorado quando DATABASE_URL não está definido.
+ * Runs only against DATABASE_URL_TEST (see test/setup-env.ts), never the development database.
  */
-const suite = process.env.DATABASE_URL ? describe : describe.skip;
+const suite = process.env.DATABASE_URL_TEST ? describe : describe.skip;
 const SUPERADMIN_KEY = process.env.SUPERADMIN_KEY ?? '';
 
 suite('fluxo da mesa (e2e)', () => {
@@ -28,7 +29,8 @@ suite('fluxo da mesa (e2e)', () => {
     (await http().post(`/auth/restaurants/${inSlug}/login`).send({ username, password })).body.accessToken as string;
 
   let admin: string, waiter: string, kitchen: string;
-  let slug: string, tableId: string, tableToken: string, productId: string;
+  let slug: string, tableId: string, tableToken: string, productId: string, planId: string;
+  const today = () => new Date().toISOString().slice(0, 10);
 
   beforeAll(async () => {
     // The suite signs in far more than the 10/min login limit allows from one address.
@@ -43,11 +45,12 @@ suite('fluxo da mesa (e2e)', () => {
     url = await app.getUrl();
 
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken;
-    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    planId = (await http().post('/admin/plans').set('Authorization', `Bearer ${sa}`).send({ name: `Plano ${suf}`, priceCents: 9900, cycleMonths: 1 }).expect(201)).body.id;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
     const r = await http()
       .post('/admin/restaurants')
       .set('Authorization', `Bearer ${sa}`)
-      .send({ name: `E2E ${suf}`, managerName: 'Maria', managerContact: '11999999999', dueDate: due, adminUsername: `adm${suf}`, adminPassword: 'senha12345' })
+      .send({ name: `E2E ${suf}`, managerName: 'Maria', managerContact: '11999999999', planId, initialDueDate: due, adminUsername: `adm${suf}`, adminPassword: 'senha12345' })
       .expect((res) => {
         if (res.status !== 201) throw new Error(JSON.stringify(res.body));
       });
@@ -138,6 +141,11 @@ suite('fluxo da mesa (e2e)', () => {
     await http().patch(`/orders/${order.body.id}/status`).set('Authorization', `Bearer ${kitchen}`).send({ status: 'received' }).expect(200);
     expect(((await updated) as { status: string }).status).toBe('received');
 
+    // the bill waits for the kitchen: no asking for it while an order is still being made
+    expect((await http().post('/public/session/close').set('Cookie', cookie).expect(409)).body.message).toBe('orders_in_progress');
+    for (const status of ['preparing', 'ready']) {
+      await http().patch(`/orders/${order.body.id}/status`).set('Authorization', `Bearer ${kitchen}`).send({ status }).expect(200);
+    }
     await http().post('/public/session/close').set('Cookie', cookie).expect(201);
     await http().post(`/tables/${tableId}/close`).set('Authorization', `Bearer ${kitchen}`).expect(403);
     await http().post(`/tables/${tableId}/close`).set('Authorization', `Bearer ${waiter}`).expect(201);
@@ -209,7 +217,14 @@ suite('fluxo da mesa (e2e)', () => {
     bill = (await http().post('/public/session/bill/fee').set('Cookie', cookie).send({ refuse: true }).expect(201)).body;
     expect(bill).toMatchObject({ feeWaivedBy: 'customer', serviceFeeCents: 0, totalCents: 12000 });
     bill = (await http().post('/public/session/bill/fee').set('Cookie', cookie).send({ refuse: false }).expect(201)).body;
-    expect(bill.feeWaivedBy).toBeNull();
+    expect(bill).toMatchObject({ feeWaivedBy: null, guestCanRefuseFee: true });
+    // the restaurant can take that option away from guests; staff still remove the fee
+    const me = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body;
+    const settings = { name: me.name, managerName: me.managerName, managerContact: me.managerContact, serviceFeeBps: me.serviceFeeBps };
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...settings, guestFeeRefusal: false }).expect(200);
+    expect((await http().get('/public/session/bill').set('Cookie', cookie).expect(200)).body.guestCanRefuseFee).toBe(false);
+    expect((await http().post('/public/session/bill/fee').set('Cookie', cookie).send({ refuse: true }).expect(403)).body.message).toBe('fee_refusal_disabled');
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...settings, guestFeeRefusal: true }).expect(200);
     await http().put(`/bills/${tableId}/fee`).set(auth(waiter)).send({ waived: true }).expect(200);
     bill = (await http().post('/public/session/bill/fee').set('Cookie', cookie).send({ refuse: false }).expect(201)).body;
     expect(bill.feeWaivedBy).toBe('staff'); // cliente não desfaz remoção do garçom
@@ -251,8 +266,8 @@ suite('fluxo da mesa (e2e)', () => {
 
     // outro restaurante não enxerga nada disto
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken;
-    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
-    const outro = await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Outro ${suf}`, managerName: 'Joao', managerContact: '11988888888', dueDate: due, adminUsername: `out${suf}`, adminPassword: 'senha12345' }).expect(201);
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const outro = await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Outro ${suf}`, managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `out${suf}`, adminPassword: 'senha12345' }).expect(201);
     const other = await login(`out${suf}`, outro.body.slug);
 
     // login é por restaurante: usuário de um não entra no outro, e o mesmo nome pode existir nos dois
@@ -275,12 +290,11 @@ suite('fluxo da mesa (e2e)', () => {
     await http().get('/tables').set(auth(access.body.accessToken)).expect(200);
     await http().patch('/me/password').set(auth(access.body.accessToken)).send({ current: 'senha12345', next: 'outrasenha123' }).expect(403);
     // the superadmin has no user row and can still record a payment
-    const nextDue = new Date(Date.now() + 40 * 86_400_000).toISOString();
-    await http().post(`/admin/restaurants/${rid}/payments`).set(auth(sa)).send({ amountCents: 9900, paidAt: new Date().toISOString(), newDueDate: nextDue }).expect(201);
+    await http().post(`/admin/restaurants/${rid}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today() }).expect(201);
     const paid = (await http().get(`/admin/restaurants/${rid}/payments`).set(auth(sa)).expect(200)).body;
-    expect(paid[0]).toMatchObject({ amountCents: 9900, recordedBy: 'superadmin', recordedByName: 'Superadmin' });
+    expect(paid[0]).toMatchObject({ kind: 'payment', amountCents: 9900, recordedByName: 'Superadmin' });
     // slug reservado não vira restaurante
-    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Admin', managerName: 'Joao', managerContact: '11988888888', dueDate: due, adminUsername: `res${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Admin', managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `res${suf}`, adminPassword: 'senha12345' }).expect(409);
     await http().get(`/bills/${tableId}`).set(auth(other)).expect(404);
     const otherRep = (await http().get('/reports').set(auth(other)).expect(200)).body;
     expect(otherRep.totals).toMatchObject({ revenueCents: 0, orders: 0, returned: 0 });
@@ -344,7 +358,8 @@ suite('fluxo da mesa (e2e)', () => {
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, logoUrl: 'javascript:alert(1)' }).expect(400);
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, null] }).expect(400);
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, { open: '25:00', close: '23:00' }, null, null, null, null, null] }).expect(400);
-    const day = { open: '00:00', close: '23:59' };
+    // same open and close time: a shift around the clock
+    const day = { open: '00:00', close: '00:00' };
     const saved = await http().patch('/restaurant/settings').set(auth(admin)).send({
       ...base,
       description: 'Pizzas no forno a lenha.',
@@ -355,11 +370,11 @@ suite('fluxo da mesa (e2e)', () => {
       wifiPassword: 'segredo-wifi-123',
       openingHours: [day, day, day, day, day, day, day],
     }).expect(200);
-    expect(saved.body).toMatchObject({ description: 'Pizzas no forno a lenha.', wifiName: 'Casa Verde', openStatus: { open: true } });
+    expect(saved.body).toMatchObject({ description: 'Pizzas no forno a lenha.', wifiName: 'Casa Verde', availability: { open: true, reason: null } });
 
     // consulta pública mostra o perfil, mas nunca o Wi-Fi
     const pub = await http().get(`/public/${slug}/menu`).expect(200);
-    expect(pub.body.restaurant).toMatchObject({ description: 'Pizzas no forno a lenha.', phone: '(11) 4000-1234', openStatus: { open: true } });
+    expect(pub.body.restaurant).toMatchObject({ description: 'Pizzas no forno a lenha.', phone: '(11) 4000-1234', availability: { open: true } });
     expect(JSON.stringify(pub.body)).not.toContain('segredo-wifi-123');
 
     // dentro da mesa o Wi-Fi aparece
@@ -416,7 +431,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post(`/tables/${tableId}/close`).set(auth(waiter)).expect(201);
   }, 30_000);
 
-  it('equipe: vários perfis, regras entre administradores, disputa entre garçons, arquivamento e desempenho', async () => {
+  it('equipe: vários perfis, um só titular, disputa entre garçons, arquivamento e desempenho', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const create = (body: Record<string, unknown>) => http().post('/staff').set(auth(admin)).send({ password: 'senha12345', ...body });
 
@@ -429,12 +444,12 @@ suite('fluxo da mesa (e2e)', () => {
     await http().get('/orders').set(auth(kc)).expect(200);
     await http().get('/staff').set(auth(kc)).expect(403);
 
-    // administrador não mexe em outro administrador nem arquiva a si mesmo
-    const adm2 = (await create({ username: `ad2${suf}`, name: 'Bruna Gerente', roles: ['restaurant_admin', 'waiter'] }).expect(201)).body;
-    await http().patch(`/staff/${adm2.id}/password`).set(auth(admin)).send({ password: 'trocada12345' }).expect(403);
-    await http().delete(`/staff/${adm2.id}`).set(auth(admin)).expect(403);
+    // one owner per restaurant: nobody creates or promotes another administrator, and the owner does not archive themselves
+    expect((await create({ username: `ad2${suf}`, name: 'Bruna Gerente', roles: ['restaurant_admin', 'waiter'] }).expect(403)).body.message).toBe('owner');
     const team = (await http().get('/staff').set(auth(admin)).expect(200)).body as { id: string; username: string; name: string; roles: string[] }[];
     const me = team.find((u) => u.username === `adm${suf}`)!;
+    const kcId = team.find((u) => u.username === `kc${suf}`)!.id;
+    expect((await http().patch(`/staff/${kcId}`).set(auth(admin)).send({ roles: ['restaurant_admin'] }).expect(403)).body.message).toBe('owner');
     await http().delete(`/staff/${me.id}`).set(auth(admin)).expect(403);
     expect(team.find((u) => u.username === `kc${suf}`)).toMatchObject({ name: 'Kátia Cozinha', roles: ['kitchen', 'cashier'] });
 
@@ -514,9 +529,9 @@ suite('fluxo da mesa (e2e)', () => {
   it('painel Elo: permissões separadas, lista com filtros e exclusão em duas etapas', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
-    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
     const newRestaurant = (name: string, admin: string) =>
-      http().post('/admin/restaurants').set(auth(sa)).send({ name, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: admin, adminPassword: 'senha12345' }).expect(201);
+      http().post('/admin/restaurants').set(auth(sa)).send({ name, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: admin, adminPassword: 'senha12345' }).expect(201);
     const teamLogin = async (username: string) => (await http().post('/auth/team/login').send({ username, password: 'senha12345' }).expect(201)).body.accessToken as string;
 
     // permissões: cada uma depende de "ver"; ninguém concede o que não tem; excluir só o superadmin concede
@@ -557,7 +572,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().delete(`/admin/restaurants/${b.id}`).set(auth(manager)).send({ confirmSlug: b.slug }).expect(204);
     await http().get(`/public/${b.slug}/menu`).expect(404);
     await http().post(`/auth/restaurants/${b.slug}/login`).send({ username: `bb${suf}`, password: 'senha12345' }).expect(401);
-    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Xis', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: `bz${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Xis', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bz${suf}`, adminPassword: 'senha12345' }).expect(409);
     const afterDelete = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}`).set(auth(sa)).expect(200)).body;
     expect(afterDelete.items.map((r: { id: string }) => r.id)).toEqual([a.id]);
     expect(afterDelete.counts.deleted).toBe(1);
@@ -578,15 +593,15 @@ suite('fluxo da mesa (e2e)', () => {
     expect(await lifecycle.purgeExpired({ ids: [b.id] })).toEqual([]);
     expect(await lifecycle.purgeExpired({ now: new Date(Date.now() + 91 * 86_400_000), ids: [b.id] })).toEqual([b.id]);
     await http().get(`/admin/restaurants/${b.id}/export`).set(auth(sa)).expect(404);
-    const slugFree = await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', dueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }).expect(201);
+    const slugFree = await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }).expect(201);
     expect(slugFree.body.slug).toBe(b.slug);
   }, 30_000);
 
   it('registros, validações dos campos e inscrição para push', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
-    const due = new Date(Date.now() + 10 * 86_400_000).toISOString();
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Registro ${suf}`, managerName: 'Rita Souza', managerContact: '(11) 97777-7777', dueDate: due, adminUsername: `rg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Registro ${suf}`, managerName: 'Rita Souza', managerContact: '(11) 97777-7777', planId, initialDueDate: due, adminUsername: `rg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
     const owner = await login(`rg${suf}`, r.slug);
 
     // campos validados e normalizados com as mesmas regras do formulário
@@ -602,7 +617,7 @@ suite('fluxo da mesa (e2e)', () => {
     // ações da equipe e da Elo ficam registradas, com nome e origem
     await http().post('/tables').set(auth(owner)).send({ name: 'Mesa 9' }).expect(201);
     await http().post('/staff').set(auth(owner)).send({ username: `rgw${suf}`, password: 'senha12345', name: 'Gabi Garçom', roles: ['waiter'] }).expect(201);
-    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ amountCents: 4990, paidAt: new Date().toISOString(), newDueDate: due }).expect(201);
+    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today(), amountCents: 4990, note: 'Desconto de lançamento' }).expect(201);
     await http().post(`/admin/restaurants/${r.id}/access`).set(auth(sa)).expect(201);
     const log = (await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body as { total: number; items: { action: string; actorName: string; actorKind: string; target: string | null; meta: Record<string, unknown> | null }[] };
     const byAction = (a: string) => log.items.find((i) => i.action === a);
@@ -633,4 +648,233 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post('/push/subscriptions').set(auth(access)).send({ endpoint: `https://push.example/elo${suf}`, keys }).expect(403);
     await http().delete('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://push.example/${suf}` }).expect(204);
   }, 30_000);
+  it('assinatura: planos, pagamento calculado, estorno, ajuste de vencimento e modo suporte', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const dayFrom = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+    const addMonth = (d: string) => {
+      const [y, m, dd] = d.split('-').map(Number);
+      const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      return new Date(Date.UTC(y, m, Math.min(dd, last))).toISOString().slice(0, 10);
+    };
+
+    // trial ended a month ago: suspended for being overdue, and "reactivate" alone does not fix it
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Cobranca ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: dayFrom(-30), adminUsername: `cb${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const detail = async () => (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body;
+    expect((await detail()).subscription).toMatchObject({ state: 'suspended', reasons: ['overdue'], plan: { id: planId, priceCents: 9900 } });
+
+    // the period restarts on the payment day and the amount comes from the plan
+    const preview = (await http().get(`/admin/restaurants/${r.id}/payments/preview?cycles=1&paidAt=${dayFrom(0)}`).set(auth(sa)).expect(200)).body;
+    expect(preview).toMatchObject({ expectedCents: 9900, restartsFromPayment: true });
+    expect(preview.periodStart.slice(0, 10)).toBe(dayFrom(0));
+    const bad = await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(0), amountCents: 5000 }).expect(400);
+    expect(bad.body.problems).toEqual(['note_required']);
+    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(2) }).expect(400);
+    const pay = (await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(0) }).expect(201)).body;
+    expect(pay.newDueDate.slice(0, 10)).toBe(addMonth(dayFrom(0)));
+    expect((await detail()).subscription).toMatchObject({ state: 'active', reasons: [] });
+
+    // a manual due date needs a reason and a day that has not passed
+    await http().post(`/admin/restaurants/${r.id}/due-date`).set(auth(sa)).send({ dueDate: dayFrom(-1), reason: 'Teste' }).expect(400);
+    const adjusted = (await http().post(`/admin/restaurants/${r.id}/due-date`).set(auth(sa)).send({ dueDate: dayFrom(90), reason: 'Cortesia de lançamento' }).expect(201)).body;
+    expect((await detail()).subscription.dueDate.slice(0, 10)).toBe(dayFrom(90));
+
+    // only the latest entry is voided, and the due date steps back each time
+    await http().post(`/admin/restaurants/${r.id}/payments/${pay.id}/void`).set(auth(sa)).send({ reason: 'Teste' }).expect(409);
+    await http().post(`/admin/restaurants/${r.id}/payments/${adjusted.id}/void`).set(auth(sa)).send({ reason: 'Engano' }).expect(201);
+    expect((await detail()).subscription.dueDate.slice(0, 10)).toBe(addMonth(dayFrom(0)));
+    await http().patch(`/admin/restaurants/${r.id}/payments/${pay.id}`).set(auth(sa)).send({ amountCents: 9000, note: 'Desconto combinado' }).expect(200);
+    await http().post(`/admin/restaurants/${r.id}/payments/${pay.id}/void`).set(auth(sa)).send({ reason: 'Pagamento não compensou' }).expect(201);
+    expect((await detail()).subscription.state).toBe('suspended');
+    const history = (await http().get(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).expect(200)).body as { voidedAt: string | null; voidReason: string | null }[];
+    expect(history.every((h) => h.voidedAt)).toBe(true);
+    const log = (await http().get(`/admin/restaurants/${r.id}/activity?category=payments`).set(auth(sa)).expect(200)).body as { items: { action: string }[] };
+    expect(log.items.map((i) => i.action)).toEqual(expect.arrayContaining(['payment_recorded', 'payment_edited', 'payment_voided', 'due_date_adjusted']));
+
+    // a plan in use is never deleted; a deactivated one takes no new restaurants
+    await http().delete(`/admin/plans/${planId}`).set(auth(sa)).expect(409);
+    const spare = (await http().post('/admin/plans').set(auth(sa)).send({ name: `Avulso ${suf}`, priceCents: 1000, cycleMonths: 1 }).expect(201)).body;
+    await http().patch(`/admin/plans/${spare.id}`).set(auth(sa)).send({ active: false }).expect(200);
+    await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Inativo ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId: spare.id, initialDueDate: dayFrom(10), adminUsername: `in${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await http().delete(`/admin/plans/${spare.id}`).set(auth(sa)).expect(204);
+
+    // Elo support inside the panel: watches the operation, fixes configuration and passwords
+    const rid = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body.id;
+    const support = (await http().post(`/admin/restaurants/${rid}/access`).set(auth(sa)).expect(201)).body.accessToken as string;
+    const anyId = '00000000-0000-4000-8000-000000000000';
+    await http().get('/orders').set(auth(support)).expect(200);
+    await http().post(`/orders/${anyId}/cancel`).set(auth(support)).send({ reason: 'Teste' }).expect(403);
+    await http().post(`/orders/${anyId}/return`).set(auth(support)).send({ reason: 'Teste' }).expect(403);
+    await http().post(`/calls/${anyId}/resolve`).set(auth(support)).expect(403);
+    await http().put(`/bills/${anyId}/fee`).set(auth(support)).send({ waived: true }).expect(403);
+    const table = (await http().post('/tables').set(auth(support)).send({ name: `Suporte ${suf}` }).expect(201)).body;
+    await http().delete(`/tables/${table.id}`).set(auth(support)).expect(204);
+    const team = (await http().get('/staff').set(auth(support)).expect(200)).body as { id: string; username: string }[];
+    const owner = team.find((m) => m.username === `adm${suf}`)!;
+    await http().patch(`/staff/${owner.id}/password`).set(auth(support)).send({ password: 'senha12345' }).expect(204);
+    // the kitchen status belongs to the kitchen, not to the administrator
+    await http().patch(`/orders/${anyId}/revert`).set(auth(admin)).expect(403);
+    await http().patch(`/orders/${anyId}/status`).set(auth(admin)).send({ status: 'received' }).expect(403);
+  });
+  it('perfis trocados valem na hora e o painel recebe um token novo sem entrar de novo', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const member = (await http().post('/staff').set(auth(admin)).send({ username: `pf${suf}`, password: 'senha12345', name: 'Paula Fernandes', roles: ['waiter'] }).expect(201)).body;
+    const before = await login(`pf${suf}`);
+    await http().get('/calls').set(auth(before)).expect(200);
+    await http().patch(`/staff/${member.id}`).set(auth(admin)).send({ roles: ['kitchen'] }).expect(200);
+    // the old token already carries the new roles on the server
+    await http().get('/calls').set(auth(before)).expect(403);
+    await http().get('/orders').set(auth(before)).expect(200);
+    const fresh = (await http().post('/auth/refresh').set(auth(before)).expect(201)).body.accessToken as string;
+    const claims = JSON.parse(Buffer.from(fresh.split('.')[1], 'base64url').toString());
+    const old = JSON.parse(Buffer.from(before.split('.')[1], 'base64url').toString());
+    expect(claims).toMatchObject({ sub: member.id, roles: ['kitchen'], exp: old.exp });
+    // answering calls is the waiters' job, and the floor only lists orders of tables still in use
+    await http().post(`/calls/00000000-0000-4000-8000-000000000000/resolve`).set(auth(admin)).expect(403);
+    await http().get('/orders?open=true&status=ready').set(auth(admin)).expect(200);
+  });
+  it('cliente: avisos só com a mesa aberta, e o aparelho é esquecido quando a mesa fecha', async () => {
+    const auth = { Authorization: `Bearer ${waiter}` };
+    const db = app.get(DataSource);
+    const count = async () => Number((await db.query(`SELECT COUNT(*) AS n FROM guest_push_subscriptions WHERE table_id = $1`, [tableId]))[0].n);
+    const device = { endpoint: `https://push.example.com/guest-${suf}`, keys: { p256dh: 'BOr6fJp5q0q3mWJZ2zKj8yG', auth: 'c2VjcmV0' } };
+
+    await http().get('/public/push-key').expect(200);
+    const g = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    await http().post('/public/session/push').set('Cookie', cookieOf(g)).send(device).expect(409);
+    await http().post('/public/session/open').set('Cookie', cookieOf(g)).expect(201);
+    await http().post(`/tables/${tableId}/validate-open`).set(auth).expect(201);
+    await http().post('/public/session/push').set('Cookie', cookieOf(g)).send({ ...device, endpoint: 'http://insecure.example.com/x' }).expect(400);
+    await http().post('/public/session/push').set('Cookie', cookieOf(g)).send(device).expect(204);
+    expect(await count()).toBe(1);
+
+    await http().post(`/tables/${tableId}/close`).set(auth).expect(201);
+    for (let i = 0; i < 20 && (await count()) > 0; i++) await new Promise((r) => setTimeout(r, 50));
+    expect(await count()).toBe(0);
+  });
+  it('gerente: cuida do dia a dia e da equipe operacional, sem configurações nem administradores', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    await http().post('/staff').set(auth(admin)).send({ username: `gr${suf}`, password: 'senha12345', name: 'Gerson Ramos', roles: ['manager'] }).expect(201);
+    const manager = await login(`gr${suf}`);
+    await http().get('/reports').set(auth(manager)).expect(200);
+    await http().get('/restaurant/activity').set(auth(manager)).expect(200);
+    await http().get('/catalog').set(auth(manager)).expect(200);
+    await http().get('/restaurant/subscription').set(auth(manager)).expect(403);
+    await http().patch('/restaurant/settings').set(auth(manager)).send({ name: 'X' }).expect(403);
+
+    const helper = (await http().post('/staff').set(auth(manager)).send({ username: `gh${suf}`, password: 'senha12345', name: 'Hugo Ajudante', roles: ['waiter'] }).expect(201)).body;
+    await http().patch(`/staff/${helper.id}`).set(auth(manager)).send({ roles: ['waiter', 'cashier'] }).expect(200);
+    expect((await http().patch(`/staff/${helper.id}`).set(auth(manager)).send({ roles: ['manager'] }).expect(403)).body.message).toBe('not_above');
+    expect((await http().post('/staff').set(auth(manager)).send({ username: `gx${suf}`, password: 'senha12345', name: 'Xavier Novo', roles: ['manager'] }).expect(403)).body.message).toBe('not_above');
+    expect((await http().post('/staff').set(auth(manager)).send({ username: `gx${suf}`, password: 'senha12345', name: 'Xavier Novo', roles: ['restaurant_admin'] }).expect(403)).body.message).toBe('owner');
+    const team = (await http().get('/staff').set(auth(manager)).expect(200)).body as { id: string; username: string }[];
+    const owner = team.find((m) => m.username === `adm${suf}`)!;
+    await http().patch(`/staff/${owner.id}/password`).set(auth(manager)).send({ password: 'trocada12345' }).expect(403);
+  });
+
+  it('titular: transfere com a senha, o suporte troca com motivo e o banco aceita um só', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Titular ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `ti${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const owner = await login(`ti${suf}`, r.slug);
+    const settings = { name: 'Titular', managerName: 'Rita', managerContact: '11977777777', serviceFeeBps: 1000 };
+    const gm = (await http().post('/staff').set(auth(owner)).send({ username: `tg${suf}`, password: 'senha12345', name: 'Gina Gerente', roles: ['manager', 'cashier'] }).expect(201)).body;
+    const manager = await login(`tg${suf}`, r.slug);
+
+    await http().post(`/staff/${gm.id}/transfer-ownership`).set(auth(manager)).send({ password: 'senha12345' }).expect(403);
+    expect((await http().post(`/staff/${gm.id}/transfer-ownership`).set(auth(owner)).send({ password: 'errada123' }).expect(403)).body.message).toBe('wrong_password');
+    await http().post(`/staff/${gm.id}/transfer-ownership`).set(auth(owner)).send({ password: 'senha12345' }).expect(204);
+
+    // both tokens follow the new roles without signing in again
+    await http().patch('/restaurant/settings').set(auth(owner)).send(settings).expect(403);
+    await http().patch('/restaurant/settings').set(auth(manager)).send(settings).expect(200);
+    const team = (await http().get('/staff').set(auth(manager)).expect(200)).body as { id: string; username: string; roles: string[] }[];
+    expect(team.find((u) => u.id === gm.id)?.roles).toEqual(['restaurant_admin', 'cashier']);
+    const former = team.find((u) => u.username === `ti${suf}`)!;
+    expect(former.roles).toEqual(['manager']);
+
+    // Elo support gives it back, with a reason and the dedicated permission
+    await http().post('/admin/staff').set(auth(sa)).send({ username: `to${suf}`, name: 'Otto Suporte', password: 'senha12345', permissions: ['restaurants.view'] }).expect(201);
+    const support = (await http().post('/auth/team/login').send({ username: `to${suf}`, password: 'senha12345' }).expect(201)).body.accessToken as string;
+    expect((await http().get(`/admin/restaurants/${r.id}/staff`).set(auth(support)).expect(200)).body).toHaveLength(2);
+    await http().post(`/admin/restaurants/${r.id}/owner`).set(auth(support)).send({ userId: former.id, reason: 'Pedido do dono' }).expect(403);
+    await http().post(`/admin/restaurants/${r.id}/owner`).set(auth(sa)).send({ userId: former.id, reason: 'x' }).expect(400);
+    await http().post(`/admin/restaurants/${r.id}/owner`).set(auth(sa)).send({ userId: former.id, reason: 'Pedido do dono' }).expect(204);
+    await http().patch('/restaurant/settings').set(auth(owner)).send(settings).expect(200);
+    const log = (await http().get(`/admin/restaurants/${r.id}/activity?category=team`).set(auth(sa)).expect(200)).body.items as { action: string; meta: { reason?: string } }[];
+    expect(log.filter((a) => a.action === 'ownership_transferred')).toHaveLength(2);
+    expect(log[0].meta.reason).toBe('Pedido do dono');
+
+    const db = app.get(DataSource);
+    await expect(db.query(`UPDATE staff_users SET roles = '{restaurant_admin}' WHERE id = $1`, [gm.id])).rejects.toThrow(/UQ_staff_restaurant_owner/);
+  });
+
+  it('funcionamento: fechado não abre mesa nova, mas as abertas terminam; paradas agendadas e encerradas', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Pausa ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `pa${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const owner = await login(`pa${suf}`, r.slug);
+    for (const [u, roles] of [['pg', ['manager']], ['pw', ['waiter']]] as const) {
+      await http().post('/staff').set(auth(owner)).send({ username: u + suf, password: 'senha12345', name: `Pessoa ${u}`, roles }).expect(201);
+    }
+    const manager = await login(`pg${suf}`, r.slug);
+    const waiterP = await login(`pw${suf}`, r.slug);
+    const cat = (await http().post('/catalog/categories').set(auth(owner)).send({ name: 'Bebidas' }).expect(201)).body;
+    const prod = (await http().post('/catalog/products').set(auth(owner)).send({ categoryId: cat.id, name: 'Suco', priceCents: 900 }).expect(201)).body;
+    const [t1, t2] = [(await http().post('/tables').set(auth(owner)).send({ name: 'Mesa A' }).expect(201)).body, (await http().post('/tables').set(auth(owner)).send({ name: 'Mesa B' }).expect(201)).body];
+    const seat = async (t: { token: string }) => cookieOf(await http().post(`/public/${r.slug}/${t.token}/session`).expect(201));
+
+    // mesa A abre antes da parada
+    const a = await seat(t1);
+    await http().post('/public/session/open').set('Cookie', a).expect(201);
+    await http().post(`/tables/${t1.id}/validate-open`).set(auth(waiterP)).expect(201);
+
+    await http().post('/restaurant/pauses').set(auth(waiterP)).send({}).expect(403);
+    const pause = (await http().post('/restaurant/pauses').set(auth(manager)).send({ reason: '  Falta de energia ' }).expect(201)).body;
+    expect(pause).toMatchObject({ endsAt: null, reason: 'Falta de energia' });
+    expect((await http().post('/restaurant/pauses').set(auth(owner)).send({}).expect(400)).body.problems).toEqual(['overlaps']);
+
+    // nenhuma mesa nova abre; a que já estava aberta continua pedindo
+    const b = await seat(t2);
+    const closed = await http().post('/public/session/open').set('Cookie', b).expect(409);
+    expect(closed.body).toMatchObject({ message: 'restaurant_closed', availability: { open: false, reason: 'pause', pauseReason: 'Falta de energia' } });
+    await http().post('/public/session/orders').set('Cookie', a).send({ items: [{ productId: prod.id, quantity: 1 }] }).expect(201);
+    const menu = (await http().get(`/public/${r.slug}/menu`).expect(200)).body;
+    expect(menu.restaurant.availability).toMatchObject({ open: false, label: 'Fechado temporariamente' });
+    const me = (await http().get('/restaurant/me').set(auth(waiterP)).expect(200)).body;
+    expect(me.availability.reason).toBe('pause');
+
+    // encerrada antes do fim: volta a abrir mesa
+    await http().post(`/restaurant/pauses/${pause.id}/end`).set(auth(owner)).expect(204);
+    await http().post(`/restaurant/pauses/${pause.id}/end`).set(auth(owner)).expect(404);
+    await http().post('/public/session/open').set('Cookie', b).expect(201);
+
+    // agendada: não fecha agora, aparece como próxima mudança e pode ser cancelada
+    const later = new Date(Date.now() + 2 * 3_600_000).toISOString();
+    const until = new Date(Date.now() + 5 * 3_600_000).toISOString();
+    await http().post('/restaurant/pauses').set(auth(owner)).send({ startsAt: until, endsAt: later }).expect(400);
+    const scheduled = (await http().post('/restaurant/pauses').set(auth(owner)).send({ startsAt: later, endsAt: until }).expect(201)).body;
+    const list = (await http().get('/restaurant/pauses').set(auth(manager)).expect(200)).body;
+    expect(list.availability).toMatchObject({ open: true, changesAt: later });
+    expect(list.upcoming.map((p: { id: string }) => p.id)).toEqual([scheduled.id]);
+    expect(list.past).toMatchObject({ total: 1, page: 1 });
+    expect(list.past.items.map((p: { id: string }) => p.id)).toEqual([pause.id]);
+    await http().post(`/restaurant/pauses/${scheduled.id}/end`).set(auth(manager)).expect(204);
+    const after = (await http().get('/restaurant/pauses').set(auth(manager)).expect(200)).body;
+    expect(after.upcoming).toEqual([]);
+    // a closure cancelled before it started never happened: it is not listed with the past ones
+    expect(after.past.items.map((p: { id: string }) => p.id)).toEqual([pause.id]);
+    await http().get('/restaurant/pauses?page=0').set(auth(manager)).expect(400);
+
+    // fora do horário: o garçom não valida a mesa pedida antes de fechar
+    const settings = { name: `Pausa ${suf}`, managerName: 'Rita', managerContact: '11977777777', serviceFeeBps: 1000 };
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...settings, openingHours: [null, null, null, null, null, null, null] }).expect(200);
+    const refused = await http().post(`/tables/${t2.id}/validate-open`).set(auth(waiterP)).expect(409);
+    expect(refused.body.availability).toMatchObject({ reason: 'hours', label: 'Fechado' });
+    await http().post(`/tables/${t2.id}/reject-open`).set(auth(waiterP)).expect(201);
+    const log = (await http().get('/restaurant/activity?category=settings').set(auth(owner)).expect(200)).body.items as { action: string }[];
+    expect(log.filter((l) => l.action === 'pause_created')).toHaveLength(2);
+  });
 });

@@ -1,7 +1,8 @@
 import { Body, Controller, Param, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { Public } from '../common/decorators';
+import { CurrentUser, NoImpersonation, Public } from '../common/decorators';
+import type { JwtUser } from '../common/auth-types';
 import { AuthService } from './auth.service';
 import { LoginDto, SuperadminLoginDto } from './auth.dto';
 
@@ -25,5 +26,18 @@ export class AuthController {
   @Post('superadmin')
   superadmin(@Body() dto: SuperadminLoginDto) {
     return this.auth.superadminLogin(dto.key);
+  }
+}
+
+/** Signed-in routes of the auth area. */
+@ApiTags('auth')
+@Controller('auth')
+export class SessionController {
+  constructor(private readonly auth: AuthService) {}
+
+  @NoImpersonation()
+  @Post('refresh')
+  refresh(@CurrentUser() user: JwtUser) {
+    return this.auth.refresh(user);
   }
 }

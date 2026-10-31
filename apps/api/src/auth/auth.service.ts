@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -62,6 +62,19 @@ export class AuthService {
       restaurantId: null,
       permissions: ALL_PERMISSIONS,
     });
+  }
+
+  /**
+   * New token with the account's current roles, permissions and name, for screens open
+   * when an administrator changed them. It ends when the original one would have.
+   */
+  async refresh(user: JwtUser & { exp?: number }): Promise<{ accessToken: string }> {
+    if (user.impersonatedBy || user.sub === 'superadmin') throw new ForbiddenException();
+    const row = await this.users.findOne({ where: { id: user.sub, deletedAt: IsNull() } });
+    const left = (user.exp ?? 0) - Math.floor(Date.now() / 1000);
+    if (!row || !row.active || left <= 0) throw new UnauthorizedException();
+    const payload: JwtUser = { sub: row.id, roles: row.roles, name: row.name, restaurantId: row.restaurantId, permissions: row.permissions };
+    return { accessToken: await this.jwt.signAsync(payload, { expiresIn: left }) };
   }
 
   private async sign(payload: JwtUser) {

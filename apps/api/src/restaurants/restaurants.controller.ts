@@ -10,13 +10,15 @@ import {
 } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import type { Restaurant } from '../database/entities';
+import { StaffService } from '../staff/staff.service';
+import { PausesService } from '../pauses/pauses.service';
 import { RestaurantsService } from './restaurants.service';
 import { RestaurantLifecycleService } from './restaurant-lifecycle.service';
 import {
+  ChangeOwnerDto,
   CreateRestaurantDto,
   DeleteRestaurantDto,
   EditRestaurantDto,
-  RecordPaymentDto,
   RestaurantListQuery,
   UpdateSettingsDto,
 } from './restaurants.dto';
@@ -32,6 +34,7 @@ export class AdminRestaurantsController {
   constructor(
     private readonly restaurants: RestaurantsService,
     private readonly lifecycle: RestaurantLifecycleService,
+    private readonly staff: StaffService,
   ) {}
 
   @Get('overview')
@@ -58,6 +61,23 @@ export class AdminRestaurantsController {
   async get(@Param('id', ParseUUIDPipe) id: string) {
     const r = await this.restaurants.get(id);
     return { ...r, subscription: this.restaurants.subscriptionOf(r) };
+  }
+
+  @RequirePermission(Permission.RestaurantsView)
+  @Get('restaurants/:id/staff')
+  async team(@Param('id', ParseUUIDPipe) id: string) {
+    await this.restaurants.get(id);
+    const rows = await this.staff.list(id);
+    return rows.map(({ id: userId, name, username, roles, active }) => ({ id: userId, name, username, roles, active }));
+  }
+
+  /** Recovery path when the owner left or lost access: Elo support names the new owner, with a reason. */
+  @RequirePermission(Permission.RestaurantsOwner)
+  @HttpCode(204)
+  @Post('restaurants/:id/owner')
+  async changeOwner(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeOwnerDto, @CurrentUser() user: JwtUser) {
+    await this.restaurants.get(id);
+    await this.staff.transferOwnership(id, dto.userId, user, { reason: dto.reason });
   }
 
   @RequirePermission(Permission.RestaurantsEdit)
@@ -105,22 +125,6 @@ export class AdminRestaurantsController {
   access(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
     return this.restaurants.accessAs(id, user);
   }
-
-  @RequirePermission(Permission.PaymentsView)
-  @Get('restaurants/:id/payments')
-  payments(@Param('id', ParseUUIDPipe) id: string) {
-    return this.restaurants.paymentHistory(id);
-  }
-
-  @RequirePermission(Permission.PaymentsRecord)
-  @Post('restaurants/:id/payments')
-  recordPayment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RecordPaymentDto,
-    @CurrentUser() user: JwtUser,
-  ) {
-    return this.restaurants.recordPayment(id, dto, user);
-  }
 }
 
 /** Visão do próprio restaurante sobre sua assinatura. */
@@ -128,7 +132,10 @@ export class AdminRestaurantsController {
 @ApiBearerAuth()
 @Controller('restaurant')
 export class RestaurantSelfController {
-  constructor(private readonly restaurants: RestaurantsService) {}
+  constructor(
+    private readonly restaurants: RestaurantsService,
+    private readonly pauses: PausesService,
+  ) {}
 
   @AllowSuspended()
   @Roles(Role.RestaurantAdmin)
@@ -146,10 +153,12 @@ export class RestaurantSelfController {
   @Roles(Role.RestaurantAdmin)
   @Patch('settings')
   async settings(@TenantId() restaurantId: string, @Body() dto: UpdateSettingsDto, @CurrentUser() user: JwtUser) {
-    return this.profile(await this.restaurants.updateSettings(restaurantId, dto, user));
+    const saved = await this.restaurants.updateSettings(restaurantId, dto, user);
+    if (dto.openingHours !== undefined) await this.pauses.announce(restaurantId);
+    return this.profile(saved);
   }
 
-  private profile(r: Restaurant) {
+  private async profile(r: Restaurant) {
     return {
       id: r.id,
       slug: r.slug,
@@ -157,7 +166,8 @@ export class RestaurantSelfController {
       managerName: r.managerName,
       managerContact: r.managerContact,
       serviceFeeBps: r.serviceFeeBps,
-      ...this.restaurants.publicProfile(r),
+      guestFeeRefusal: r.guestFeeRefusal,
+      ...(await this.restaurants.publicProfile(r)),
       wifiName: r.wifiName,
       wifiPassword: r.wifiPassword,
       openingHours: r.openingHours,
@@ -167,5 +177,5 @@ export class RestaurantSelfController {
 }
 
 function RestaurantStaff(): Role[] {
-  return [Role.RestaurantAdmin, Role.Waiter, Role.Kitchen, Role.Cashier];
+  return [Role.RestaurantAdmin, Role.Manager, Role.Waiter, Role.Kitchen, Role.Cashier];
 }

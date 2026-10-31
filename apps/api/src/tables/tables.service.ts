@@ -13,13 +13,14 @@ import { EntityManager, In, IsNull, Repository } from 'typeorm';
 import { canTransitionTable, canWaiterClose, TableState } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import { TenantRepo } from '../common/tenant-repo';
-import { DiningTable, Restaurant, type SessionClosedReason, TableSession } from '../database/entities';
+import { DiningTable, GuestPushSubscription, Restaurant, type SessionClosedReason, TableSession } from '../database/entities';
 import type { Env } from '../config/env';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
+import { PausesService } from '../pauses/pauses.service';
 import { StaffService } from '../staff/staff.service';
 
-const newToken = () => randomBytes(24).toString('base64url');
+export const newToken = () => randomBytes(24).toString('base64url');
 
 /** Contexto da sessão do cliente, já validado no servidor. */
 export interface SessionContext {
@@ -38,6 +39,7 @@ export class TablesService {
     private readonly config: ConfigService<Env, true>,
     private readonly staff: StaffService,
     private readonly audit: AuditService,
+    private readonly pauses: PausesService,
   ) {}
 
   private scoped(rid: string) {
@@ -75,6 +77,8 @@ export class TablesService {
     const table = await this.get(rid, id);
     table.token = newToken();
     await this.closeSessions(table.id, 'closed');
+    // Guests of the ended session stop hearing about this table.
+    await this.tables.manager.delete(GuestPushSubscription, { tableId: table.id });
     table.state = TableState.Closed;
     table.waiterId = null;
     const saved = await repo.save(table);
@@ -120,11 +124,12 @@ export class TablesService {
    * with the winner's name instead of a second, conflicting update.
    */
   async validateOpen(rid: string, tableId: string, actor: JwtUser) {
+    await this.pauses.assertOpen(rid);
     const table = await this.move(rid, tableId, [TableState.PendingOpen], TableState.Open, { waiterId: staffId(actor) }, (em) =>
       this.stampSession(em, tableId, { openedAt: new Date(), openedBy: staffId(actor) }),
     );
     if (!table) throw await this.lost(rid, tableId);
-    return this.persist(table, actor);
+    return this.persist(table, actor, 'opened');
   }
 
   /** The waiter turns down the opening request: the table goes back to closed and the guest session ends. */
@@ -133,7 +138,7 @@ export class TablesService {
       this.closeSessions(tableId, 'rejected', staffId(actor), em),
     );
     if (!table) throw await this.lost(rid, tableId);
-    return this.persist(table, actor);
+    return this.persist(table, actor, 'rejected');
   }
 
   /** Only staff close a table; the guest session ends with it. */
@@ -142,7 +147,7 @@ export class TablesService {
       this.closeSessions(tableId, 'closed', staffId(actor), em),
     );
     if (!table) throw await this.lost(rid, tableId);
-    return this.persist(table, actor);
+    return this.persist(table, actor, 'closed');
   }
 
   /** Another waiter takes over an open table (shift change); they become the one who can cancel its orders. */
@@ -153,7 +158,7 @@ export class TablesService {
     if (!table) throw new ConflictException('invalid_table_state');
     const previous = (await this.staff.names([current.waiterId])).get(current.waiterId ?? '')?.name ?? null;
     await this.audit.record(actor, 'table_taken', rid, { target: table.name, meta: previous ? { from: previous } : undefined });
-    return this.persist(table, actor);
+    return this.persist(table, actor, 'taken');
   }
 
   /** Adds the full name of the waiter serving each table, for the staff panels. */
@@ -218,17 +223,18 @@ export class TablesService {
   }
 
   async requestOpen(ctx: SessionContext) {
+    await this.pauses.assertOpen(ctx.restaurantId);
     const table = await this.move(ctx.restaurantId, ctx.tableId, [TableState.Closed], TableState.PendingOpen);
     if (!table) throw new ConflictException('invalid_table_state');
     await this.sessions.update({ id: ctx.sessionId }, { openRequestedAt: new Date() });
-    return this.persist(table);
+    return this.persist(table, undefined, 'open_requested');
   }
 
   async requestClose(ctx: SessionContext) {
     const table = await this.move(ctx.restaurantId, ctx.tableId, [TableState.Open], TableState.PendingClose);
     if (!table) throw new ConflictException('invalid_table_state');
     await this.sessions.update({ id: ctx.sessionId }, { closeRequestedAt: new Date() });
-    return this.persist(table);
+    return this.persist(table, undefined, 'close_requested');
   }
 
   /** Pedidos só saem se a mesa foi aberta e validada pelo garçom. */
@@ -306,7 +312,8 @@ export class TablesService {
     return new ConflictException({ statusCode: 409, message: 'already_handled', state: table.state, by: name });
   }
 
-  private async persist(table: DiningTable, actor?: JwtUser) {
+  /** `change` says what just happened, so listeners can tell an opening from a waiter taking over. */
+  private async persist(table: DiningTable, actor?: JwtUser, change?: TableChange) {
     const id = actor ? staffId(actor) : null;
     const names = await this.staff.names([table.waiterId, id]);
     this.realtime.publish({
@@ -320,11 +327,14 @@ export class TablesService {
         waiterId: table.waiterId,
         waiterName: names.get(table.waiterId ?? '')?.guestName ?? null,
         handledBy: id ? { id, name: names.get(id)?.guestName ?? null } : null,
+        change: change ?? null,
       },
     });
     return table;
   }
 }
+
+export type TableChange = 'open_requested' | 'opened' | 'rejected' | 'close_requested' | 'closed' | 'taken';
 
 /** Elo support inside a restaurant panel has no staff row; only real team members are recorded. */
 function staffId(actor: JwtUser): string | null {

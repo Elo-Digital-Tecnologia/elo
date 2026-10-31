@@ -34,9 +34,9 @@ export class ReportsService {
   }
 
   /**
-   * Per-person service numbers: calls answered, tables opened and closed, and
-   * how long guests waited. Archived members show up only when they have
-   * activity in the period.
+   * Floor service numbers per waiter: calls answered, tables opened and closed,
+   * and how long guests waited. Only waiters do this work, so only they are
+   * measured; archived waiters show up only when they have activity in the period.
    */
   async staff(rid: string, from?: string, to?: string): Promise<StaffReportView> {
     const { start, end, tz } = await this.period(from, to);
@@ -62,7 +62,7 @@ export class ReportsService {
        LEFT JOIN calls c ON c.id = u.id
        LEFT JOIN opened o ON o.id = u.id
        LEFT JOIN closed cl ON cl.id = u.id
-       WHERE u.restaurant_id = $1
+       WHERE u.restaurant_id = $1 AND 'waiter' = ANY(u.roles)
          AND (u.deleted_at IS NULL OR c.n IS NOT NULL OR o.n IS NOT NULL OR cl.n IS NOT NULL)
        ORDER BY COALESCE(c.n, 0) + COALESCE(o.n, 0) + COALESCE(cl.n, 0) DESC, u.name ASC`,
       [rid, start, end, tz],

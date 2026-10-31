@@ -9,17 +9,17 @@ import { PushService } from './push.service';
 
 const B64URL = /^[A-Za-z0-9_-]+$/;
 
-class SubscriptionKeys {
+export class SubscriptionKeys {
   @IsString() @Matches(B64URL) @MaxLength(120) p256dh: string;
   @IsString() @Matches(B64URL) @MaxLength(60) auth: string;
 }
 
-class SubscribeDto {
+export class SubscribeDto {
   @IsUrl({ protocols: ['https'], require_tld: true }) @MaxLength(1000) endpoint: string;
   @ValidateNested() @Type(() => SubscriptionKeys) keys: SubscriptionKeys;
 }
 
-class UnsubscribeDto {
+export class UnsubscribeDto {
   @IsString() @MaxLength(1000) endpoint: string;
 }
 

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@elo/core';
-import { CurrentUser, Roles, TenantId } from '../common/decorators';
+import { CurrentUser, NoImpersonation, Roles, TenantId } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { BillsService } from './bills.service';
 import { AdjustmentDto, WaiveFeeDto } from './bills.dto';
@@ -9,7 +9,7 @@ import { AdjustmentDto, WaiveFeeDto } from './bills.dto';
 /** Caixa: garçom, caixa e administrador veem e ajustam a conta das mesas. */
 @ApiTags('bills')
 @ApiBearerAuth()
-@Roles(Role.Cashier, Role.Waiter, Role.RestaurantAdmin)
+@Roles(Role.Cashier, Role.Waiter, Role.RestaurantAdmin, Role.Manager)
 @Controller('bills')
 export class BillsController {
   constructor(private readonly bills: BillsService) {}
@@ -25,11 +25,13 @@ export class BillsController {
     return this.bills.view(rid, tableId);
   }
 
+  @NoImpersonation()
   @Put(':tableId/fee')
   waive(@TenantId() rid: string, @Param('tableId', ParseUUIDPipe) tableId: string, @Body() dto: WaiveFeeDto) {
     return this.bills.setFeeWaived(rid, tableId, dto.waived);
   }
 
+  @NoImpersonation()
   @Post(':tableId/adjustments')
   addAdjustment(
     @TenantId() rid: string,
@@ -40,6 +42,7 @@ export class BillsController {
     return this.bills.addAdjustment(rid, tableId, dto, user.sub);
   }
 
+  @NoImpersonation()
   @Delete(':tableId/adjustments/:index')
   removeAdjustment(
     @TenantId() rid: string,

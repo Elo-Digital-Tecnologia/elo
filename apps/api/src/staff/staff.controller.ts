@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { canGrant, Permission, Role, withRequired } from '@elo/core';
+import { canGrant, Permission, RestaurantManagerRoles, Role, withRequired } from '@elo/core';
 import { CurrentUser, NoImpersonation, RequirePermission, Roles, TenantId } from '../common/decorators';
 import { StaffService } from './staff.service';
 import type { JwtUser } from '../common/auth-types';
@@ -10,6 +10,7 @@ import {
   CreateRestaurantStaffDto,
   ResetPasswordDto,
   SetActiveDto,
+  TransferOwnershipDto,
   UpdateEloStaffDto,
   UpdateRestaurantStaffDto,
 } from './staff.dto';
@@ -20,19 +21,19 @@ import {
 export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Get()
   list(@TenantId() restaurantId: string) {
     return this.staff.list(restaurantId);
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Post()
   create(@TenantId() restaurantId: string, @Body() dto: CreateRestaurantStaffDto, @CurrentUser() actor: JwtUser) {
     return this.staff.create({ restaurantId, ...dto }, actor);
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Patch(':id')
   update(
     @TenantId() restaurantId: string,
@@ -43,15 +44,15 @@ export class StaffController {
     return this.staff.update(id, restaurantId, actor, dto);
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @HttpCode(204)
   @Delete(':id')
   archive(@TenantId() restaurantId: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: JwtUser) {
     return this.staff.archive(id, restaurantId, actor);
   }
 
-  @Roles(Role.RestaurantAdmin)
-  @NoImpersonation()
+  /** Elo support may set a new password here: it is how a locked-out administrator gets back in. */
+  @Roles(...RestaurantManagerRoles)
   @HttpCode(204)
   @Patch(':id/password')
   resetPassword(
@@ -64,6 +65,19 @@ export class StaffController {
   }
 
   @Roles(Role.RestaurantAdmin)
+  @NoImpersonation()
+  @HttpCode(204)
+  @Post(':id/transfer-ownership')
+  transferOwnership(
+    @TenantId() restaurantId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() actor: JwtUser,
+    @Body() dto: TransferOwnershipDto,
+  ) {
+    return this.staff.transferOwnership(restaurantId, id, actor, { password: dto.password });
+  }
+
+  @Roles(...RestaurantManagerRoles)
   @Patch(':id/active')
   async setActive(
     @TenantId() restaurantId: string,

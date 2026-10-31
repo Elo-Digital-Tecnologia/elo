@@ -10,7 +10,7 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { Permission, Role } from '@elo/core';
+import { hasAnyRole, Permission, RestaurantManagerRoles, Role } from '@elo/core';
 import { CurrentUser, RequirePermission, Roles, TenantId } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { TablesService } from './tables.service';
@@ -29,33 +29,33 @@ const view = (t: { token: string } & Record<string, unknown>, withToken: boolean
 export class TablesController {
   constructor(private readonly tables: TablesService) {}
 
-  @Roles(Role.RestaurantAdmin, Role.Waiter, Role.Cashier, Role.Kitchen)
+  @Roles(Role.RestaurantAdmin, Role.Manager, Role.Waiter, Role.Cashier, Role.Kitchen)
   @Get()
   async list(@TenantId() rid: string, @CurrentUser() user: JwtUser) {
     const rows = await this.tables.withWaiterNames(await this.tables.list(rid));
-    return rows.map((t) => view(t as never, user.roles.includes(Role.RestaurantAdmin)));
+    return rows.map((t) => view(t as never, hasAnyRole(user.roles, RestaurantManagerRoles)));
   }
 
-  @Roles(Role.Waiter, Role.RestaurantAdmin)
+  @Roles(Role.Waiter, Role.RestaurantAdmin, Role.Manager)
   @Get('pending')
   async pending(@TenantId() rid: string) {
     return (await this.tables.withWaiterNames(await this.tables.pending(rid))).map((t) => view(t as never, false));
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Post()
   create(@TenantId() rid: string, @Body() dto: CreateTableDto, @CurrentUser() user: JwtUser) {
     return this.tables.create(rid, dto.name, user);
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @HttpCode(204)
   @Delete(':id')
   remove(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
     return this.tables.remove(rid, id, user);
   }
 
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Get(':id/qr')
   async qr(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
     return new StreamableFile(await this.tables.qrPng(rid, id), { type: 'image/png' });

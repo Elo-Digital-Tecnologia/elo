@@ -1,14 +1,15 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
-import { ACTIVITY_CATEGORIES, type ActivityCategory, Permission, Role } from '@elo/core';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ACTIVITY_CATEGORIES, type ActivityCategory, Permission, RestaurantManagerRoles, Role } from '@elo/core';
 import { AllowSuspended, RequirePermission, Roles, TenantId } from '../common/decorators';
 import { AuditService } from './audit.service';
 
 class ActivityQuery {
   @IsOptional() @IsIn(Object.keys(ACTIVITY_CATEGORIES)) category?: ActivityCategory;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(5) @Max(50) pageSize?: number;
 }
 
 @ApiTags('activity')
@@ -19,7 +20,7 @@ export class ActivityController {
 
   /** The restaurant's own log: what its team and the Elo team did there. */
   @AllowSuspended()
-  @Roles(Role.RestaurantAdmin)
+  @Roles(...RestaurantManagerRoles)
   @Get('restaurant/activity')
   mine(@TenantId() rid: string, @Query() q: ActivityQuery) {
     return this.audit.list(rid, q);

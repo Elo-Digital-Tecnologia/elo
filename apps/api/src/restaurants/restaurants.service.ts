@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -6,20 +6,23 @@ import { Brackets, Repository, type SelectQueryBuilder } from 'typeorm';
 import {
   AccessState,
   accessState,
+  dateOnly,
   GRACE_DAYS,
   isReservedSlug,
-  openStatus,
   type RestaurantListItem,
   type RestaurantListStatus,
   type RestaurantListView,
   type RestaurantProfileView,
   Role,
   slugify,
+  type SuspensionReason,
+  suspensionReasons,
 } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
-import { Payment, Restaurant } from '../database/entities';
+import { Plan, Restaurant } from '../database/entities';
+import { PausesService } from '../pauses/pauses.service';
 import { StaffService } from '../staff/staff.service';
 import type { RestaurantListQuery } from './restaurants.dto';
 
@@ -28,7 +31,9 @@ export interface NewRestaurant {
   slug?: string;
   managerName: string;
   managerContact: string;
-  dueDate: Date;
+  planId: string;
+  /** End of the trial, YYYY-MM-DD. */
+  initialDueDate: string;
   serviceFeeBps?: number;
   adminUsername: string;
   adminPassword: string;
@@ -40,6 +45,8 @@ export interface SubscriptionInfo {
   graceEndsAt: Date;
   /** Aviso de vencimento mostrado no dashboard do restaurante. */
   warning: boolean;
+  reasons: SuspensionReason[];
+  plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -60,15 +67,16 @@ function applyStatus(qb: SelectQueryBuilder<Restaurant>, status: Exclude<Restaur
 export class RestaurantsService {
   constructor(
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
-    @InjectRepository(Payment) private readonly payments: Repository<Payment>,
+    @InjectRepository(Plan) private readonly plans: Repository<Plan>,
     private readonly staff: StaffService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<Env, true>,
     private readonly audit: AuditService,
+    private readonly pauses: PausesService,
   ) {}
 
   /** Perfil que qualquer cliente pode ver no cardápio. O Wi-Fi fica de fora. */
-  publicProfile(r: Restaurant): RestaurantProfileView {
+  async publicProfile(r: Restaurant): Promise<RestaurantProfileView> {
     return {
       description: r.description,
       logoUrl: r.logoUrl,
@@ -76,7 +84,7 @@ export class RestaurantsService {
       address: r.address,
       phone: r.phone,
       instagram: r.instagram,
-      openStatus: openStatus(r.openingHours, new Date(), this.config.get('REPORT_TZ', { infer: true })),
+      availability: await this.pauses.of(r),
     };
   }
 
@@ -103,13 +111,21 @@ export class RestaurantsService {
     if (await this.restaurants.findOne({ where: { slug }, withDeleted: true })) {
       throw new ConflictException('slug_taken');
     }
+    const due = dateOnly(data.initialDueDate);
+    if (!due) throw new BadRequestException({ message: 'invalid_date', field: 'initialDueDate' });
+    const plan = await this.plans.findOne({ where: { id: data.planId } });
+    if (!plan) throw new NotFoundException('plan_not_found');
+    if (!plan.active) throw new ConflictException('plan_inactive');
     const restaurant = await this.restaurants.save(
       this.restaurants.create({
         slug,
         name: data.name,
         managerName: data.managerName,
         managerContact: data.managerContact,
-        dueDate: data.dueDate,
+        dueDate: due,
+        initialDueDate: due,
+        planId: plan.id,
+        plan,
         serviceFeeBps: data.serviceFeeBps ?? 1000,
       }),
     );
@@ -131,7 +147,7 @@ export class RestaurantsService {
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 20;
     const base = () => {
-      const qb = this.restaurants.createQueryBuilder('r');
+      const qb = this.restaurants.createQueryBuilder('r').leftJoinAndSelect('r.plan', 'plan');
       const term = q.q?.trim();
       if (term) {
         qb.andWhere(
@@ -237,12 +253,14 @@ export class RestaurantsService {
       dueDate: r.dueDate,
       graceEndsAt: new Date(r.dueDate.getTime() + GRACE_DAYS * DAY_MS),
       warning: state === AccessState.Grace,
+      reasons: suspensionReasons(r.dueDate, r.suspended, now),
+      plan: r.plan ? { id: r.plan.id, name: r.plan.name, priceCents: r.plan.priceCents, cycleMonths: r.plan.cycleMonths } : null,
     };
   }
 
   async updateSettings(
     id: string,
-    data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'wifiName' | 'wifiPassword' | 'openingHours'>> &
+    data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'wifiName' | 'wifiPassword' | 'openingHours' | 'guestFeeRefusal'>> &
       Pick<Restaurant, 'name' | 'managerName' | 'managerContact' | 'serviceFeeBps'>,
     actor?: JwtUser,
   ): Promise<Restaurant> {
@@ -259,29 +277,6 @@ export class RestaurantsService {
     const r = await this.get(id);
     r.suspended = suspended;
     return this.restaurants.save(r);
-  }
-
-  async recordPayment(
-    id: string,
-    data: { amountCents: number; paidAt: Date; newDueDate: Date; note?: string },
-    actor: JwtUser,
-  ): Promise<Payment> {
-    const r = await this.get(id);
-    r.dueDate = data.newDueDate;
-    await this.restaurants.save(r);
-    const recordedBy = actor.sub;
-    const recordedByName = actor.name ?? (await this.staff.actorName(recordedBy));
-    const payment = await this.payments.save(
-      this.payments.create({ restaurantId: id, ...data, note: data.note ?? null, recordedBy, recordedByName }),
-    );
-    await this.audit.record(actor, 'payment_recorded', id, {
-      meta: { amountCents: data.amountCents, newDueDate: data.newDueDate.toISOString() },
-    });
-    return payment;
-  }
-
-  paymentHistory(restaurantId: string): Promise<Payment[]> {
-    return this.payments.find({ where: { restaurantId }, order: { paidAt: 'DESC' } });
   }
 
   async overview() {

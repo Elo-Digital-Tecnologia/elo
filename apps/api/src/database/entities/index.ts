@@ -11,6 +11,9 @@ import { AuditLog } from './audit-log.entity';
 import { Media } from './media.entity';
 import { Review } from './review.entity';
 import { PushSubscription } from './push-subscription.entity';
+import { Plan } from './plan.entity';
+import { GuestPushSubscription } from './guest-push-subscription.entity';
+import { RestaurantPause } from './restaurant-pause.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -25,6 +28,9 @@ export * from './audit-log.entity';
 export * from './media.entity';
 export * from './review.entity';
 export * from './push-subscription.entity';
+export * from './plan.entity';
+export * from './guest-push-subscription.entity';
+export * from './restaurant-pause.entity';
 
 export const ENTITIES = [
   Restaurant,
@@ -40,4 +46,7 @@ export const ENTITIES = [
   Media,
   Review,
   PushSubscription,
+  Plan,
+  GuestPushSubscription,
+  RestaurantPause,
 ];

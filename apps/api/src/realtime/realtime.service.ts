@@ -6,7 +6,7 @@ export const staffRoom = (restaurantId: string) => `r:${restaurantId}`;
 export const tableRoom = (tableId: string) => `t:${tableId}`;
 
 export interface RealtimeEvent {
-  type: 'order.created' | 'order.updated' | 'order.cancelled' | 'table.updated' | 'call.created' | 'call.resolved' | 'bill.updated';
+  type: 'order.created' | 'order.updated' | 'order.cancelled' | 'table.updated' | 'call.created' | 'call.resolved' | 'bill.updated' | 'staff.updated' | 'restaurant.availability';
   restaurantId: string;
   /** Quando presente, o cliente da mesa também recebe o evento. */
   tableId?: string;
@@ -34,7 +34,7 @@ export class RealtimeService {
 
   /** Emits to the open screens and, for alerts, to the staff phones subscribed to push. */
   publish(event: RealtimeEvent): void {
-    this.push.dispatch(event.type, event.restaurantId, event.payload);
+    this.push.dispatch(event.type, event.restaurantId, event.tableId, event.payload);
     if (!this.server) return;
     let target = this.server.to(staffRoom(event.restaurantId));
     if (event.tableId) target = target.to(tableRoom(event.tableId));

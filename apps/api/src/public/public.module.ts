@@ -6,11 +6,12 @@ import { OrdersModule } from '../orders/orders.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { RestaurantsModule } from '../restaurants/restaurants.module';
 import { TablesModule } from '../tables/tables.module';
+import { PushModule } from '../push/push.module';
 import { PublicController } from './public.controller';
 import { TableSessionGuard } from './table-session.guard';
 
 @Module({
-  imports: [RestaurantsModule, CatalogModule, TablesModule, OrdersModule, CallsModule, BillsModule, ReviewsModule],
+  imports: [RestaurantsModule, CatalogModule, TablesModule, OrdersModule, CallsModule, BillsModule, ReviewsModule, PushModule],
   controllers: [PublicController],
   providers: [TableSessionGuard],
 })

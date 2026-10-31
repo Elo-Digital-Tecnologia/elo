@@ -53,3 +53,7 @@ export class ChangePasswordDto {
 export class ResetPasswordDto {
   @IsString() @MinLength(8) @MaxLength(128) password: string;
 }
+
+export class TransferOwnershipDto {
+  @IsString() @MinLength(1) @MaxLength(128) password: string;
+}

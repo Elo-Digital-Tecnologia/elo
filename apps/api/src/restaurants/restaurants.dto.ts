@@ -1,11 +1,12 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsIn,
-  IsDate,
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -44,17 +45,12 @@ export class CreateRestaurantDto {
   @IsOptional() @Matches(SLUG_PATTERN) @MaxLength(60) slug?: string;
   @Normalized(personName, 'managerName must be a person name') managerName: string;
   @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
-  @Type(() => Date) @IsDate() dueDate: Date;
+  @IsUUID() planId: string;
+  /** End of the trial, a calendar day (YYYY-MM-DD): the first due date. */
+  @Matches(/^\d{4}-\d{2}-\d{2}$/) initialDueDate: string;
   @IsOptional() @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps?: number;
   @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) adminUsername: string;
   @IsString() @MinLength(8) @MaxLength(128) adminPassword: string;
-}
-
-export class RecordPaymentDto {
-  @IsInt() @Min(0) amountCents: number;
-  @Type(() => Date) @IsDate() paidAt: Date;
-  @Type(() => Date) @IsDate() newDueDate: Date;
-  @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
 
 /** Dados editáveis pelo próprio restaurante. O slug não muda: está impresso nos QR Codes e gravado nas tags. */
@@ -63,6 +59,7 @@ export class UpdateSettingsDto {
   @Normalized(personName, 'managerName must be a person name') managerName: string;
   @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
   @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps: number;
+  @IsOptional() @IsBoolean() guestFeeRefusal?: boolean;
 
   // Perfil público. Ausente = não muda; nulo ou texto vazio = limpa.
   @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.description) description?: string | null;
@@ -95,4 +92,9 @@ export class RestaurantListQuery {
 /** Deleting asks for the slug typed back, so a misclick cannot remove a restaurant. */
 export class DeleteRestaurantDto {
   @IsString() @MaxLength(60) confirmSlug: string;
+}
+
+export class ChangeOwnerDto {
+  @IsUUID() userId: string;
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(3) @MaxLength(300) reason: string;
 }
