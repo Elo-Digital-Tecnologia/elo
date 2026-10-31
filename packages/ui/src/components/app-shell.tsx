@@ -119,7 +119,7 @@ function FadingScroll({ children }: { children: ReactNode }) {
   const edge = 'pointer-events-none absolute inset-x-0 z-10 h-12 backdrop-blur-[3px] transition-opacity duration-300';
   return (
     <div className="relative mt-3 min-h-0 flex-1">
-      <div ref={box} onScroll={update} className="h-full overflow-y-auto scroll-soft">
+      <div ref={box} onScroll={update} className="h-full overflow-y-auto overscroll-contain scroll-soft">
         <div>{children}</div>
       </div>
       <span aria-hidden className={`${edge} top-0 [mask-image:linear-gradient(to_bottom,black,transparent)] ${edges.top ? 'opacity-100' : 'opacity-0'}`} />
