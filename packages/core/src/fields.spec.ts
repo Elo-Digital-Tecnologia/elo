@@ -1,4 +1,4 @@
-import { FIELD_RULES as R, fieldError, fieldMessage, moneyError } from './fields';
+import { dayError, FIELD_RULES as R, fieldError, fieldMessage, moneyError } from './fields';
 
 const check = (rule: keyof typeof R, v: unknown) => R[rule].check(v);
 
@@ -42,5 +42,14 @@ describe('field rules', () => {
   it('writes the message in Portuguese', () => {
     expect(fieldMessage({ code: 'too_long', params: { max: 40 } })).toBe('Use no máximo 40 caracteres.');
     expect(fieldMessage({ code: 'too_large', params: { max: 1_000_000, money: true } })).toMatch(/^O máximo é R\$\s?10\.000,00\.$/);
+  });
+  it('says why a date is not allowed instead of dropping it', () => {
+    expect(dayError('', {})).toEqual({ code: 'required' });
+    expect(dayError('31/02/2026')).toEqual({ code: 'invalid_date' });
+    expect(dayError('2026-02-30')).toEqual({ code: 'invalid_date' });
+    expect(dayError('2026-10-01', { min: '2026-10-31' })).toEqual({ code: 'too_early', params: { date: '2026-10-31' } });
+    expect(fieldMessage({ code: 'too_early', params: { date: '2026-10-31' } })).toBe('Use uma data a partir de 31/10/2026.');
+    expect(dayError('2026-11-05', { max: '2026-10-31' })?.code).toBe('too_late');
+    expect(dayError('2026-10-31', { min: '2026-10-31', max: '2026-10-31' })).toBeNull();
   });
 });

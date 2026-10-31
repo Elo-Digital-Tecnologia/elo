@@ -28,6 +28,8 @@ export type FieldErrorCode =
   | 'not_zero'
   | 'invalid_option'
   | 'invalid_date'
+  | 'too_early'
+  | 'too_late'
   | 'too_few'
   | 'too_many'
   | 'unknown_field'
@@ -35,7 +37,7 @@ export type FieldErrorCode =
 
 export interface FieldError {
   code: FieldErrorCode;
-  params?: { min?: number; max?: number; money?: boolean };
+  params?: { min?: number; max?: number; money?: boolean; /** YYYY-MM-DD limit of a date field. */ date?: string };
 }
 
 export type FieldResult<T> = { ok: true; value: T } | { ok: false; error: FieldError };
@@ -202,6 +204,21 @@ export function fieldError(rule: FieldRule, value: unknown): FieldError | null {
   return r.ok ? null : r.error;
 }
 
+/**
+ * A calendar day typed in a form (YYYY-MM-DD when complete; anything else is
+ * what was typed) checked against optional first and last allowed days.
+ */
+export function dayError(value: string, o: { min?: string; max?: string; optional?: boolean } = {}): FieldError | null {
+  if (!value.trim()) return o.optional ? null : { code: 'required' };
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const d = new Date(`${value}T12:00:00Z`);
+  const real = !!m && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+  if (!real) return { code: 'invalid_date' };
+  if (o.min && value < o.min) return { code: 'too_early', params: { date: o.min } };
+  if (o.max && value > o.max) return { code: 'too_late', params: { date: o.max } };
+  return null;
+}
+
 /** Money typed in a form ("39,90") checked with a cents rule; empty follows the rule's `optional`. */
 export function moneyError(rule: FieldRule, typed: string): FieldError | null {
   if (!typed.trim()) return rule.optional ? null : { code: 'required' };
@@ -210,6 +227,8 @@ export function moneyError(rule: FieldRule, typed: string): FieldError | null {
   if (cents === null) return { code: 'invalid_money' };
   return fieldError(rule, negative ? -cents : cents);
 }
+
+const brDay = (iso?: string) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 
 const amount = (n: number | undefined, money?: boolean) => (n === undefined ? '' : money ? formatBRL(n) : n.toLocaleString('pt-BR'));
 
@@ -252,7 +271,11 @@ export function fieldMessage(error: FieldError): string {
     case 'invalid_option':
       return 'Escolha uma das opções da lista.';
     case 'invalid_date':
-      return 'Informe uma data válida.';
+      return 'Informe uma data válida, no formato dd/mm/aaaa.';
+    case 'too_early':
+      return `Use uma data a partir de ${brDay(p.date)}.`;
+    case 'too_late':
+      return `Use uma data até ${brDay(p.date)}.`;
     case 'too_few':
       return p.min === 1 ? 'Inclua pelo menos um item.' : `Inclua pelo menos ${p.min} itens.`;
     case 'too_many':
