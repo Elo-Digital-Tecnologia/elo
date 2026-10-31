@@ -3,7 +3,7 @@
 import { CreditCard, History, KeyRound, Settings, ShieldCheck, Store, Table2, Users, UtensilsCrossed } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@elo/client';
-import { ACTIVITY_ACTIONS, ACTIVITY_CATEGORIES, type ActivityCategory, type ActivityPage, type ActivityView, formatBRL, ROLE_LABEL, type Role } from '@elo/core';
+import { ACTIVITY_ACTIONS, ACTIVITY_CATEGORIES, type ActivityCategory, type ActivityPage, type ActivityView, CONTRACT_KIND_LABEL, type ContractKind, formatBRL, ROLE_LABEL, type Role } from '@elo/core';
 import { Badge, Button, EmptyState, ErrorState, Pagination, SkeletonCards } from '@elo/ui';
 
 const ICON: Record<ActivityCategory, typeof History> = {
@@ -40,6 +40,7 @@ const FIELD: Record<string, string> = {
 };
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');
+const calendarDay = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 
 const roles = (v: unknown) => (Array.isArray(v) ? v.map((r) => ROLE_LABEL[r as Role] ?? r).join(', ') : '');
 
@@ -62,6 +63,11 @@ function detail(a: ActivityView): string | null {
     return [typeof m.formerOwner === 'string' ? `Antes: ${m.formerOwner}` : null, reason].filter(Boolean).join(' · ') || null;
   }
   if (a.action === 'trial_ended') return [typeof m.from === 'string' ? `Terminaria em ${day(m.from)}` : null, reason].filter(Boolean).join(' · ') || null;
+  if (a.action === 'contract_registered' || a.action === 'contract_converted' || a.action === 'contract_renewed') {
+    const kind = typeof m.kind === 'string' ? CONTRACT_KIND_LABEL[m.kind as ContractKind] : null;
+    const term = typeof m.startsOn === 'string' && typeof m.endsOn === 'string' ? `de ${calendarDay(m.startsOn)} a ${calendarDay(m.endsOn)}` : null;
+    return [kind, term].filter(Boolean).join(' · ') || null;
+  }
   if (a.action === 'plan_changed') return typeof m.from === 'string' ? `Antes: ${m.from}.` : null;
   if (a.action === 'payment_voided') {
     const amount = typeof m.amountCents === 'number' && m.amountCents > 0 ? formatBRL(m.amountCents) : null;

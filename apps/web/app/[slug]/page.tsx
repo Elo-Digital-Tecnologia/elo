@@ -1,6 +1,6 @@
 'use client';
 
-import { SearchX } from 'lucide-react';
+import { SearchX, Store } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import type { PublicMenuView } from '@elo/core';
@@ -13,16 +13,17 @@ import { Notice } from '../_components/notice';
 /** Link fixo do restaurante: apenas consulta do cardápio. */
 export default function FixedMenu({ params }: { params: { slug: string } }) {
   const [data, setData] = useState<PublicMenuView | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  const [missing, setMissing] = useState<'not_found' | 'unavailable' | null>(null);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
     api<PublicMenuView>(`/api/public/${params.slug}/menu`)
       .then(setData)
-      .catch((e) => e instanceof ApiError && setNotFound(true));
+      .catch((e) => e instanceof ApiError && setMissing(e.code === 'menu_unavailable' ? 'unavailable' : 'not_found'));
   }, [params.slug]);
 
-  if (notFound) return <Notice title="Restaurante não encontrado" icon={<SearchX size={30} />}>Confira o endereço do cardápio.</Notice>;
+  if (missing === 'unavailable') return <Notice title="Cardápio indisponível no momento" icon={<Store size={30} />}>Este cardápio está fora do ar. Tente de novo mais tarde.</Notice>;
+  if (missing) return <Notice title="Restaurante não encontrado" icon={<SearchX size={30} />}>Confira o endereço do cardápio.</Notice>;
   if (!data)
     return (
       <main className="mx-auto max-w-2xl" aria-busy>

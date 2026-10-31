@@ -1,6 +1,6 @@
 'use client';
 
-import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Timer, Trash2, WifiOff } from 'lucide-react';
+import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Store, Timer, Trash2, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
 import { canRequestBill, type FieldError, fieldMessage, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
@@ -18,7 +18,7 @@ import { CartLine, lineUnit, ProductSheet } from '../../_components/product-shee
 import { useGuestAlertHandlers, useGuestPush } from '../../_components/menu/guest-alerts';
 import { unexpected } from '../../_lib/use-form';
 
-type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'taken' | 'rejected' | 'expired' | 'ended' | 'error';
+type Phase = 'loading' | 'ready' | 'invalid' | 'unavailable' | 'in_use' | 'taken' | 'rejected' | 'expired' | 'ended' | 'error';
 type View = 'menu' | 'orders' | 'bill';
 
 const HINT: Record<string, string> = {
@@ -105,7 +105,8 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         setPhase('ready');
       })
       .catch((e) => {
-        if (e instanceof ApiError && e.status === 404) setPhase('invalid');
+        if (e instanceof ApiError && e.code === 'menu_unavailable') setPhase('unavailable');
+        else if (e instanceof ApiError && e.status === 404) setPhase('invalid');
         else if (e instanceof ApiError && e.status === 409) setPhase('in_use');
         else setPhase('error');
       });
@@ -225,6 +226,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
       </main>
     );
   if (phase === 'invalid') return <Notice title="Link não reconhecido" icon={<Lock size={30} />}>Este QR Code ou tag não é válido. Chame o garçom.</Notice>;
+  if (phase === 'unavailable') return <Notice title="Cardápio indisponível no momento" icon={<Store size={30} />}>Os pedidos por aqui estão fora do ar. Chame o garçom.</Notice>;
   if (phase === 'in_use') return <Notice title="Mesa em atendimento" icon={<Lock size={30} />}>Esta mesa já está aberta em outro aparelho. Chame o garçom se precisar.</Notice>;
   const reload = <Button onClick={() => location.reload()}>Recarregar a página</Button>;
   if (phase === 'taken')

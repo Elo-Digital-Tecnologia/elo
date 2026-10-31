@@ -20,6 +20,7 @@ import {
   ConciergeBell,
   ShieldAlert,
   History,
+  FileClock,
   Trophy,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -27,7 +28,7 @@ import { useParams, usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, type RealtimeStatus, useAuth, useRealtime, useRealtimeStatus } from '@elo/client';
 import { useAlertsControl, useStaffAlerts } from './alerts';
-import { type Availability, ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
+import { type Availability, CONTRACT_LIMITS, ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
 import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, PageLoading, SkeletonCards } from '@elo/ui';
 
 interface Me extends RestaurantSettingsView {
@@ -100,6 +101,27 @@ function navFor(base: string, roles: string[], impersonated: boolean): NavItem[]
   ].filter((i): i is NavItem => !!i);
 }
 
+/** Why the API refused the team (403 `subscription_suspended`). */
+interface Suspension {
+  reasons: string[];
+  contractEndsOn: string | null;
+}
+
+const suspensionOf = (e: ApiError): Suspension => ({
+  reasons: Array.isArray(e.data.reasons) ? (e.data.reasons as string[]) : [],
+  contractEndsOn: typeof e.data.contractEndsOn === 'string' ? e.data.contractEndsOn : null,
+});
+
+const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
+
+function suspensionText({ reasons, contractEndsOn }: Suspension): string {
+  if (reasons.includes('contract_pending')) return 'Contrato pendente: fale com a Elo Digital para liberar o acesso. O cardápio dos clientes também fica fora do ar até lá.';
+  if (reasons.includes('contract_ended'))
+    return `Contrato encerrado${contractEndsOn ? ` em ${dayLabel(contractEndsOn)}` : ''}. Fale com a Elo Digital para renovar. O cardápio dos clientes fica fora do ar até a renovação.`;
+  if (reasons.includes('manual')) return 'O acesso foi suspenso pela Elo Digital. Fale com a Elo Digital para reativar. O cardápio dos clientes continua disponível.';
+  return 'O pagamento da assinatura não foi confirmado. Fale com a Elo Digital para reativar o acesso. O cardápio dos clientes continua disponível.';
+}
+
 const rolesLabel = (roles: string[]) => roles.map((r) => ROLE_LABEL[r as Role] ?? r).join(' · ');
 
 /**
@@ -117,7 +139,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
   const { token, user, ready, setToken } = useAuth(slug);
   const [me, setMe] = useState<Me | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [suspended, setSuspended] = useState(false);
+  const [suspended, setSuspended] = useState<Suspension | null>(null);
   const [failed, setFailed] = useState(false);
   const live = useRealtimeStatus(token, !!me);
   const roleList = user?.roles ?? [];
@@ -169,7 +191,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
           setMe(data);
         })
         .catch((e) => {
-          if (e instanceof ApiError && e.status === 403) setSuspended(true);
+          if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
           else if (e instanceof ApiError && e.status === 401) setToken(null);
           // Limite de requisições ou queda passageira: tenta de novo sem deslogar.
           else if (attempt < 4) retry = setTimeout(() => void load(attempt + 1), 1500 * (attempt + 1));
@@ -184,7 +206,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (live !== 'rejected' || !token) return;
     api<Me>('/api/restaurant/me', { token }).catch((e) => {
-      if (e instanceof ApiError && e.status === 403) setSuspended(true);
+      if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
       else if (e instanceof ApiError && e.status === 401) setToken(null);
     });
   }, [live, token, setToken]);
@@ -198,9 +220,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
             <ShieldAlert size={30} />
           </span>
           <h1 className="text-2xl font-bold">Acesso suspenso</h1>
-          <p className="text-muted">
-            O pagamento da assinatura não foi confirmado. Fale com a Elo Digital para reativar o acesso. O cardápio dos clientes continua disponível.
-          </p>
+          <p className="text-muted">{suspensionText(suspended)}</p>
           <Button variant="ghost" onClick={() => setToken(null)}>
             Sair
           </Button>
@@ -229,6 +249,8 @@ export function PanelShell({ children }: { children: ReactNode }) {
     );
 
   const warn = me.subscription.warning;
+  const contract = me.subscription.contract;
+  const manages = user.roles.some((r) => r === 'restaurant_admin' || r === 'manager');
   return (
     <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe, name: user.name ?? me.name, avatarUrl, setAvatarUrl }}>
       <AppShell
@@ -267,6 +289,15 @@ export function PanelShell({ children }: { children: ReactNode }) {
               </span>
             </GlassCard>
           ) : null}
+          {!user.impersonatedBy && manages && contract.state === 'active' && contract.daysLeft !== null && contract.daysLeft <= CONTRACT_LIMITS.warnDays && contract.endsOn && (
+            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+              <FileClock size={20} className="shrink-0 text-warning" />
+              <span>
+                O contrato com a Elo Digital termina em <strong>{dayLabel(contract.endsOn)}</strong>
+                {contract.daysLeft === 0 ? ' (hoje)' : ` (${contract.daysLeft} ${contract.daysLeft === 1 ? 'dia' : 'dias'})`}. Fale com a Elo Digital para renovar; sem renovação, o painel e o cardápio saem do ar.
+              </span>
+            </GlassCard>
+          )}
           {!me.availability.open && (
             <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
               <Clock size={20} className="shrink-0 text-warning" />

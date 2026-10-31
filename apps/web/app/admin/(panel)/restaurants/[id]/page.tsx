@@ -7,6 +7,7 @@ import { api, ApiError, storeToken } from '@elo/client';
 import { cycleLabel, FIELD_RULES, formatBRL, GRACE_DAYS, type Role, type SubscriptionView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
+import { useContracts } from './_components/contracts';
 import { PaymentSummaryCard } from './_components/payment-summary';
 import { ActivityList } from '../../../../_components/activity-list';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
@@ -39,6 +40,7 @@ interface AdminTables {
 
 const STATE = { active: { label: 'Ativa', tone: 'success' }, grace: { label: 'Em tolerância', tone: 'warning' }, suspended: { label: 'Suspensa', tone: 'danger' } } as const;
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
+const fmtDay = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
 /**
  * Ready-made billing message on the manager's own channel: WhatsApp for a phone, e-mail otherwise.
  * Sending stays manual; there is no integration.
@@ -110,6 +112,7 @@ function View({ id }: { id: string }) {
   }, [load]);
 
   const billing = useBilling({ id, token, subscription: r?.subscription ?? null, canRecord: can('payments.record'), onChange: load });
+  const contracts = useContracts({ id, token, canManage: can('contracts.manage'), signatory: { name: r?.managerName ?? '', contact: r?.managerContact ?? '' }, onChange: load });
 
   /** Runs an action and reloads; `fields` puts the API's per-field errors under their fields first. */
   const guard = async (fn: () => Promise<unknown>, fields?: (e: unknown) => boolean) => {
@@ -165,7 +168,7 @@ function View({ id }: { id: string }) {
   };
 
   const st = STATE[r.subscription.state];
-  const charge = can('payments.record') && r.subscription.state !== 'active' ? billingLink(r) : null;
+  const charge = can('payments.record') && r.subscription.state !== 'active' && r.subscription.contract.state === 'active' ? billingLink(r) : null;
   const sub = r.subscription;
   const overdue = sub.reasons.includes('overdue');
   const overdueDays = Math.floor((Date.now() - new Date(sub.dueDate).getTime()) / 86_400_000);
@@ -218,6 +221,8 @@ function View({ id }: { id: string }) {
             )}
             {sub.reasons.length > 0 && (
               <ul className="space-y-1 text-sm">
+                {sub.reasons.includes('contract_pending') && <li>Sem contrato registrado: registre o contrato assinado para liberar o acesso e o cardápio.</li>}
+                {sub.reasons.includes('contract_ended') && <li>Contrato encerrado{sub.contract.endsOn ? ` em ${fmtDay(sub.contract.endsOn)}` : ''}: renove para liberar o acesso e o cardápio.</li>}
                 {sub.reasons.includes('manual') && <li>Suspenso manualmente pela Elo Digital.</li>}
                 {overdue && <li>Vencida há {overdueDays} {overdueDays === 1 ? 'dia' : 'dias'}: registre um pagamento ou ajuste o vencimento para liberar.</li>}
               </ul>
@@ -266,6 +271,14 @@ function View({ id }: { id: string }) {
           </GlassCard>
         )}
       </div>
+
+      <div className="mt-5">{contracts.card}</div>
+      {contracts.history && (
+        <section className="mt-6">
+          <h2 className="mb-3 text-xl font-semibold">Histórico de contratos</h2>
+          {contracts.history}
+        </section>
+      )}
 
       {can('payments.view') && (
         <section className="mt-6">
@@ -430,6 +443,7 @@ function View({ id }: { id: string }) {
       </Modal>
 
       {billing.modals}
+      {contracts.modals}
     </>
   );
 }
