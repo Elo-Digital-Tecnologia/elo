@@ -2,38 +2,47 @@
 
 import { Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api } from '@elo/client';
-import type { ReviewView } from '@elo/core';
-import { Button } from '@elo/ui';
+import { api, ApiError } from '@elo/client';
+import { FIELD_RULES, type ReviewView } from '@elo/core';
+import { Button, Textarea } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../_lib/use-form';
+
+const CHECKS = { comment: rule(FIELD_RULES.reviewComment) };
+
+const ERRORS: Record<string, string> = {
+  table_not_open: 'A avaliação fica disponível enquanto a mesa estiver aberta.',
+};
 
 /** Avaliação do atendimento: de 1 a 5 estrelas e um comentário opcional. Pode ser corrigida enquanto a mesa estiver aberta. */
 export function ReviewForm() {
   const [stars, setStars] = useState(0);
-  const [comment, setComment] = useState('');
+  const form = useForm({ comment: '' }, CHECKS);
+  const { set } = form;
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<ReviewView | null>('/api/public/session/review')
       .then((r) => {
         if (r) {
           setStars(r.stars);
-          setComment(r.comment ?? '');
+          set('comment', r.comment ?? '');
           setSent(true);
         }
       })
       .catch(() => undefined);
-  }, []);
+  }, [set]);
 
   const send = async () => {
+    setError(null);
+    if (!form.validate()) return;
     setBusy(true);
-    setError(false);
     try {
-      await api('/api/public/session/review', { body: { stars, comment } });
+      await api('/api/public/session/review', { body: { stars, comment: form.values.comment } });
       setSent(true);
-    } catch {
-      setError(true);
+    } catch (err) {
+      if (!form.fromServer(err)) setError((err instanceof ApiError && ERRORS[err.code]) || unexpected(err));
     } finally {
       setBusy(false);
     }
@@ -62,8 +71,13 @@ export function ReviewForm() {
       </div>
       {stars > 0 && !sent && (
         <>
-          <textarea rows={2} maxLength={300} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Quer comentar algo? (opcional)" aria-label="Comentário" />
-          {error && <p role="alert" className="text-sm text-danger">Não foi possível enviar. Tente de novo.</p>}
+          <div>
+            <Textarea {...form.bind('comment')} rows={2} maxLength={FIELD_RULES.reviewComment.max} placeholder="Quer comentar algo? (opcional)" aria-label="Comentário" />
+            <span aria-live="polite" className="mt-1.5 block text-xs">
+              {form.errors.comment ? <span className="text-danger">{form.errors.comment}</span> : <span className="text-muted">{form.values.comment.length}/{FIELD_RULES.reviewComment.max}</span>}
+            </span>
+          </div>
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <Button className="w-full" loading={busy} onClick={send}>Enviar avaliação</Button>
         </>
       )}

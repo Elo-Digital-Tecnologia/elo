@@ -2,8 +2,9 @@
 
 import { Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
-import { formatBRL, type ProductView } from '@elo/core';
-import { Button, Sheet } from '@elo/ui';
+import { FIELD_RULES, formatBRL, type ProductView } from '@elo/core';
+import { Button, Sheet, Textarea } from '@elo/ui';
+import { rule, useForm } from '../_lib/use-form';
 import { ProductPlaceholder, TagChips } from './menu-list';
 
 export interface CartLine {
@@ -15,15 +16,25 @@ export interface CartLine {
 
 export const lineUnit = (l: CartLine) => l.product.priceCents + l.options.reduce((s, o) => s + o.priceCents, 0);
 
-/** Detalhe do produto: foto, opções, observação e quantidade. */
-export function ProductSheet({ product, onAdd, onClose }: { product: ProductView | null; onAdd: (line: CartLine) => void; onClose: () => void }) {
-  // O corpo remonta por produto para zerar quantidade e escolhas.
-  return product ? <Body key={product.id} product={product} onAdd={onAdd} onClose={onClose} /> : null;
+const NOTES_CHECKS = { notes: rule(FIELD_RULES.orderNotes) };
+
+interface SheetProps {
+  onAdd: (line: CartLine) => void;
+  onClose: () => void;
+  /** Why nothing more can be added right now (a full bag), shown in place of the add button. */
+  blocked?: string | null;
 }
 
-function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line: CartLine) => void; onClose: () => void }) {
+/** Detalhe do produto: foto, opções, observação e quantidade. */
+export function ProductSheet({ product, ...rest }: SheetProps & { product: ProductView | null }) {
+  // O corpo remonta por produto para zerar quantidade e escolhas.
+  return product ? <Body key={product.id} product={product} {...rest} /> : null;
+}
+
+function Body({ product, onAdd, onClose, blocked }: SheetProps & { product: ProductView }) {
   const [quantity, setQuantity] = useState(1);
-  const [notes, setNotes] = useState('');
+  const form = useForm({ notes: '' }, NOTES_CHECKS);
+  const notes = form.values.notes;
   const [chosen, setChosen] = useState<CartLine['options']>([]);
 
   const toggle = (group: string, multiple: boolean, label: string, priceCents: number) =>
@@ -37,6 +48,10 @@ function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line:
   const missing = product.options.filter((g) => g.required && !chosen.some((o) => o.group === g.name));
   const unit = product.priceCents + chosen.reduce((s, o) => s + o.priceCents, 0);
 
+  const add = () => {
+    if (form.validate()) onAdd({ product, quantity, notes: notes.trim(), options: chosen });
+  };
+
   return (
     <Sheet
       open
@@ -44,16 +59,19 @@ function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line:
       media={product.imageUrl ? <img src={product.imageUrl} alt="" className="aspect-[4/3] w-full object-cover" /> : <ProductPlaceholder className="aspect-[4/3] w-full" size={48} />}
       title={product.name}
       footer={
-        <div className="flex items-center gap-3">
-          <div className="surface flex items-center !rounded-pill p-1">
-            <button aria-label="Menos" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
-            <span className="w-8 text-center font-bold tabular-nums">{quantity}</span>
-            <button aria-label="Mais" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
+        <>
+          {blocked && <p role="alert" className="mb-3 text-sm text-danger">{blocked}</p>}
+          <div className="flex items-center gap-3">
+            <div className="surface flex items-center !rounded-pill p-1">
+              <button aria-label="Menos" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
+              <span className="w-8 text-center font-bold tabular-nums">{quantity}</span>
+              <button aria-label="Mais" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
+            </div>
+            <Button className="flex-1 !py-3.5" disabled={missing.length > 0 || !!blocked} onClick={add}>
+              {missing.length > 0 ? `Escolha: ${missing[0].name}` : `Adicionar · ${formatBRL(unit * quantity)}`}
+            </Button>
           </div>
-          <Button className="flex-1 !py-3.5" disabled={missing.length > 0} onClick={() => onAdd({ product, quantity, notes: notes.trim(), options: chosen })}>
-            {missing.length > 0 ? `Escolha: ${missing[0].name}` : `Adicionar · ${formatBRL(unit * quantity)}`}
-          </Button>
-        </div>
+        </>
       }
     >
       <p className="mt-1 font-semibold text-brand">
@@ -90,7 +108,10 @@ function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line:
 
         <label className="block">
           <span className="mb-2 block font-semibold">Observações</span>
-          <textarea rows={2} maxLength={300} placeholder="Ex.: sem cebola" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <Textarea {...form.bind('notes')} rows={2} maxLength={FIELD_RULES.orderNotes.max} placeholder="Ex.: sem cebola" />
+          <span aria-live="polite" className="mt-1.5 block text-xs">
+            {form.errors.notes ? <span className="text-danger">{form.errors.notes}</span> : <span className="text-muted">{notes.length}/{FIELD_RULES.orderNotes.max}</span>}
+          </span>
         </label>
       </div>
     </Sheet>

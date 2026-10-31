@@ -4,9 +4,16 @@ import { KeyRound } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { Button, Field, GlassCard, PageHeader } from '@elo/ui';
+import { FIELD_RULES, type FieldError } from '@elo/core';
+import { Button, Field, GlassCard, PageHeader, PasswordInput } from '@elo/ui';
 import { AvatarPicker } from '../../../../_components/avatar-picker';
+import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../_components/shell';
+
+const EMPTY = { current: '', next: '', again: '' };
+
+/** `invalid` only comes from the confirmation check: the API has no such rule for passwords. */
+const MESSAGES = { invalid: 'A confirmação não confere com a nova senha.' };
 
 function Account() {
   const { token, impersonated, name, avatarUrl, setAvatarUrl } = useStaff();
@@ -16,23 +23,32 @@ function Account() {
   useEffect(() => {
     if (impersonated) router.replace(`/r/${slug}/dashboard`);
   }, [impersonated, router, slug]);
-  const [form, setForm] = useState({ current: '', next: '', again: '' });
+  const form = useForm(
+    EMPTY,
+    {
+      current: (v: string): FieldError | null => (v ? null : { code: 'required' }),
+      next: rule(FIELD_RULES.password),
+      again: (v: string, all) => (!v ? { code: 'required' } : v !== all.next ? { code: 'invalid' } : null),
+    },
+    MESSAGES,
+  );
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (form.next !== form.again) return setMsg({ ok: false, text: 'A confirmação não confere com a nova senha.' });
-    setLoading(true);
     setMsg(null);
+    if (!form.validate()) return;
+    setLoading(true);
     try {
-      await api('/api/me/password', { method: 'PATCH', body: { current: form.current, next: form.next }, token });
-      setForm({ current: '', next: '', again: '' });
+      await api('/api/me/password', { method: 'PATCH', body: { current: form.values.current, next: form.values.next }, token });
+      form.reset(EMPTY);
       setMsg({ ok: true, text: 'Senha alterada.' });
     } catch (err) {
+      if (form.fromServer(err)) return;
       setMsg({
         ok: false,
-        text: err instanceof ApiError && err.status === 401 ? 'A senha atual está incorreta.' : err instanceof ApiError && err.code === 'same_password' ? 'Escolha uma senha diferente da atual.' : 'Não foi possível alterar. A nova senha precisa ter 8+ caracteres.',
+        text: err instanceof ApiError && err.status === 401 ? 'A senha atual está incorreta.' : err instanceof ApiError && err.code === 'same_password' ? 'Escolha uma senha diferente da atual.' : unexpected(err),
       });
     } finally {
       setLoading(false);
@@ -49,10 +65,10 @@ function Account() {
       </GlassCard>
       <GlassCard strong className="p-6">
         <h2 className="mb-4 font-semibold">Senha</h2>
-        <form onSubmit={submit} className="space-y-4">
-          <Field label="Senha atual"><input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} required /></Field>
-          <Field label="Nova senha" hint="Pelo menos 8 caracteres."><input type="password" autoComplete="new-password" minLength={8} value={form.next} onChange={(e) => setForm({ ...form, next: e.target.value })} required /></Field>
-          <Field label="Repita a nova senha"><input type="password" autoComplete="new-password" minLength={8} value={form.again} onChange={(e) => setForm({ ...form, again: e.target.value })} required /></Field>
+        <form onSubmit={submit} noValidate className="space-y-4">
+          <Field label="Senha atual" error={form.errors.current}><PasswordInput {...form.bind('current')} maxLength={FIELD_RULES.password.max} autoComplete="current-password" /></Field>
+          <Field label="Nova senha" hint="Pelo menos 8 caracteres." error={form.errors.next}><PasswordInput {...form.bind('next')} maxLength={FIELD_RULES.password.max} autoComplete="new-password" /></Field>
+          <Field label="Repita a nova senha" error={form.errors.again}><PasswordInput {...form.bind('again')} maxLength={FIELD_RULES.password.max} autoComplete="new-password" /></Field>
           {msg && <p role="alert" className={`text-sm ${msg.ok ? 'text-success' : 'text-danger'}`}>{msg.text}</p>}
           <Button type="submit" loading={loading}><KeyRound size={16} /> Alterar senha</Button>
         </form>

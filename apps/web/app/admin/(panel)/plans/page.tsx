@@ -3,12 +3,15 @@
 import { Layers, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { BILLING_LIMITS, cycleLabel, formatBRL, parseCents, type PlanView } from '@elo/core';
-import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, Modal, PageHeader, SkeletonCards } from '@elo/ui';
+import { BILLING_LIMITS, cycleLabel, FIELD_RULES, formatBRL, parseCents, type PlanView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, Input, Modal, MoneyInput, PageHeader, SkeletonCards } from '@elo/ui';
+import { money, rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
 
 const EMPTY = { name: '', price: '', cycleMonths: '1', active: true };
 type Form = typeof EMPTY;
+
+const CHECKS = { name: rule(FIELD_RULES.planName), price: money(FIELD_RULES.planPriceCents) };
 
 const toForm = (p: PlanView): Form => ({ name: p.name, price: (p.priceCents / 100).toFixed(2).replace('.', ','), cycleMonths: String(p.cycleMonths), active: p.active });
 
@@ -18,7 +21,7 @@ function View() {
   const [plans, setPlans] = useState<PlanView[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState<PlanView | 'new' | null>(null);
-  const [form, setForm] = useState<Form>(EMPTY);
+  const form = useForm<Form>(EMPTY, CHECKS);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState<PlanView | null>(null);
@@ -37,24 +40,24 @@ function View() {
 
   const open = (p: PlanView | 'new') => {
     setError(null);
-    setForm(p === 'new' ? EMPTY : toForm(p));
+    form.reset(p === 'new' ? EMPTY : toForm(p));
     setEditing(p);
   };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    const priceCents = parseCents(form.price);
-    if (!priceCents || priceCents > BILLING_LIMITS.planPriceMaxCents) return setError('Informe o valor do ciclo, por exemplo 99,90.');
     setError(null);
+    if (!form.validate()) return;
+    const v = form.values;
     setSaving(true);
     try {
-      const body = { name: form.name, priceCents, cycleMonths: Number(form.cycleMonths), active: form.active };
+      const body = { name: v.name, priceCents: parseCents(v.price), cycleMonths: Number(v.cycleMonths), active: v.active };
       if (editing === 'new') await api('/api/admin/plans', { body, token });
       else if (editing) await api(`/api/admin/plans/${editing.id}`, { method: 'PATCH', body, token });
       setEditing(null);
       await load();
-    } catch {
-      setError('Não foi possível salvar. Confira os campos.');
+    } catch (err) {
+      if (!form.fromServer(err, { priceCents: 'price' })) setError(unexpected(err));
     } finally {
       setSaving(false);
     }
@@ -119,12 +122,12 @@ function View() {
       )}
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? 'Novo plano' : 'Editar plano'} sheet>
-        <form onSubmit={save} className="space-y-4">
-          <Field label="Nome"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} minLength={2} maxLength={BILLING_LIMITS.planNameMax} required autoFocus /></Field>
+        <form onSubmit={save} noValidate className="space-y-4">
+          <Field label="Nome" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.planName.max} autoFocus /></Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Valor por ciclo" hint="Por exemplo 99,90."><input inputMode="decimal" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required /></Field>
+            <Field label="Valor por ciclo" hint="Por exemplo 99,90." error={form.errors.price}><MoneyInput {...form.bind('price')} /></Field>
             <Field label="Ciclo">
-              <select value={form.cycleMonths} onChange={(e) => setForm({ ...form, cycleMonths: e.target.value })}>
+              <select value={form.values.cycleMonths} onChange={(e) => form.set('cycleMonths', e.target.value)}>
                 {Array.from({ length: BILLING_LIMITS.cycleMonthsMax }, (_, i) => i + 1).map((m) => (
                   <option key={m} value={m}>{m === 1 ? '1 mês' : `${m} meses`}</option>
                 ))}
@@ -133,7 +136,7 @@ function View() {
           </div>
           {editing !== 'new' && (
             <label className="flex items-center gap-3 text-sm">
-              <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+              <input type="checkbox" checked={form.values.active} onChange={(e) => form.set('active', e.target.checked)} />
               Disponível para novos restaurantes
             </label>
           )}

@@ -3,8 +3,9 @@
 import { KeyRound, Power, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { type Permission, PERMISSION_GROUPS, upgradePermissions, withRequired } from '@elo/core';
-import { ActionMenu, Badge, Button, DataTable, EmptyState, ErrorState, Field, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { FIELD_RULES, type Permission, PERMISSION_GROUPS, upgradePermissions, withRequired } from '@elo/core';
+import { ActionMenu, Badge, Button, DataTable, EmptyState, ErrorState, Field, Input, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
 
 interface Member {
@@ -14,6 +15,19 @@ interface Member {
   permissions: string[];
   active: boolean;
 }
+
+const EMPTY = { name: '', username: '', password: '' };
+const CHECKS = { name: rule(FIELD_RULES.personName), username: rule(FIELD_RULES.username), password: rule(FIELD_RULES.password) };
+const RESET_CHECKS = { password: rule(FIELD_RULES.password) };
+
+const ERRORS: Record<string, string> = {
+  username_taken: 'Esse usuário já existe na equipe Elo.',
+  cannot_grant: 'Você marcou uma permissão que não pode conceder.',
+  self: 'Você não pode alterar a própria conta por aqui.',
+};
+
+/** A known refusal from the API in words, or the honest "something failed". */
+const messageOf = (e: unknown) => (e instanceof ApiError && ERRORS[e.code]) || unexpected(e);
 
 /** "Restaurantes: Ver, Cadastrar" per group, so a member with many permissions still fits in a row. */
 function summary(perms: string[]) {
@@ -60,12 +74,12 @@ function View() {
   const [list, setList] = useState<Member[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', username: '', password: '' });
+  const form = useForm(EMPTY, CHECKS, { username_taken: ERRORS.username_taken });
   const [perms, setPerms] = useState<Permission[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [resetting, setResetting] = useState<Member | null>(null);
-  const [newPassword, setNewPassword] = useState('');
+  const resetForm = useForm({ password: '' }, RESET_CHECKS);
   const [editing, setEditing] = useState<Member | null>(null);
   const [editPerms, setEditPerms] = useState<Permission[]>([]);
   const [removing, setRemoving] = useState<Member | null>(null);
@@ -89,20 +103,15 @@ function View() {
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!form.validate()) return;
     try {
-      await api('/api/admin/staff', { body: { ...form, permissions: perms }, token });
-      setForm({ name: '', username: '', password: '' });
+      await api('/api/admin/staff', { body: { ...form.values, permissions: perms }, token });
+      form.reset(EMPTY);
       setPerms([]);
       setOpen(false);
       await load();
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 409
-          ? 'Esse usuário já existe.'
-          : err instanceof ApiError && err.code === 'cannot_grant'
-            ? 'Você marcou uma permissão que não pode conceder.'
-            : 'Confira os campos: nome com letras, usuário em minúsculas e senha com 8 ou mais caracteres.',
-      );
+      if (!form.fromServer(err)) setError(messageOf(err));
     }
   };
 
@@ -115,7 +124,7 @@ function View() {
       setEditing(null);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError && err.code === 'cannot_grant' ? 'Você marcou uma permissão que não pode conceder.' : 'Não foi possível salvar as permissões.');
+      setError(messageOf(err));
     }
   };
 
@@ -123,12 +132,13 @@ function View() {
     e.preventDefault();
     if (!resetting) return;
     setError(null);
+    if (!resetForm.validate()) return;
     try {
-      await api(`/api/admin/staff/${resetting.id}/password`, { method: 'PATCH', body: { password: newPassword }, token });
+      await api(`/api/admin/staff/${resetting.id}/password`, { method: 'PATCH', body: { password: resetForm.values.password }, token });
       setResetting(null);
-      setNewPassword('');
-    } catch {
-      setError('Não foi possível trocar a senha. Use 8 caracteres ou mais.');
+      resetForm.reset({ password: '' });
+    } catch (err) {
+      if (!resetForm.fromServer(err)) setError(messageOf(err));
     }
   };
 
@@ -196,7 +206,7 @@ function View() {
                     <ActionMenu
                       title={m.name}
                       items={[
-                        { label: 'Nova senha', icon: KeyRound, onSelect: () => { setError(null); setNewPassword(''); setResetting(m); } },
+                        { label: 'Nova senha', icon: KeyRound, onSelect: () => { setError(null); resetForm.reset({ password: '' }); setResetting(m); } },
                         { label: m.active ? 'Desativar acesso' : 'Reativar acesso', icon: Power, disabledReason: own, onSelect: () => void toggle(m) },
                         { label: 'Excluir', icon: Trash2, danger: true, disabledReason: own, onSelect: () => { setError(null); setRemoving(m); } },
                       ]}
@@ -210,8 +220,10 @@ function View() {
       )}
 
       <Modal open={!!resetting} onClose={() => setResetting(null)} title={`Nova senha de ${resetting?.name ?? ''}`}>
-        <form onSubmit={resetPassword} className="space-y-4">
-          <Field label="Nova senha" hint="Pelo menos 8 caracteres."><PasswordInput value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} autoComplete="new-password" required autoFocus /></Field>
+        <form onSubmit={resetPassword} noValidate className="space-y-4">
+          <Field label="Nova senha" hint="Pelo menos 8 caracteres." error={resetForm.errors.password}>
+            <PasswordInput {...resetForm.bind('password')} maxLength={FIELD_RULES.password.max} autoComplete="new-password" autoFocus />
+          </Field>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end"><Button type="submit">Salvar senha</Button></div>
         </form>
@@ -235,11 +247,15 @@ function View() {
       </Modal>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Novo integrante" sheet>
-        <form onSubmit={create} className="space-y-4">
+        <form onSubmit={create} noValidate className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nome completo"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} minLength={2} maxLength={80} required autoFocus /></Field>
-            <Field label="Usuário"><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })} autoCapitalize="none" required /></Field>
-            <Field label="Senha" hint="Pelo menos 8 caracteres."><PasswordInput value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" minLength={8} required /></Field>
+            <Field label="Nome completo" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.personName.max} autoFocus /></Field>
+            <Field label="Usuário" hint="Minúsculas, números, ponto, hífen ou sublinhado." error={form.errors.username}>
+              <Input {...form.bind('username')} onChange={(e) => form.set('username', e.target.value.toLowerCase())} maxLength={FIELD_RULES.username.max} autoCapitalize="none" />
+            </Field>
+            <Field label="Senha" hint="Pelo menos 8 caracteres." error={form.errors.password}>
+              <PasswordInput {...form.bind('password')} maxLength={FIELD_RULES.password.max} autoComplete="new-password" />
+            </Field>
           </div>
           <PermissionPicker value={perms} onChange={setPerms} grantable={grantable} />
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}

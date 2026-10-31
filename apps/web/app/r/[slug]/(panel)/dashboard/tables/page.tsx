@@ -3,8 +3,9 @@
 import { Check, Copy, Download, Plus, Table2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import type { TableView } from '@elo/core';
-import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards, Stagger, StaggerItem } from '@elo/ui';
+import { FIELD_RULES, type TableView } from '@elo/core';
+import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, SkeletonCards, Stagger, StaggerItem } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const STATE: Record<string, { label: string; tone: 'neutral' | 'warning' | 'success' }> = {
@@ -68,7 +69,8 @@ function View() {
   const [tables, setTables] = useState<TableView[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
+  const form = useForm({ name: '' }, { name: rule(FIELD_RULES.tableName) });
+  const [createError, setCreateError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -85,11 +87,22 @@ function View() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    await api('/api/tables', { body: { name: name.trim() }, token });
-    setName('');
+    setCreateError(null);
+    if (!form.validate()) return;
+    try {
+      await api('/api/tables', { body: { name: form.values.name.trim() }, token });
+    } catch (err) {
+      if (!form.fromServer(err)) setCreateError(unexpected(err));
+      return;
+    }
     setOpen(false);
     await load();
+  };
+
+  const openForm = () => {
+    form.reset({ name: '' });
+    setCreateError(null);
+    setOpen(true);
   };
 
   const remove = async (t: TableView) => {
@@ -104,19 +117,20 @@ function View() {
 
   return (
     <>
-      <PageHeader title="Mesas e QR Codes" description="QR Code e tag NFC de cada mesa." actions={<Button onClick={() => setOpen(true)}><Plus size={17} /> Nova mesa</Button>} />
+      <PageHeader title="Mesas e QR Codes" description="QR Code e tag NFC de cada mesa." actions={<Button onClick={openForm}><Plus size={17} /> Nova mesa</Button>} />
       {error && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
       {failed && <ErrorState action={<Button onClick={load}>Tentar de novo</Button>}>Não foi possível carregar as mesas.</ErrorState>}
       {!tables && !failed && <SkeletonCards count={3} />}
-      {tables?.length === 0 && <EmptyState icon={Table2} title="Nenhuma mesa cadastrada" action={<Button onClick={() => setOpen(true)}>Cadastrar mesa</Button>}>Crie uma mesa para gerar o QR Code que o cliente escaneia para pedir.</EmptyState>}
+      {tables?.length === 0 && <EmptyState icon={Table2} title="Nenhuma mesa cadastrada" action={<Button onClick={openForm}>Cadastrar mesa</Button>}>Crie uma mesa para gerar o QR Code que o cliente escaneia para pedir.</EmptyState>}
       <Stagger className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         {tables?.map((t) => (
           <StaggerItem key={t.id}><TableCard table={t} slug={me.slug} token={token} onRemove={() => remove(t)} /></StaggerItem>
         ))}
       </Stagger>
       <Modal open={open} onClose={() => setOpen(false)} title="Nova mesa" sheet>
-        <form onSubmit={create} className="space-y-4">
-          <Field label="Nome da mesa"><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Mesa 01" required autoFocus /></Field>
+        <form onSubmit={create} noValidate className="space-y-4">
+          <Field label="Nome da mesa" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.tableName.max} placeholder="Mesa 01" autoFocus /></Field>
+          {createError && <p role="alert" className="text-sm text-danger">{createError}</p>}
           <div className="flex justify-end"><Button type="submit">Criar mesa</Button></div>
         </form>
       </Modal>

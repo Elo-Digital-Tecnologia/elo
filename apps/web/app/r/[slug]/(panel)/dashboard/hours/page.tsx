@@ -4,8 +4,9 @@ import { CalendarClock, CalendarX2, CirclePause, Clock, Play } from 'lucide-reac
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { availability, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
-import { Badge, Button, ConfirmModal, DateTimeInput, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, Pagination, SkeletonCards } from '@elo/ui';
+import { availability, FIELD_RULES, type FieldError, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DateTimeInput, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, Pagination, SkeletonCards, Textarea } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -35,6 +36,22 @@ interface Draft {
   end: string;
   reason: string;
 }
+
+/** Codes only this form raises, each with its own sentence in `MESSAGES`. */
+const own = (code: 'start_missing' | 'end_missing') => ({ code }) as unknown as FieldError;
+
+const MESSAGES = {
+  start_missing: 'Informe quando a parada começa.',
+  end_missing: 'Informe quando a parada termina, ou marque "Até reabrir".',
+};
+
+const dateError = (v: string, missing: FieldError): FieldError | null => (!v ? missing : Number.isNaN(new Date(v).getTime()) ? { code: 'invalid_date' } : null);
+
+const DRAFT_CHECKS = {
+  start: (v: string, all: Draft) => (all.startNow ? null : dateError(v, own('start_missing'))),
+  end: (v: string, all: Draft) => (all.untilReopen ? null : dateError(v, own('end_missing'))),
+  reason: rule(FIELD_RULES.pauseReason),
+};
 
 const freshDraft = (startNow: boolean): Draft => ({
   startNow,
@@ -98,7 +115,9 @@ function View() {
   const { token, roles, me } = useStaff();
   const [data, setData] = useState<PauseList | null>(null);
   const [failed, setFailed] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const [composing, setComposing] = useState(false);
+  const form = useForm<Draft>(freshDraft(true), DRAFT_CHECKS, MESSAGES);
+  const draft = composing ? form.values : null;
   const [ending, setEnding] = useState<PauseView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -131,15 +150,20 @@ function View() {
 
   const quick = (minutes: number) => {
     if (!draft || !startAt) return;
-    setDraft({ ...draft, untilReopen: false, end: localInput(new Date(startAt.getTime() + minutes * 60_000)) });
+    form.set('untilReopen', false);
+    form.set('end', localInput(new Date(startAt.getTime() + minutes * 60_000)));
+  };
+
+  const compose = (startNow: boolean) => {
+    setError(null);
+    form.reset(freshDraft(startNow));
+    setComposing(true);
   };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!draft) return;
-    if (!draft.startNow && !draft.start) return setError('Informe quando a parada começa.');
-    if (!draft.untilReopen && !draft.end) return setError('Informe quando a parada termina, ou marque "Até reabrir".');
     setError(null);
+    if (!draft || !form.validate()) return;
     setBusy(true);
     try {
       await api('/api/restaurant/pauses', {
@@ -150,11 +174,12 @@ function View() {
         },
         token,
       });
-      setDraft(null);
+      setComposing(false);
       await load();
     } catch (err) {
+      if (form.fromServer(err, { startsAt: 'start', endsAt: 'end' })) return;
       const problems = err instanceof ApiError && Array.isArray(err.data.problems) ? (err.data.problems as PauseProblem[]) : [];
-      setError(problems.length ? problems.map((p) => PROBLEM[p]).join(' ') : 'Não foi possível salvar a parada. Tente de novo.');
+      setError(problems.length ? problems.map((p) => PROBLEM[p]).join(' ') : unexpected(err));
     } finally {
       setBusy(false);
     }
@@ -191,8 +216,8 @@ function View() {
         description="Fora do horário ou numa parada, nenhuma mesa nova abre. As mesas já abertas continuam pedindo até o garçom fechar."
         actions={
           <div className="flex flex-wrap gap-2">
-            {!running && <Button variant="danger" onClick={() => { setError(null); setDraft(freshDraft(true)); }}><CirclePause size={17} /> Pausar agora</Button>}
-            <Button variant="ghost" onClick={() => { setError(null); setDraft(freshDraft(false)); }}><CalendarClock size={17} /> Agendar parada</Button>
+            {!running && <Button variant="danger" onClick={() => compose(true)}><CirclePause size={17} /> Pausar agora</Button>}
+            <Button variant="ghost" onClick={() => compose(false)}><CalendarClock size={17} /> Agendar parada</Button>
           </div>
         }
       />
@@ -276,25 +301,26 @@ function View() {
         )}
       </div>
 
-      <Modal open={!!draft} onClose={() => setDraft(null)} title={draft?.startNow ? 'Pausar agora' : 'Agendar parada'} sheet>
+      <Modal open={!!draft} onClose={() => setComposing(false)} title={draft?.startNow ? 'Pausar agora' : 'Agendar parada'} sheet>
         {draft && (
-          <form onSubmit={save} className="space-y-4">
+          <form onSubmit={save} noValidate className="space-y-4">
             {!draft.startNow && (
-              <Field label="Começa em">
-                <DateTimeInput value={draft.start} min={localInput(new Date())} onChange={(v) => setDraft({ ...draft, start: v })} required aria-label="Começa em" />
+              <Field label="Começa em" error={form.errors.start}>
+                <DateTimeInput name="start" invalid={!!form.errors.start} onBlur={() => form.touch('start')} value={draft.start} min={localInput(new Date())} onChange={(v) => form.set('start', v)} aria-label="Começa em" />
               </Field>
             )}
             <fieldset className="space-y-2">
               <legend className="mb-1 text-sm font-medium">Termina</legend>
               <label className="flex items-center gap-2 text-sm">
-                <input type="radio" checked={draft.untilReopen} onChange={() => setDraft({ ...draft, untilReopen: true })} /> Até reabrir manualmente
+                <input type="radio" checked={draft.untilReopen} onChange={() => form.set('untilReopen', true)} /> Até reabrir manualmente
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="radio" checked={!draft.untilReopen} onChange={() => setDraft({ ...draft, untilReopen: false })} /> Em uma data e hora
+                <input type="radio" checked={!draft.untilReopen} onChange={() => form.set('untilReopen', false)} /> Em uma data e hora
               </label>
               {!draft.untilReopen && (
-                <DateTimeInput aria-label="Termina em" value={draft.end} min={draft.startNow ? localInput(new Date()) : draft.start} onChange={(v) => setDraft({ ...draft, end: v })} required />
+                <DateTimeInput name="end" invalid={!!form.errors.end} onBlur={() => form.touch('end')} aria-label="Termina em" value={draft.end} min={draft.startNow ? localInput(new Date()) : draft.start} onChange={(v) => form.set('end', v)} />
               )}
+              {form.errors.end && <p aria-live="polite" className="text-xs text-danger">{form.errors.end}</p>}
               <div className="flex flex-wrap gap-2 pt-1">
                 {QUICK.map(([label, minutes]) => (
                   <button key={label} type="button" onClick={() => quick(minutes)} className="rounded-pill border border-line/60 px-3 py-1.5 text-xs font-semibold transition hover:border-brand/60 hover:text-brand">
@@ -303,8 +329,8 @@ function View() {
                 ))}
               </div>
             </fieldset>
-            <Field label="Motivo (opcional)" hint={`Aparece para os clientes no cardápio. ${draft.reason.length}/${PAUSE_LIMITS.reasonMax}`}>
-              <textarea value={draft.reason} onChange={(e) => setDraft({ ...draft, reason: e.target.value })} maxLength={PAUSE_LIMITS.reasonMax} rows={2} placeholder="Ex.: Reforma da cozinha" />
+            <Field label="Motivo (opcional)" hint={`Aparece para os clientes no cardápio. ${draft.reason.length}/${FIELD_RULES.pauseReason.max}`} error={form.errors.reason}>
+              <Textarea {...form.bind('reason')} maxLength={FIELD_RULES.pauseReason.max} rows={2} placeholder="Ex.: Reforma da cozinha" />
             </Field>
             {preview && (
               <p className="surface px-4 py-3 text-sm">
@@ -315,7 +341,7 @@ function View() {
             )}
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" variant="ghost" onClick={() => setDraft(null)}>Voltar</Button>
+              <Button type="button" variant="ghost" onClick={() => setComposing(false)}>Voltar</Button>
               <Button type="submit" variant={draft.startNow ? 'danger' : 'primary'} loading={busy}>{draft.startNow ? 'Pausar agora' : 'Agendar'}</Button>
             </div>
           </form>

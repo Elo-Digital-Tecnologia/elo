@@ -2,15 +2,17 @@
 
 import { Percent } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { api } from '@elo/client';
+import { api, ApiError } from '@elo/client';
 import { type BillView, formatBRL } from '@elo/core';
 import { Button } from '@elo/ui';
+import { unexpected } from '../_lib/use-form';
 
 /** Conta da mesa vista pelo cliente. Quando o restaurante permite, ele mesmo recusa a taxa de serviço. */
 export function BillPanel({ active, version, children }: { active: boolean; version: number; children?: ReactNode }) {
   const [bill, setBill] = useState<BillView | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [feeError, setFeeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!active) return;
@@ -25,10 +27,15 @@ export function BillPanel({ active, version, children }: { active: boolean; vers
   const toggleFee = async () => {
     if (!bill) return;
     setBusy(true);
+    setFeeError(null);
     try {
       setBill(await api<BillView>('/api/public/session/bill/fee', { body: { refuse: bill.feeWaivedBy === null } }));
-    } catch {
-      setFailed(true);
+    } catch (e) {
+      setFeeError(
+        e instanceof ApiError && e.code === 'fee_refusal_disabled'
+          ? 'Este restaurante não permite retirar a taxa de serviço por aqui. Fale com o garçom.'
+          : unexpected(e),
+      );
     } finally {
       setBusy(false);
     }
@@ -68,6 +75,7 @@ export function BillPanel({ active, version, children }: { active: boolean; vers
           <Percent size={16} /> {bill.feeWaivedBy === 'customer' ? 'Aceitar a taxa de serviço' : 'Recusar a taxa de serviço'}
         </Button>
       )}
+      {feeError && <p role="alert" className="text-sm text-danger">{feeError}</p>}
       {bill?.feeWaivedBy === 'staff' && <p className="text-xs text-muted">O atendimento retirou a taxa de serviço.</p>}
       <p className="text-xs text-muted">O pagamento é feito no local, com o garçom.</p>
       {children}

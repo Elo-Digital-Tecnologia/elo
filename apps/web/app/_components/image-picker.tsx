@@ -3,7 +3,9 @@
 import { ImagePlus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, apiUpload } from '@elo/client';
+import { fieldError, fieldMessage, FIELD_RULES } from '@elo/core';
 import { Input, Spinner } from '@elo/ui';
+import { unexpected } from '../_lib/use-form';
 
 interface MediaItem {
   id: string;
@@ -15,20 +17,67 @@ interface MediaItem {
 const MAX_MB = 5;
 
 const reason = (e: unknown) => {
-  if (!(e instanceof ApiError)) return 'Não foi possível enviar. Tente de novo.';
+  if (!(e instanceof ApiError)) return unexpected(e);
   if (e.status === 413) return `A imagem passa de ${MAX_MB} MB.`;
   if (e.code === 'invalid_image' || e.code === 'unsupported_image_type') return 'Use uma imagem JPG, PNG ou WebP.';
   if (e.code === 'image_in_use') return 'Esta imagem está em uso por um produto.';
-  return 'Não foi possível concluir. Tente de novo.';
+  return unexpected(e);
 };
 
-/** Escolhe a foto do produto no banco de imagens do restaurante, ou envia uma nova. */
-export function ImagePicker({ token, value, onChange }: { token: string; value: string; onChange: (url: string) => void }) {
+const isExternal = (url: string) => !!url && !url.startsWith('/api/media/');
+
+interface PickerProps {
+  token: string;
+  value: string;
+  onChange: (url: string) => void;
+  /** What the API refused about the image. */
+  error?: string | null;
+  /** Shows the link problem without waiting for the input to be left (the form was submitted). */
+  showErrors?: boolean;
+  /** Tells whether the typed link is being held back for not passing the rule. */
+  onLinkError?: (bad: boolean) => void;
+}
+
+/**
+ * Escolhe a foto do produto no banco de imagens do restaurante, ou envia uma nova.
+ * A typed link is applied only while it passes the API rule.
+ */
+export function ImagePicker({ token, value, onChange, error: refused, showErrors = false, onLinkError }: PickerProps) {
   const [items, setItems] = useState<MediaItem[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const [link, setLink] = useState(isExternal(value) ? value : '');
+  const [linkLeft, setLinkLeft] = useState(false);
+  /** The last value this picker applied from the link, so only outside changes reset the link. */
+  const applied = useRef(value);
+
+  useEffect(() => {
+    if (value === applied.current) return;
+    applied.current = value;
+    setLink(isExternal(value) ? value : '');
+    setLinkLeft(false);
+  }, [value]);
+
+  const linkError = fieldError(FIELD_RULES.imageUrl, link.trim());
+  const linkMessage = (linkLeft || showErrors) && linkError ? fieldMessage(linkError) : null;
+  const linkBad = !!linkError;
+  const details = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    onLinkError?.(linkBad);
+    if (linkBad && showErrors && details.current) details.current.open = true;
+  }, [linkBad, showErrors, onLinkError]);
+  useEffect(() => () => onLinkError?.(false), [onLinkError]);
+
+  const typeLink = (text: string) => {
+    setLink(text);
+    const next = fieldError(FIELD_RULES.imageUrl, text.trim()) ? '' : text.trim();
+    if (next === applied.current) return;
+    applied.current = next;
+    onChange(next);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -69,7 +118,7 @@ export function ImagePicker({ token, value, onChange }: { token: string; value: 
     }
   };
 
-  const external = value && !value.startsWith('/api/media/');
+  const external = isExternal(value);
 
   return (
     <div className="space-y-4">
@@ -91,7 +140,7 @@ export function ImagePicker({ token, value, onChange }: { token: string; value: 
         )}
         <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ''; }} />
       </div>
-      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {(error ?? refused) && <p role="alert" className="text-sm text-danger">{error ?? refused}</p>}
 
       {value && (
         <div className="flex items-center gap-3 rounded-md border border-line/50 p-2">
@@ -117,10 +166,11 @@ export function ImagePicker({ token, value, onChange }: { token: string; value: 
         </ul>
       </div>
 
-      <details className="text-sm">
+      <details ref={details} className="text-sm">
         <summary className="cursor-pointer text-muted">Usar o link de uma imagem</summary>
         <div className="mt-2">
-          <Input type="url" value={external ? value : ''} onChange={(e) => onChange(e.target.value)} placeholder="https://" aria-label="Link da imagem" />
+          <Input name="imageUrl" inputMode="url" autoCapitalize="none" value={link} onChange={(e) => typeLink(e.target.value)} onBlur={() => setLinkLeft(true)} invalid={!!linkMessage} maxLength={FIELD_RULES.imageUrl.max} placeholder="https://" aria-label="Link da imagem" />
+          {linkMessage && <p aria-live="polite" className="mt-1.5 text-xs text-danger">{linkMessage}</p>}
         </div>
       </details>
     </div>

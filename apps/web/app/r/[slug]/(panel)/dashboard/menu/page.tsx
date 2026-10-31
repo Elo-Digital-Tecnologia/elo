@@ -3,11 +3,12 @@
 import { ChevronDown, ChevronUp, Copy, FolderPlus, ImageIcon, PackagePlus, Pencil, Star, Trash2, UtensilsCrossed } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { formatBRL, parseCents, PRODUCT_TAG_LABEL, PRODUCT_TAGS, type CategoryView, type ProductTag, type ProductView } from '@elo/core';
-import { ActionMenu, Badge, Button, ConfirmModal, EmptyState, ErrorState, Field, GlassCard, Input, Modal, MoneyInput, PageHeader, SkeletonCards, Stagger, StaggerItem, Switch } from '@elo/ui';
+import { type FieldError, FIELD_RULES, formatBRL, parseCents, PRODUCT_TAG_LABEL, PRODUCT_TAGS, type CategoryView, type ProductTag, type ProductView } from '@elo/core';
+import { ActionMenu, Badge, Button, ConfirmModal, EmptyState, ErrorState, Field, GlassCard, Input, Modal, MoneyInput, PageHeader, Select, SkeletonCards, Stagger, StaggerItem, Switch, Textarea } from '@elo/ui';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 import { ImagePicker } from '../../../../../_components/image-picker';
-import { fromDraft, OptionsEditor, toDraft, type DraftGroup } from './options-editor';
+import { money, rule, unexpected, useForm } from '../../../../../_lib/use-form';
+import { draftErrors, draftErrorsFromServer, firstInvalid, fromDraft, type GroupErrors, OptionsEditor, toDraft, type DraftGroup } from './options-editor';
 
 const STEPS = ['Dados', 'Foto', 'Opções'] as const;
 
@@ -22,11 +23,34 @@ interface Form {
   options: DraftGroup[];
 }
 const EMPTY: Form = { categoryId: '', name: '', price: '', description: '', imageUrl: '', featured: false, tags: [], options: [] };
-const money = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
+const priceText = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
 
 const ERRORS: Record<string, string> = {
   category_not_empty: 'Esta categoria ainda tem produtos. Mova ou remova os produtos primeiro.',
+  invalid_category: 'Essa categoria não existe mais. Escolha outra na etapa Dados.',
+  invalid_order: 'O cardápio mudou em outro aparelho. Atualize a página e tente de novo.',
 };
+
+/** A known refusal from the API in words, or the honest "something failed". */
+const messageOf = (e: unknown) => (e instanceof ApiError && (ERRORS[e.code] ?? (e.status === 404 ? 'Este item não existe mais. Atualize a página.' : null))) || unexpected(e);
+
+const CATEGORY_CHECKS = { name: rule(FIELD_RULES.categoryName) };
+
+const PRODUCT_CHECKS = {
+  categoryId: (v: string): FieldError | null => (v ? null : { code: 'invalid_option' }),
+  name: rule(FIELD_RULES.productName),
+  price: money(FIELD_RULES.priceCents),
+  description: rule(FIELD_RULES.productDescription),
+  imageUrl: rule(FIELD_RULES.imageUrl),
+};
+type Checked = keyof typeof PRODUCT_CHECKS;
+
+const PRODUCT_MESSAGES = { invalid_option: 'Escolha uma categoria.' };
+
+/** The step that holds each field: the photo is on the second, option groups on the third. */
+const stepOf = (field: string) => (field.startsWith('options') ? 2 : field === 'imageUrl' ? 1 : 0);
+
+const firstBad = (v: Form) => (Object.keys(PRODUCT_CHECKS) as Checked[]).find((k) => (PRODUCT_CHECKS[k] as (x: unknown) => FieldError | null)(v[k]));
 
 function View() {
   const { token } = useStaff();
@@ -35,11 +59,17 @@ function View() {
   const [failed, setFailed] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
   const [prodOpen, setProdOpen] = useState(false);
-  const [catName, setCatName] = useState('');
+  const catForm = useForm({ name: '' }, CATEGORY_CHECKS);
   const [editCat, setEditCat] = useState<string | null>(null);
   const [editProd, setEditProd] = useState<string | null>(null);
-  const [form, setForm] = useState<Form>(EMPTY);
+  const form = useForm<Form>(EMPTY, PRODUCT_CHECKS, PRODUCT_MESSAGES);
+  const [submitted, setSubmitted] = useState(false);
+  /** A typed image link held back by the picker for not passing the rule. */
+  const [linkBad, setLinkBad] = useState(false);
+  const [optionsServer, setOptionsServer] = useState<GroupErrors[] | null>(null);
   const [step, setStep] = useState(0);
+  /** Input to focus once its step is on screen. */
+  const [focus, setFocus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -55,7 +85,19 @@ function View() {
     void load();
   }, [load]);
 
-  const guard = async (fn: () => Promise<unknown>) => {
+  useEffect(() => {
+    if (!focus) return;
+    document.querySelector<HTMLElement>(`[name="${focus}"]`)?.focus();
+    setFocus(null);
+  }, [focus, step]);
+
+  const goTo = (field: string) => {
+    setStep(stepOf(field));
+    setFocus(field);
+  };
+
+  /** Runs a change and reloads the menu. `onError` puts field errors in place first; anything else shows as a message. */
+  const guard = async (fn: () => Promise<unknown>, onError?: (e: unknown) => boolean) => {
     setError(null);
     setSaving(true);
     try {
@@ -63,7 +105,7 @@ function View() {
       await load();
       return true;
     } catch (e) {
-      setError(e instanceof ApiError ? (ERRORS[e.code] ?? 'Não foi possível salvar. Confira os campos.') : 'Não foi possível salvar.');
+      if (!onError?.(e)) setError(messageOf(e));
       return false;
     } finally {
       setSaving(false);
@@ -73,17 +115,20 @@ function View() {
   const openCategory = (c?: CategoryView) => {
     setError(null);
     setEditCat(c?.id ?? null);
-    setCatName(c?.name ?? '');
+    catForm.reset({ name: c?.name ?? '' });
     setCatOpen(true);
   };
 
   const openProduct = (p?: ProductView, copy = false) => {
     setError(null);
     setStep(0);
+    setSubmitted(false);
+    setLinkBad(false);
+    setOptionsServer(null);
     setEditProd(p && !copy ? p.id : null);
-    setForm(
+    form.reset(
       p
-        ? { categoryId: p.categoryId, name: copy ? `${p.name} (cópia)` : p.name, price: money(p.priceCents), description: p.description ?? '', imageUrl: p.imageUrl ?? '', featured: p.featured, tags: p.tags, options: toDraft(p.options) }
+        ? { categoryId: p.categoryId, name: copy ? `${p.name} (cópia)` : p.name, price: priceText(p.priceCents), description: p.description ?? '', imageUrl: p.imageUrl ?? '', featured: p.featured, tags: p.tags, options: toDraft(p.options) }
         : { ...EMPTY, categoryId: menu?.length === 1 ? menu[0].id : '' },
     );
     setProdOpen(true);
@@ -91,34 +136,48 @@ function View() {
 
   const saveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!catForm.validate()) return;
+    const body = { name: catForm.values.name };
     const call = editCat
-      ? () => api(`/api/catalog/categories/${editCat}`, { method: 'PUT', body: { name: catName }, token })
-      : () => api('/api/catalog/categories', { body: { name: catName }, token });
-    if (await guard(call)) {
-      setCatName('');
+      ? () => api(`/api/catalog/categories/${editCat}`, { method: 'PUT', body, token })
+      : () => api('/api/catalog/categories', { body, token });
+    if (await guard(call, (err) => catForm.fromServer(err))) {
       setEditCat(null);
       setCatOpen(false);
     }
   };
 
+  const setOptions = (options: DraftGroup[]) => {
+    form.set('options', options);
+    setOptionsServer(null);
+  };
+
+  /** Field errors sent back by the API, under their inputs, opening the step of the first one. */
+  const productFromServer = (err: unknown) => {
+    if (!(err instanceof ApiError)) return false;
+    const landed = form.fromServer(err, { priceCents: 'price' });
+    const options = draftErrorsFromServer(form.values.options, err.fields);
+    setOptionsServer(options);
+    const field = Object.keys(err.fields).map((p) => (p === 'priceCents' ? 'price' : p)).find((p) => p in form.values) ?? firstInvalid(options);
+    if (field) goTo(field);
+    else if (err.code === 'invalid_category') goTo('categoryId');
+    return landed || !!options;
+  };
+
   const saveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cents = parseCents(form.price);
-    if (!form.categoryId || !form.name.trim() || cents === null) {
-      setStep(0);
-      return setError('Informe categoria, nome e um preço válido, como 39,90.');
-    }
-    const options = fromDraft(form.options);
-    if (options === null) {
-      setStep(2);
-      return setError('Cada grupo precisa de nome e ao menos uma escolha, com valor válido.');
-    }
-    const body = { categoryId: form.categoryId, name: form.name.trim(), priceCents: cents, description: form.description.trim() || undefined, imageUrl: form.imageUrl.trim() || undefined, featured: form.featured, tags: form.tags, options };
+    setError(null);
+    form.validate();
+    setSubmitted(true);
+    const v = form.values;
+    const bad = firstBad(v) ?? (linkBad ? 'imageUrl' : null) ?? firstInvalid(draftErrors(v.options));
+    if (bad) return goTo(bad);
+    const body = { categoryId: v.categoryId, name: v.name.trim(), priceCents: parseCents(v.price) ?? 0, description: v.description.trim() || undefined, imageUrl: v.imageUrl.trim() || undefined, featured: v.featured, tags: v.tags, options: fromDraft(v.options) };
     const call = editProd
       ? () => api(`/api/catalog/products/${editProd}`, { method: 'PUT', body, token })
       : () => api('/api/catalog/products', { body, token });
-    if (await guard(call)) {
-      setForm(EMPTY);
+    if (await guard(call, productFromServer)) {
+      form.reset(EMPTY);
       setEditProd(null);
       setProdOpen(false);
     }
@@ -226,15 +285,15 @@ function View() {
       </div>
 
       <Modal open={catOpen} onClose={() => setCatOpen(false)} title={editCat ? 'Editar categoria' : 'Nova categoria'} sheet>
-        <form onSubmit={saveCategory} className="space-y-4">
-          <Field label="Nome"><Input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="Pizzas" maxLength={80} required autoFocus /></Field>
+        <form onSubmit={saveCategory} noValidate className="space-y-4">
+          <Field label="Nome" error={catForm.errors.name}><Input {...catForm.bind('name')} placeholder="Pizzas" maxLength={FIELD_RULES.categoryName.max} autoFocus /></Field>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end"><Button type="submit" loading={saving}>{editCat ? 'Salvar' : 'Criar categoria'}</Button></div>
         </form>
       </Modal>
 
       <Modal open={prodOpen} onClose={() => setProdOpen(false)} title={editProd ? 'Editar produto' : 'Novo produto'} sheet>
-        <form onSubmit={saveProduct} className="space-y-5">
+        <form onSubmit={saveProduct} noValidate className="space-y-5">
           <div className="glass flex !rounded-pill p-1 text-sm font-semibold" role="tablist">
             {STEPS.map((label, i) => (
               <button key={label} type="button" role="tab" aria-selected={step === i} onClick={() => setStep(i)} className={`flex-1 rounded-pill px-3 py-2 transition ${step === i ? 'btn-glass' : 'text-muted hover:text-fg'}`}>
@@ -245,40 +304,46 @@ function View() {
 
           {step === 0 && (
             <div className="space-y-4">
-              <Field label="Categoria">
-                <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} required>
+              <Field label="Categoria" error={form.errors.categoryId}>
+                <Select {...form.bind('categoryId')}>
                   <option value="">Escolha uma categoria</option>
                   {menu?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                </Select>
               </Field>
               <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
-                <Field label="Nome"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={120} required autoFocus /></Field>
-                <Field label="Preço"><MoneyInput value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required /></Field>
+                <Field label="Nome" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.productName.max} autoFocus /></Field>
+                <Field label="Preço" error={form.errors.price}><MoneyInput {...form.bind('price')} /></Field>
               </div>
               <label className="flex items-center gap-3 text-sm font-medium">
-                <Switch label="Destaque" checked={form.featured} onChange={(featured) => setForm({ ...form, featured })} />
+                <Switch label="Destaque" checked={form.values.featured} onChange={(featured) => form.set('featured', featured)} />
                 Destaque no cardápio
               </label>
               <fieldset>
                 <legend className="mb-2 text-sm font-medium">Etiquetas</legend>
                 <div className="flex flex-wrap gap-2">
                   {PRODUCT_TAGS.map((t) => {
-                    const on = form.tags.includes(t);
+                    const on = form.values.tags.includes(t);
                     return (
-                      <button key={t} type="button" aria-pressed={on} onClick={() => setForm({ ...form, tags: on ? form.tags.filter((x) => x !== t) : [...form.tags, t] })} className={`rounded-pill border px-3.5 py-1.5 text-sm font-medium transition ${on ? 'border-brand bg-brand text-brand-fg' : 'border-line/70 hover:border-brand/60'}`}>
+                      <button key={t} type="button" aria-pressed={on} onClick={() => form.set('tags', on ? form.values.tags.filter((x) => x !== t) : [...form.values.tags, t])} className={`rounded-pill border px-3.5 py-1.5 text-sm font-medium transition ${on ? 'border-brand bg-brand text-brand-fg' : 'border-line/70 hover:border-brand/60'}`}>
                         {PRODUCT_TAG_LABEL[t]}
                       </button>
                     );
                   })}
                 </div>
+                {form.errors.tags && <p aria-live="polite" className="mt-2 text-xs text-danger">{form.errors.tags}</p>}
               </fieldset>
-              <Field label="Descrição" hint={`${form.description.length}/500`}>
-                <textarea rows={3} maxLength={500} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Ingredientes, tamanho da porção..." />
+              <Field label="Descrição" hint={`${form.values.description.length}/${FIELD_RULES.productDescription.max}`} error={form.errors.description}>
+                <Textarea {...form.bind('description')} rows={3} maxLength={FIELD_RULES.productDescription.max} placeholder="Ingredientes, tamanho da porção..." />
               </Field>
             </div>
           )}
-          {step === 1 && <ImagePicker token={token} value={form.imageUrl} onChange={(imageUrl) => setForm({ ...form, imageUrl })} />}
-          {step === 2 && <OptionsEditor value={form.options} onChange={(options) => setForm({ ...form, options })} />}
+          {step === 1 && <ImagePicker token={token} value={form.values.imageUrl} onChange={(imageUrl) => form.set('imageUrl', imageUrl)} error={form.errors.imageUrl} showErrors={submitted} onLinkError={setLinkBad} />}
+          {step === 2 && (
+            <>
+              <OptionsEditor value={form.values.options} onChange={setOptions} showAll={submitted} server={optionsServer} />
+              {form.errors.options && <p aria-live="polite" className="text-xs text-danger">{form.errors.options}</p>}
+            </>
+          )}
 
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex items-center justify-between gap-3">

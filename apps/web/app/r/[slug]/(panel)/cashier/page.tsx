@@ -3,12 +3,28 @@
 import { Minus, Percent, Plus, Receipt, Trash2, Users } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { type BillView, formatBRL, parseCents, splitBillByItems, splitBillEqually, splitEqually } from '@elo/core';
-import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, PageHeader, SkeletonCards } from '@elo/ui';
+import { type BillView, FIELD_RULES, type FieldError, formatBRL, moneyError, parseCents, splitBillByItems, splitBillEqually, splitEqually } from '@elo/core';
+import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, Input, MoneyInput, PageHeader, Select, SkeletonCards } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 const STATE_LABEL = { pending_open: 'Abrindo', open: 'Aberta', pending_close: 'Pediu a conta', closed: 'Fechada' } as const;
 const STATE_TONE = { pending_open: 'info', open: 'success', pending_close: 'warning', closed: 'neutral' } as const;
+
+const ERRORS: Record<string, string> = {
+  no_active_session: 'A mesa não tem sessão ativa.',
+  zero_adjustment: 'O valor do ajuste não pode ser zero.',
+  too_many_adjustments: 'Esta conta já chegou ao limite de 50 ajustes. Remova um antes de aplicar outro.',
+};
+
+const messageOf = (e: unknown) => (e instanceof ApiError && ERRORS[e.code]) || unexpected(e);
+
+type AdjustmentKind = 'discount' | 'extra';
+
+/** The amount is typed without sign: the kind picker decides whether it adds or subtracts. */
+const amountError = (v: string): FieldError | null => (v.trim().startsWith('-') ? { code: 'invalid_money' } : moneyError(FIELD_RULES.adjustmentCents, v));
+
+const EMPTY_ADJUSTMENT = { label: '', value: '', kind: 'discount' as AdjustmentKind };
 
 function Cashier() {
   const { token } = useStaff();
@@ -76,7 +92,7 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
   const { token, impersonated } = useStaff();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [adj, setAdj] = useState({ label: '', value: '', kind: 'discount' as 'discount' | 'extra' });
+  const adj = useForm(EMPTY_ADJUSTMENT, { label: rule(FIELD_RULES.adjustmentLabel), value: amountError });
 
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -86,7 +102,7 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
       await onChanged();
       return true;
     } catch (e) {
-      setError(e instanceof ApiError && e.code === 'no_active_session' ? 'A mesa não tem sessão ativa.' : 'Não foi possível salvar a alteração.');
+      setError(messageOf(e));
       return false;
     } finally {
       setBusy(false);
@@ -95,12 +111,20 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
 
   const addAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cents = parseCents(adj.value);
-    if (!cents) return setError('Informe um valor maior que zero.');
-    const ok = await run(() =>
-      api(`/api/bills/${bill.tableId}/adjustments`, { body: { label: adj.label, cents: adj.kind === 'discount' ? -cents : cents }, token }),
-    );
-    if (ok) setAdj({ ...adj, label: '', value: '' });
+    setError(null);
+    if (!adj.validate()) return;
+    const { label, value, kind } = adj.values;
+    const cents = parseCents(value) ?? 0;
+    setBusy(true);
+    try {
+      await api(`/api/bills/${bill.tableId}/adjustments`, { body: { label, cents: kind === 'discount' ? -cents : cents }, token });
+      adj.reset({ ...EMPTY_ADJUSTMENT, kind });
+      await onChanged();
+    } catch (err) {
+      if (!adj.fromServer(err, { cents: 'value' })) setError(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const feeLabel = bill.feeWaivedBy === 'customer' ? 'Taxa recusada pelo cliente' : bill.feeWaivedBy === 'staff' ? 'Taxa removida' : `Taxa de serviço (${bill.serviceFeeBps / 100}%)`;
@@ -165,14 +189,14 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
       {!impersonated && (
         <GlassCard className="p-6">
           <h3 className="mb-3 text-lg font-semibold">Ajuste na conta</h3>
-          <form onSubmit={addAdjustment} className="grid gap-3 sm:grid-cols-[1fr_9rem_9rem_auto] sm:items-end">
-            <Field label="Descrição"><input value={adj.label} onChange={(e) => setAdj({ ...adj, label: e.target.value })} placeholder="Ex.: cortesia da casa" required minLength={2} /></Field>
-            <Field label="Valor"><input value={adj.value} onChange={(e) => setAdj({ ...adj, value: e.target.value })} placeholder="5,00" inputMode="decimal" required /></Field>
+          <form onSubmit={addAdjustment} noValidate className="grid gap-3 sm:grid-cols-[1fr_9rem_9rem_auto] sm:items-end">
+            <Field label="Descrição" error={adj.errors.label}><Input {...adj.bind('label')} maxLength={FIELD_RULES.adjustmentLabel.max} placeholder="Ex.: cortesia da casa" /></Field>
+            <Field label="Valor" error={adj.errors.value}><MoneyInput {...adj.bind('value')} placeholder="5,00" /></Field>
             <Field label="Tipo">
-              <select value={adj.kind} onChange={(e) => setAdj({ ...adj, kind: e.target.value as 'discount' | 'extra' })}>
+              <Select value={adj.values.kind} onChange={(e) => adj.set('kind', e.target.value as AdjustmentKind)}>
                 <option value="discount">Desconto</option>
                 <option value="extra">Acréscimo</option>
-              </select>
+              </Select>
             </Field>
             <Button type="submit" disabled={busy}>Aplicar</Button>
           </form>

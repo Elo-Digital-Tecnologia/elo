@@ -4,8 +4,9 @@ import { ArchiveRestore, Building2, Download, ExternalLink, Plus, Search } from 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { cycleLabel, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
-import { Badge, Button, ConfirmModal, DataTable, DateInput, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, SkeletonCards } from '@elo/ui';
+import { cycleLabel, FIELD_RULES, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DataTable, DateInput, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, PasswordInput, Select, SkeletonCards } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
 import { downloadExport } from './export';
 
@@ -14,6 +15,30 @@ const TRIAL_DAYS = 14;
 const EMPTY = { name: '', managerName: '', managerContact: '', planId: '', initialDueDate: '', adminUsername: '', adminPassword: '' };
 const dayFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 const PAGE_SIZE = 10;
+const REQUIRED = { code: 'required' } as const;
+
+const CHECKS = {
+  name: rule(FIELD_RULES.restaurantName),
+  managerName: rule(FIELD_RULES.personName),
+  managerContact: rule(FIELD_RULES.contact),
+  adminUsername: rule(FIELD_RULES.username),
+  adminPassword: rule(FIELD_RULES.password),
+  planId: (v: string) => (v ? null : REQUIRED),
+  initialDueDate: (v: string) => (v ? null : REQUIRED),
+};
+
+/** The link comes from the name (there is no link field), so link conflicts land under the name. */
+const FIELD_MESSAGES: Record<string, string> = {
+  slug_taken: 'Já existe um restaurante com esse link; mude o nome.',
+  slug_reserved: 'Esse nome gera um link reservado do sistema; mude o nome.',
+  invalid_slug: 'Esse nome não gera um link válido; use letras ou números.',
+  username_taken: 'Esse usuário já existe.',
+};
+
+const CREATE_ERRORS: Record<string, string> = {
+  plan_inactive: 'Este plano foi desativado. Escolha outro.',
+  plan_not_found: 'Este plano não existe mais. Escolha outro.',
+};
 const SORTS = [
   ['name', 'Nome'],
   ['due', 'Vencimento mais próximo'],
@@ -62,7 +87,7 @@ function View() {
   const [data, setData] = useState<RestaurantListView | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY);
+  const form = useForm(EMPTY, CHECKS, FIELD_MESSAGES);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -103,7 +128,7 @@ function View() {
     try {
       const list = (await api<PlanView[]>('/api/admin/plans', { token })).filter((p) => p.active);
       setPlans(list);
-      setForm((f) => ({ ...f, planId: f.planId || list[0]?.id || '', initialDueDate: f.initialDueDate || dayFromNow(TRIAL_DAYS) }));
+      form.setValues((f) => ({ ...f, planId: f.planId || list[0]?.id || '', initialDueDate: f.initialDueDate || dayFromNow(TRIAL_DAYS) }));
     } catch {
       setPlans([]);
     }
@@ -112,20 +137,15 @@ function View() {
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!form.validate()) return;
     setSaving(true);
     try {
-      await api('/api/admin/restaurants', { body: form, token });
-      setForm(EMPTY);
+      await api('/api/admin/restaurants', { body: form.values, token });
+      form.reset(EMPTY);
       setOpen(false);
       await load();
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.code === 'plan_inactive'
-          ? 'Este plano foi desativado. Escolha outro.'
-          : err instanceof ApiError && err.status === 409
-            ? 'Já existe um restaurante ou usuário com esse nome.'
-            : 'Confira os campos e tente de novo.',
-      );
+      if (!form.fromServer(err, { slug: 'name', username: 'adminUsername' })) setError((err instanceof ApiError && CREATE_ERRORS[err.code]) || unexpected(err));
     } finally {
       setSaving(false);
     }
@@ -151,10 +171,6 @@ function View() {
       setBusyId(null);
     }
   };
-
-  const field = (key: keyof typeof EMPTY, label: string, type = 'text', hint?: string) => (
-    <Field label={label} hint={hint}><input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} required /></Field>
-  );
 
   const counts = data?.counts;
   const chips: [RestaurantListStatus | '', string, number | undefined][] = [
@@ -283,32 +299,36 @@ function View() {
       </ConfirmModal>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Novo restaurante" sheet>
-        <form onSubmit={create} className="space-y-4">
-          {field('name', 'Nome do restaurante')}
+        <form onSubmit={create} noValidate className="space-y-4">
+          <Field label="Nome do restaurante" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.restaurantName.max} /></Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            {field('managerName', 'Responsável pelo contrato', 'text', 'Também vira o titular do painel do restaurante.')}
-            {field('managerContact', 'Contato do responsável', 'text', 'Telefone com DDD ou e-mail.')}
+            <Field label="Responsável pelo contrato" hint="Também vira o titular do painel do restaurante." error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
+            <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
           </div>
           {plans?.length === 0 ? (
             <p className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">Nenhum plano ativo. Crie um plano em <a href="/admin/plans" className="font-semibold underline">Planos</a> antes de cadastrar.</p>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Plano">
-                <select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>
+              <Field label="Plano" error={form.errors.planId}>
+                <Select name="planId" value={form.values.planId} onChange={(e) => form.set('planId', e.target.value)} onBlur={() => form.touch('planId')} invalid={!!form.errors.planId}>
                   {(plans ?? []).map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
-                </select>
+                </Select>
               </Field>
-              <Field label="Fim do teste" hint="Primeiro vencimento. O padrão é daqui a 14 dias.">
-                <DateInput value={form.initialDueDate} min={dayFromNow(0)} onChange={(v) => setForm({ ...form, initialDueDate: v })} required />
+              <Field label="Fim do teste" hint="Primeiro vencimento. O padrão é daqui a 14 dias." error={form.errors.initialDueDate}>
+                <DateInput value={form.values.initialDueDate} min={dayFromNow(0)} onChange={(v) => form.set('initialDueDate', v)} invalid={!!form.errors.initialDueDate} required />
               </Field>
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            {field('adminUsername', 'Usuário do titular', 'text', 'Minúsculas, sem espaços.')}
-            {field('adminPassword', 'Senha do titular', 'password', 'Pelo menos 8 caracteres.')}
+            <Field label="Usuário do titular" hint="Minúsculas, números, ponto, hífen ou sublinhado." error={form.errors.adminUsername}>
+              <Input {...form.bind('adminUsername')} onChange={(e) => form.set('adminUsername', e.target.value.toLowerCase())} maxLength={FIELD_RULES.username.max} autoCapitalize="none" autoComplete="off" />
+            </Field>
+            <Field label="Senha do titular" hint="Pelo menos 8 caracteres." error={form.errors.adminPassword}>
+              <PasswordInput {...form.bind('adminPassword')} maxLength={FIELD_RULES.password.max} autoComplete="new-password" />
+            </Field>
           </div>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <div className="flex justify-end"><Button type="submit" loading={saving} disabled={!form.planId}>Cadastrar</Button></div>
+          <div className="flex justify-end"><Button type="submit" loading={saving} disabled={!form.values.planId}>Cadastrar</Button></div>
         </form>
       </Modal>
     </>

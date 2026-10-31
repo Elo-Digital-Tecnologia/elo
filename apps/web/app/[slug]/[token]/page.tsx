@@ -3,7 +3,7 @@
 import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Timer, Trash2, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { canRequestBill, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
+import { canRequestBill, type FieldError, fieldMessage, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
 import { AlertsProvider, AnimatePresence, Button, Sheet, unlockAlertSound } from '@elo/ui';
 import { BillPanel } from '../../_components/bill-panel';
 import { MenuFooter } from '../../_components/menu-chrome';
@@ -16,6 +16,7 @@ import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
 import { CartLine, lineUnit, ProductSheet } from '../../_components/product-sheet';
 import { useGuestAlertHandlers, useGuestPush } from '../../_components/menu/guest-alerts';
+import { unexpected } from '../../_lib/use-form';
 
 type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'taken' | 'rejected' | 'expired' | 'ended' | 'error';
 type View = 'menu' | 'orders' | 'bill';
@@ -33,7 +34,30 @@ const GUEST_ERRORS: Record<string, string> = {
   invalid_table_state: 'A mesa mudou. Atualizamos a tela.',
   restaurant_closed: 'O restaurante está fechado agora, então a mesa não pode ser aberta.',
   fee_refusal_disabled: 'Este restaurante não permite retirar a taxa de serviço por aqui. Fale com o garçom.',
+  product_unavailable: 'Um item da sacola esgotou. Remova-o e envie de novo.',
+  invalid_product: 'Um item da sacola saiu do cardápio. Remova-o e envie de novo.',
+  invalid_option: 'As opções de um item mudaram no cardápio. Remova-o da sacola e adicione de novo.',
+  missing_required_option: 'Falta escolher uma opção obrigatória em um item. Remova-o da sacola e adicione de novo.',
+  too_many_options: 'Um item tem mais escolhas do que o grupo permite. Remova-o da sacola e adicione de novo.',
+  duplicate_option: 'Um item tem a mesma escolha repetida. Remova-o da sacola e adicione de novo.',
 };
+
+/** Most different lines one order takes (the API refuses more). */
+const MAX_CART_LINES = 50;
+const CART_FULL = `A sacola chegou ao limite de ${MAX_CART_LINES} itens diferentes. Envie esta comanda ou aumente a quantidade de um item que já está nela.`;
+
+const LINE_PART: Record<string, string> = { notes: 'Observação de', quantity: 'Quantidade de', options: 'Opções de' };
+
+/** An order the API refused field by field (`items.0.notes`), named after the bag line it is about. */
+function orderProblem(e: ApiError, cart: CartLine[]): string | null {
+  const [path, error] = Object.entries(e.fields)[0] ?? [];
+  if (!path || !error) return null;
+  if (path === 'items') return error.code === 'too_many' ? CART_FULL : error.code === 'too_few' ? 'A sacola está vazia. Adicione um item antes de enviar.' : null;
+  const m = /^items\.(\d+)\.(\w+)/.exec(path);
+  const line = m && cart[Number(m[1])];
+  if (!m || !line) return null;
+  return `${LINE_PART[m[2]] ?? 'Item'} ${line.product.name}: ${fieldMessage(error as FieldError)}`;
+}
 
 /** O servidor diz por que a sessão caiu; cada motivo tem sua mensagem. */
 const phaseFor = (code: string): Phase =>
@@ -173,7 +197,8 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
     }
   }, [cart, cartLoaded, cartKey]);
 
-  const act = async (fn: () => Promise<unknown>) => {
+  /** Runs a guest action; `explain` names a refusal only that action understands. */
+  const act = async (fn: () => Promise<unknown>, explain?: (e: ApiError) => string | null) => {
     setBusy(true);
     setMessage(null);
     try {
@@ -185,7 +210,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
       else if (e instanceof ApiError && e.code === 'restaurant_closed') {
         setMessage(GUEST_ERRORS.restaurant_closed);
         void refresh();
-      } else setMessage(e instanceof ApiError ? GUEST_ERRORS[e.code] ?? 'Não foi possível concluir. Tente de novo.' : 'Falha de conexão. Tente de novo.');
+      } else setMessage((e instanceof ApiError && (explain?.(e) ?? GUEST_ERRORS[e.code])) || unexpected(e));
       return false;
     } finally {
       setBusy(false);
@@ -233,17 +258,19 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
   const showTabs = tableState !== 'closed' || state.orders.length > 0;
 
   const sendOrder = async () => {
-    const ok = await act(() =>
-      api('/api/public/session/orders', {
-        body: {
-          items: cart.map((l) => ({
-            productId: l.product.id,
-            quantity: l.quantity,
-            notes: l.notes || undefined,
-            options: l.options.map((o) => ({ group: o.group, label: o.label })),
-          })),
-        },
-      }),
+    const ok = await act(
+      () =>
+        api('/api/public/session/orders', {
+          body: {
+            items: cart.map((l) => ({
+              productId: l.product.id,
+              quantity: l.quantity,
+              notes: l.notes || undefined,
+              options: l.options.map((o) => ({ group: o.group, label: o.label })),
+            })),
+          },
+        }),
+      (e) => orderProblem(e, cart),
     );
     if (ok) {
       setCart([]);
@@ -297,7 +324,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
       <RestaurantInfo profile={state.restaurant} />
 
-      {message && <p role="alert" className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
+      {message && !cartOpen && <p role="alert" className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
       {coming && (
         <p role="status" className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-success/10 px-4 py-3 text-sm font-medium text-success">
           <Check size={16} className="shrink-0" /> {coming} vai até a sua mesa.
@@ -357,7 +384,12 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         )}
       </AnimatePresence>
 
-      <ProductSheet product={billRequested ? null : picked} onClose={() => setPicked(null)} onAdd={(line) => { setCart((c) => [...c, line]); setPicked(null); }} />
+      <ProductSheet
+        product={billRequested ? null : picked}
+        blocked={cart.length >= MAX_CART_LINES ? CART_FULL : null}
+        onClose={() => setPicked(null)}
+        onAdd={(line) => { setCart((c) => (c.length >= MAX_CART_LINES ? c : [...c, line])); setPicked(null); }}
+      />
 
       <Sheet
         open={cartOpen}
@@ -365,6 +397,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         title="Sua sacola"
         footer={
           <div className="space-y-3">
+            {message && <p role="alert" className="rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
             <div className="flex items-baseline justify-between">
               <span className="text-muted">Total</span>
               <span className="font-display text-2xl font-extrabold tabular-nums">{formatBRL(total)}</span>

@@ -4,10 +4,11 @@ import { Ban, CalendarClock, Crown, CalendarCog, CircleCheck, ExternalLink, Laye
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
-import { cycleLabel, formatBRL, type Role, type SubscriptionView } from '@elo/core';
-import { Badge, Button, ColumnChart, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards } from '@elo/ui';
+import { cycleLabel, FIELD_RULES, formatBRL, type Role, type SubscriptionView } from '@elo/core';
+import { Badge, Button, ColumnChart, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
 import { ActivityList } from '../../../../_components/activity-list';
+import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { useAdmin } from '../../../_components/shell';
 
 interface Detail {
@@ -61,6 +62,14 @@ const ERRORS: Record<string, string> = {
   invalid_owner: 'Escolha alguém ativo da equipe.',
 };
 
+const EDIT_CHECKS = {
+  name: rule(FIELD_RULES.restaurantName),
+  managerName: rule(FIELD_RULES.personName),
+  managerContact: rule(FIELD_RULES.contact),
+};
+
+const OWNER_CHECKS = { reason: rule(FIELD_RULES.reason) };
+
 function View({ id }: { id: string }) {
   const router = useRouter();
   const { token, can } = useAdmin();
@@ -71,12 +80,14 @@ function View({ id }: { id: string }) {
   const [tables, setTables] = useState<AdminTables | null>(null);
   const [rotating, setRotating] = useState<AdminTables['tables'][number] | null>(null);
   const [newLink, setNewLink] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ name: string; managerName: string; managerContact: string } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const editForm = useForm({ name: '', managerName: '', managerContact: '' }, EDIT_CHECKS);
   const [deleting, setDeleting] = useState(false);
   const [confirmSlug, setConfirmSlug] = useState('');
   const [access, setAccess] = useState<'suspend' | 'reactivate' | null>(null);
   const [team, setTeam] = useState<TeamMember[] | null>(null);
-  const [newOwner, setNewOwner] = useState<{ userId: string; reason: string } | null>(null);
+  const [newOwner, setNewOwner] = useState(false);
+  const ownerForm = useForm({ userId: '', reason: '' }, OWNER_CHECKS);
 
   const load = useCallback(async () => {
     try {
@@ -95,7 +106,8 @@ function View({ id }: { id: string }) {
 
   const billing = useBilling({ id, token, subscription: r?.subscription ?? null, canRecord: can('payments.record'), onChange: load });
 
-  const guard = async (fn: () => Promise<unknown>) => {
+  /** Runs an action and reloads; `fields` puts the API's per-field errors under their fields first. */
+  const guard = async (fn: () => Promise<unknown>, fields?: (e: unknown) => boolean) => {
     setError(null);
     setSaving(true);
     try {
@@ -103,7 +115,7 @@ function View({ id }: { id: string }) {
       await load();
       return true;
     } catch (e) {
-      setError(e instanceof ApiError ? ERRORS[e.code] ?? 'Não foi possível concluir. Confira os campos.' : 'Não foi possível concluir.');
+      if (!fields?.(e)) setError((e instanceof ApiError && ERRORS[e.code]) || unexpected(e));
       return false;
     } finally {
       setSaving(false);
@@ -121,7 +133,9 @@ function View({ id }: { id: string }) {
 
   const saveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editing && (await guard(() => api(`/api/admin/restaurants/${id}`, { method: 'PATCH', body: editing, token })))) setEditing(null);
+    setError(null);
+    if (!editForm.validate()) return;
+    if (await guard(() => api(`/api/admin/restaurants/${id}`, { method: 'PATCH', body: editForm.values, token }), editForm.fromServer)) setEditing(false);
   };
 
   const remove = async (e: React.FormEvent) => {
@@ -168,7 +182,7 @@ function View({ id }: { id: string }) {
         actions={
           <>
             {can('restaurants.edit') && (
-              <Button variant="ghost" onClick={() => { setError(null); setEditing({ name: r.name, managerName: r.managerName, managerContact: r.managerContact }); }}><Pencil size={16} /> Editar</Button>
+              <Button variant="ghost" onClick={() => { setError(null); editForm.reset({ name: r.name, managerName: r.managerName, managerContact: r.managerContact }); setEditing(true); }}><Pencil size={16} /> Editar</Button>
             )}
             {can('restaurants.access') && (
               <Button variant="soft" loading={saving} onClick={openPanel}><ExternalLink size={17} /> Abrir painel</Button>
@@ -218,7 +232,7 @@ function View({ id }: { id: string }) {
               <div className="font-semibold">{owner ? `${owner.name} (${owner.username})` : 'Sem titular'}</div>
             </div>
             {can('restaurants.owner') && candidates.length > 0 && (
-              <Button variant="ghost" onClick={() => { setError(null); setNewOwner({ userId: candidates[0].id, reason: '' }); }}>Trocar</Button>
+              <Button variant="ghost" onClick={() => { setError(null); ownerForm.reset({ userId: candidates[0].id, reason: '' }); setNewOwner(true); }}>Trocar</Button>
             )}
           </div>
           <div className="flex items-center gap-3"><UserRound className="text-brand" size={20} /><div><div className="text-sm text-muted">Responsável pelo contrato</div><div className="font-semibold">{r.managerName}</div></div></div>
@@ -311,35 +325,36 @@ function View({ id }: { id: string }) {
         confirmLabel="Trocar titular"
         danger
         loading={saving}
-        disabled={!newOwner || newOwner.reason.trim().length < 3}
         error={error}
         onConfirm={async () => {
-          if (newOwner && (await guard(() => api(`/api/admin/restaurants/${id}/owner`, { body: newOwner, token })))) setNewOwner(null);
+          setError(null);
+          if (!ownerForm.validate()) return;
+          if (await guard(() => api(`/api/admin/restaurants/${id}/owner`, { body: ownerForm.values, token }), ownerForm.fromServer)) setNewOwner(false);
         }}
-        onClose={() => setNewOwner(null)}
+        onClose={() => setNewOwner(false)}
       >
         <p>Use quando o titular saiu ou perdeu o acesso. A pessoa escolhida passa a administrar o restaurante e {owner ? `${owner.name} vira Gerente` : 'o restaurante volta a ter titular'}.</p>
         {newOwner && (
           <>
             <Field label="Novo titular">
-              <select value={newOwner.userId} onChange={(e) => setNewOwner({ ...newOwner, userId: e.target.value })}>
+              <Select name="userId" value={ownerForm.values.userId} onChange={(e) => ownerForm.set('userId', e.target.value)}>
                 {candidates.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.username})</option>)}
-              </select>
+              </Select>
             </Field>
-            <Field label="Motivo" hint="Pelo menos 3 caracteres. Fica nos registros do restaurante.">
-              <textarea value={newOwner.reason} onChange={(e) => setNewOwner({ ...newOwner, reason: e.target.value })} minLength={3} maxLength={300} rows={3} required />
+            <Field label="Motivo" hint="Pelo menos 3 caracteres. Fica nos registros do restaurante." error={ownerForm.errors.reason}>
+              <Textarea {...ownerForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={3} />
             </Field>
           </>
         )}
       </ConfirmModal>
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar restaurante" sheet>
+      <Modal open={editing} onClose={() => setEditing(false)} title="Editar restaurante" sheet>
         {editing && (
-          <form onSubmit={saveEdit} className="space-y-4">
-            <Field label="Nome do restaurante"><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} minLength={2} maxLength={120} required autoFocus /></Field>
+          <form onSubmit={saveEdit} noValidate className="space-y-4">
+            <Field label="Nome do restaurante" error={editForm.errors.name}><Input {...editForm.bind('name')} maxLength={FIELD_RULES.restaurantName.max} autoFocus /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Responsável pelo contrato"><input value={editing.managerName} onChange={(e) => setEditing({ ...editing, managerName: e.target.value })} minLength={2} maxLength={120} required /></Field>
-              <Field label="Contato do responsável"><input value={editing.managerContact} onChange={(e) => setEditing({ ...editing, managerContact: e.target.value })} minLength={5} maxLength={120} required /></Field>
+              <Field label="Responsável pelo contrato" error={editForm.errors.managerName}><Input {...editForm.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
+              <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={editForm.errors.managerContact}><Input {...editForm.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
             </div>
             <p className="text-xs text-muted">O link /{r.slug} não muda: ele está impresso nos QR Codes.</p>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}

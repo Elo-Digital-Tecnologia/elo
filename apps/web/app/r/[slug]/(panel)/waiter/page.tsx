@@ -3,8 +3,9 @@
 import { BellRing, CheckCheck, DoorOpen, Hand, Receipt, UserRound, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, upsertOrder, useRealtime } from '@elo/client';
-import { ORDER_IN_PROGRESS, type OrderView, type TableView, type WaiterCallView } from '@elo/core';
-import { AnimatePresence, Badge, Button, ConfirmModal, EmptyState, GlassCard, Modal, motion, PageHeader } from '@elo/ui';
+import { FIELD_RULES, ORDER_IN_PROGRESS, type OrderView, type TableView, type WaiterCallView } from '@elo/core';
+import { AnimatePresence, Badge, Button, ConfirmModal, EmptyState, Field, GlassCard, Modal, motion, PageHeader, Textarea } from '@elo/ui';
+import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 const ACTIVE = ['sent', 'received', 'preparing', 'ready'];
@@ -21,7 +22,7 @@ function Panel() {
   /** Lost a race to another waiter: not an error, just who got there first. */
   const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<{ order: OrderView; kind: 'cancel' | 'return' } | null>(null);
-  const [reason, setReason] = useState('');
+  const reasonForm = useForm({ reason: '' }, { reason: rule(FIELD_RULES.reason) });
   /** Closing ends the guests' visit for good, so it is confirmed first. */
   const [closing, setClosing] = useState<TableView | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
@@ -65,13 +66,15 @@ function Panel() {
   const onOrder = useCallback((o: OrderView) => setOrders((list) => upsertOrder(list, o, (x) => ACTIVE.includes(x.status))), []);
   useRealtime({ 'table.updated': reload, 'call.created': reload, 'call.resolved': reload, 'order.created': onOrder, 'order.updated': onOrder, 'order.cancelled': onOrder }, token, true, { onResync: reload });
 
-  const run = async (fn: () => Promise<unknown>, lostText?: (by: string) => string) => {
+  /** Runs an action and explains a refusal. Returns false only when `onFields` placed the problem in a form, which then stays open. */
+  const run = async (fn: () => Promise<unknown>, lostText?: (by: string) => string, onFields?: (e: unknown) => boolean) => {
     setError(null);
     setNotice(null);
     try {
       await fn();
       await load();
     } catch (e) {
+      if (onFields?.(e)) return false;
       if (e instanceof ApiError && e.code === 'already_handled' && lostText) {
         setNotice(lostText(typeof e.data.by === 'string' ? e.data.by : 'outro garçom'));
         await load().catch(() => undefined);
@@ -83,9 +86,10 @@ function Panel() {
         setNotice('Esta mesa mudou em outro aparelho. A lista foi atualizada.');
         await load().catch(() => undefined);
       } else {
-        setError('Não foi possível concluir a ação. Tente de novo.');
+        setError(unexpected(e));
       }
     }
+    return true;
   };
 
   /** Orders of the guests now at the table, newest first. */
@@ -101,10 +105,13 @@ function Panel() {
   const post = (path: string, body: unknown = {}) => () => api(path, { method: 'POST', body, token });
 
   const confirmAction = async () => {
-    if (!acting || reason.trim().length < 3) return;
-    await run(post(`/api/orders/${acting.order.id}/${acting.kind}`, { reason }));
-    setActing(null);
-    setReason('');
+    if (!acting || !reasonForm.validate()) return;
+    if (await run(post(`/api/orders/${acting.order.id}/${acting.kind}`, { reason: reasonForm.values.reason }), undefined, reasonForm.fromServer)) setActing(null);
+  };
+
+  const startAction = (order: OrderView) => {
+    reasonForm.reset({ reason: '' });
+    setActing({ order, kind: order.status === 'ready' ? 'return' : 'cancel' });
   };
 
   const isWaiter = roles.includes('waiter');
@@ -193,7 +200,7 @@ function Panel() {
                       <li key={o.id} className="flex items-start justify-between gap-3 rounded-md bg-leaf-100/40 px-3 py-2.5">
                         <span><Badge tone={o.status === 'ready' ? 'success' : o.status === 'preparing' ? 'warning' : 'info'}>{o.status === 'ready' ? 'Pronto' : o.status === 'preparing' ? 'Em preparo' : o.status === 'received' ? 'Recebido' : 'Enviado'}</Badge>
                           <span className="mt-1.5 block text-muted">{o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}</span></span>
-                        {!impersonated && <button className="shrink-0 text-danger underline-offset-2 hover:underline" onClick={() => setActing({ order: o, kind: o.status === 'ready' ? 'return' : 'cancel' })}>{o.status === 'ready' ? 'Devolver' : 'Cancelar'}</button>}
+                        {!impersonated && <button className="shrink-0 text-danger underline-offset-2 hover:underline" onClick={() => startAction(o)}>{o.status === 'ready' ? 'Devolver' : 'Cancelar'}</button>}
                       </li>
                     ))}
                     {ordersOf(t.id).length === 0 && <li className="text-muted">Sem pedidos ainda.</li>}
@@ -234,11 +241,15 @@ function Panel() {
             ? 'O pedido já saiu da cozinha. Informe o motivo da devolução; ele deixa de contar na conta.'
             : 'Informe o motivo. A cozinha é avisada se o preparo já começou.'}
         </p>
-        <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={acting?.kind === 'return' ? 'Ex.: chegou frio, cliente recusou' : 'Ex.: cliente desistiu do item'} />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setActing(null)}>Voltar</Button>
-          <Button variant="danger" disabled={reason.trim().length < 3} onClick={confirmAction}>{acting?.kind === 'return' ? 'Devolver pedido' : 'Cancelar pedido'}</Button>
-        </div>
+        <form noValidate onSubmit={(e) => { e.preventDefault(); void confirmAction(); }}>
+          <Field label="Motivo" error={reasonForm.errors.reason}>
+            <Textarea {...reasonForm.bind('reason')} rows={3} maxLength={FIELD_RULES.reason.max} placeholder={acting?.kind === 'return' ? 'Ex.: chegou frio, cliente recusou' : 'Ex.: cliente desistiu do item'} />
+          </Field>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setActing(null)}>Voltar</Button>
+            <Button type="submit" variant="danger">{acting?.kind === 'return' ? 'Devolver pedido' : 'Cancelar pedido'}</Button>
+          </div>
+        </form>
       </Modal>
     </>
   );

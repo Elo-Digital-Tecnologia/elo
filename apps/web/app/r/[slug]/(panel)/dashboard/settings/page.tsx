@@ -3,10 +3,11 @@
 import { Save } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
-import { api } from '@elo/client';
-import { brazilPhone, contact, instagramHandle, LIMITS, maskPhone, type OpeningHours, personName } from '@elo/core';
-import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, TimeInput } from '@elo/ui';
+import { api, ApiError } from '@elo/client';
+import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, type OpeningHours } from '@elo/core';
+import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, Textarea, TimeInput } from '@elo/ui';
 import { ImageField } from '../../../../../_components/image-field';
+import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
@@ -16,6 +17,21 @@ interface Day {
   from: string;
   to: string;
 }
+
+const MAX_FEE_PCT = LIMITS.serviceFeeBpsMax / 100;
+const FEE_MESSAGE = `Use um valor de 0% a ${MAX_FEE_PCT}%, como 10 ou 12,5.`;
+/** The fee is the only number in this form, so its range codes always mean the percent. */
+const MESSAGES = { too_small: FEE_MESSAGE, too_large: FEE_MESSAGE, not_integer: FEE_MESSAGE };
+
+const percentOf = (fee: string) => Number(fee.replace(',', '.'));
+
+const feeError = (fee: string): FieldError | null => {
+  if (!fee.trim()) return { code: 'required' };
+  const pct = percentOf(fee);
+  return Number.isFinite(pct) && pct >= 0 && pct <= MAX_FEE_PCT ? null : { code: 'too_large' };
+};
+
+const isTime = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
 const toDays = (hours: OpeningHours | null): Day[] =>
   DAYS.map((_, i) => {
@@ -37,70 +53,80 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 function Settings() {
   const { token, me, setMe } = useStaff();
-  const [form, setForm] = useState({
-    name: me.name,
-    description: me.description ?? '',
-    logoUrl: me.logoUrl ?? '',
-    coverUrl: me.coverUrl ?? '',
-    address: me.address ?? '',
-    phone: me.phone ?? '',
-    instagram: me.instagram ? `@${me.instagram.replace(/^@/, '')}` : '',
-    wifiName: me.wifiName ?? '',
-    wifiPassword: me.wifiPassword ?? '',
-    managerName: me.managerName,
-    managerContact: me.managerContact,
-    fee: String(me.serviceFeeBps / 100).replace('.', ','),
-  });
+  const form = useForm(
+    {
+      name: me.name,
+      description: me.description ?? '',
+      logoUrl: me.logoUrl ?? '',
+      coverUrl: me.coverUrl ?? '',
+      address: me.address ?? '',
+      phone: me.phone ?? '',
+      instagram: me.instagram ? `@${me.instagram.replace(/^@/, '')}` : '',
+      wifiName: me.wifiName ?? '',
+      wifiPassword: me.wifiPassword ?? '',
+      managerName: me.managerName,
+      managerContact: me.managerContact,
+      fee: String(me.serviceFeeBps / 100).replace('.', ','),
+    },
+    {
+      name: rule(FIELD_RULES.restaurantName),
+      description: rule(FIELD_RULES.description),
+      logoUrl: rule(FIELD_RULES.imageUrl),
+      coverUrl: rule(FIELD_RULES.imageUrl),
+      address: rule(FIELD_RULES.address),
+      phone: rule(FIELD_RULES.phone),
+      instagram: rule(FIELD_RULES.instagram),
+      wifiName: rule(FIELD_RULES.wifiName),
+      wifiPassword: rule(FIELD_RULES.wifiPassword),
+      managerName: rule(FIELD_RULES.personName),
+      managerContact: rule(FIELD_RULES.contact),
+      fee: feeError,
+    },
+    MESSAGES,
+  );
   const [feeRefusal, setFeeRefusal] = useState(me.guestFeeRefusal);
   const [showHours, setShowHours] = useState(me.openingHours !== null);
   const [days, setDays] = useState<Day[]>(toDays(me.openingHours));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({});
   const [loading, setLoading] = useState(false);
-  const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+  const values = form.values;
   const setDay = (i: number, patch: Partial<Day>) => setDays((d) => d.map((x, k) => (k === i ? { ...x, ...patch } : x)));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const pct = Number(form.fee.replace(',', '.'));
-    const maxPct = LIMITS.serviceFeeBpsMax / 100;
-    const found: typeof errors = {};
-    if (form.name.trim().length < 2) found.name = 'Informe o nome do restaurante.';
-    if (!personName(form.managerName)) found.managerName = 'Use só letras, como em "Maria da Silva".';
-    if (!contact(form.managerContact)) found.managerContact = 'Informe um telefone com DDD ou um e-mail.';
-    if (form.phone.trim() && !brazilPhone(form.phone)) found.phone = 'Telefone com DDD, como (11) 4000-1234.';
-    if (form.instagram.trim() && !instagramHandle(form.instagram)) found.instagram = 'Só o nome do perfil, como @seurestaurante.';
-    if (!Number.isFinite(pct) || pct < 0 || pct > maxPct) found.fee = `Entre 0% e ${maxPct}%.`;
-    setErrors(found);
-    if (Object.keys(found).length) return setMsg({ ok: false, text: 'Corrija os campos marcados.' });
-    setLoading(true);
     setMsg(null);
+    if (!form.validate()) return;
+    const badDay = showHours ? days.findIndex((d) => d.open && (!isTime(d.from) || !isTime(d.to))) : -1;
+    if (badDay >= 0) return setMsg({ ok: false, text: `Informe os horários de abrir e fechar de ${DAYS[badDay]}.` });
+    setLoading(true);
     try {
       const updated = await api<typeof me>('/api/restaurant/settings', {
         method: 'PATCH',
         token,
         body: {
-          name: form.name,
-          managerName: form.managerName,
-          managerContact: form.managerContact,
-          serviceFeeBps: Math.round(pct * 100),
+          name: values.name,
+          managerName: values.managerName,
+          managerContact: values.managerContact,
+          serviceFeeBps: Math.round(percentOf(values.fee) * 100),
           guestFeeRefusal: feeRefusal,
-          description: form.description,
-          logoUrl: form.logoUrl,
-          coverUrl: form.coverUrl,
-          address: form.address,
-          phone: form.phone.trim() ? brazilPhone(form.phone) : '',
-          instagram: form.instagram.trim() ? instagramHandle(form.instagram) : '',
-          wifiName: form.wifiName,
-          wifiPassword: form.wifiPassword,
+          description: values.description,
+          logoUrl: values.logoUrl,
+          coverUrl: values.coverUrl,
+          address: values.address,
+          phone: values.phone.trim() ? brazilPhone(values.phone) : '',
+          instagram: values.instagram.trim() ? instagramHandle(values.instagram) : '',
+          wifiName: values.wifiName,
+          wifiPassword: values.wifiPassword,
           openingHours: showHours ? days.map((d) => (d.open ? { open: d.from, close: d.to } : null)) : null,
         },
       });
       setMe({ ...me, ...updated });
-      setForm((f) => ({ ...f, phone: updated.phone ?? '', instagram: updated.instagram ? `@${updated.instagram}` : '', managerContact: updated.managerContact, managerName: updated.managerName }));
+      form.setValues((f) => ({ ...f, phone: updated.phone ?? '', instagram: updated.instagram ? `@${updated.instagram}` : '', managerContact: updated.managerContact, managerName: updated.managerName }));
       setMsg({ ok: true, text: 'Alterações salvas.' });
-    } catch {
-      setMsg({ ok: false, text: 'Não foi possível salvar. Confira os campos e os horários.' });
+    } catch (err) {
+      if (form.fromServer(err, { serviceFeeBps: 'fee' })) return;
+      const hours = err instanceof ApiError && Object.keys(err.fields).some((k) => k.startsWith('openingHours'));
+      setMsg({ ok: false, text: hours ? 'Informe os horários no formato 00:00 em cada dia aberto.' : unexpected(err) });
     } finally {
       setLoading(false);
     }
@@ -109,26 +135,28 @@ function Settings() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Configurações" />
-      <form onSubmit={submit} className="space-y-5">
+      <form onSubmit={submit} noValidate className="space-y-5">
         <Section title="Identidade" hint="Aparece no topo do cardápio dos clientes.">
-          <Field label="Nome do restaurante" error={errors.name}><Input value={form.name} onChange={(e) => set({ name: e.target.value })} invalid={!!errors.name} minLength={2} maxLength={120} required /></Field>
+          <Field label="Nome do restaurante" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.restaurantName.max} /></Field>
           <Field label="Endereço do cardápio" hint="Não muda: já está nos QR Codes e nas tags. Só a Elo Digital altera.">
             <Input value={me.slug} disabled />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-start">
-            <ImageField label="Logo" token={token} value={form.logoUrl} onChange={(logoUrl) => set({ logoUrl })} />
-            <ImageField label="Capa" token={token} value={form.coverUrl} onChange={(coverUrl) => set({ coverUrl })} wide />
+            <ImageField label="Logo" token={token} value={values.logoUrl} onChange={(logoUrl) => form.set('logoUrl', logoUrl)} />
+            <ImageField label="Capa" token={token} value={values.coverUrl} onChange={(coverUrl) => form.set('coverUrl', coverUrl)} wide />
           </div>
-          <Field label="Descrição" hint={`${form.description.length}/${LIMITS.description}`}>
-            <textarea rows={3} maxLength={LIMITS.description} value={form.description} onChange={(e) => set({ description: e.target.value })} placeholder="Pizzas no forno a lenha, desde 1998." />
+          {form.errors.logoUrl && <p aria-live="polite" className="text-xs text-danger">Logo: {form.errors.logoUrl}</p>}
+          {form.errors.coverUrl && <p aria-live="polite" className="text-xs text-danger">Capa: {form.errors.coverUrl}</p>}
+          <Field label="Descrição" hint={`${values.description.length}/${FIELD_RULES.description.max}`} error={form.errors.description}>
+            <Textarea {...form.bind('description')} rows={3} maxLength={FIELD_RULES.description.max} placeholder="Pizzas no forno a lenha, desde 1998." />
           </Field>
         </Section>
 
         <Section title="Contato">
-          <Field label="Endereço"><Input value={form.address} onChange={(e) => set({ address: e.target.value })} maxLength={LIMITS.address} placeholder="Rua das Flores, 100 · Centro" /></Field>
+          <Field label="Endereço" error={form.errors.address}><Input {...form.bind('address')} maxLength={FIELD_RULES.address.max} placeholder="Rua das Flores, 100 · Centro" /></Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Telefone" error={errors.phone}><Input value={form.phone} onChange={(e) => set({ phone: maskPhone(e.target.value) })} invalid={!!errors.phone} inputMode="tel" maxLength={16} placeholder="(11) 4000-1234" /></Field>
-            <Field label="Instagram" error={errors.instagram}><Input value={form.instagram} onChange={(e) => set({ instagram: e.target.value })} invalid={!!errors.instagram} maxLength={60} placeholder="@seurestaurante" autoCapitalize="none" autoCorrect="off" spellCheck={false} /></Field>
+            <Field label="Telefone" error={form.errors.phone}><Input {...form.bind('phone')} onChange={(e) => form.set('phone', maskPhone(e.target.value))} inputMode="tel" maxLength={16} placeholder="(11) 4000-1234" /></Field>
+            <Field label="Instagram" error={form.errors.instagram}><Input {...form.bind('instagram')} maxLength={FIELD_RULES.instagram.max} placeholder="@seurestaurante" autoCapitalize="none" autoCorrect="off" spellCheck={false} /></Field>
           </div>
         </Section>
 
@@ -150,9 +178,9 @@ function Settings() {
                   </label>
                   {d.open && (
                     <span className="flex w-full flex-wrap items-center gap-2 text-sm sm:ml-auto sm:w-auto">
-                      <TimeInput value={d.from} onChange={(v) => setDay(i, { from: v })} aria-label={`${DAYS[i]}: abre`} required className="!w-24 text-center" />
+                      <TimeInput value={d.from} onChange={(v) => setDay(i, { from: v })} aria-label={`${DAYS[i]}: abre`} className="!w-24 text-center" />
                       <span className="text-muted">às</span>
-                      <TimeInput value={d.to} onChange={(v) => setDay(i, { to: v })} aria-label={`${DAYS[i]}: fecha`} required className="!w-24 text-center" />
+                      <TimeInput value={d.to} onChange={(v) => setDay(i, { to: v })} aria-label={`${DAYS[i]}: fecha`} className="!w-24 text-center" />
                     </span>
                   )}
                 </li>
@@ -164,21 +192,21 @@ function Settings() {
 
         <Section title="Wi-Fi para clientes" hint="Aparece só para quem está com a mesa aberta. Nunca no link de consulta.">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nome da rede"><Input value={form.wifiName} onChange={(e) => set({ wifiName: e.target.value })} maxLength={LIMITS.wifiName} /></Field>
-            <Field label="Senha"><PasswordInput value={form.wifiPassword} onChange={(e) => set({ wifiPassword: e.target.value })} maxLength={LIMITS.wifiPassword} autoComplete="off" /></Field>
+            <Field label="Nome da rede" error={form.errors.wifiName}><Input {...form.bind('wifiName')} maxLength={FIELD_RULES.wifiName.max} /></Field>
+            <Field label="Senha" error={form.errors.wifiPassword}><PasswordInput {...form.bind('wifiPassword')} maxLength={FIELD_RULES.wifiPassword.max} autoComplete="off" /></Field>
           </div>
         </Section>
 
         <Section title="Responsável pelo contrato" hint="Quem a Elo Digital procura sobre a assinatura. Não aparece para os clientes.">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nome do responsável" error={errors.managerName}><Input value={form.managerName} onChange={(e) => set({ managerName: e.target.value })} invalid={!!errors.managerName} maxLength={LIMITS.personName.max} required /></Field>
-            <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={errors.managerContact}><Input value={form.managerContact} onChange={(e) => set({ managerContact: e.target.value })} invalid={!!errors.managerContact} maxLength={120} required /></Field>
+            <Field label="Nome do responsável" error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
+            <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
           </div>
         </Section>
 
         <Section title="Taxa de serviço" hint="Entra na conta de cada mesa. O garçom e o caixa sempre podem remover.">
-          <Field label="Taxa de serviço (%)" hint={`De 0% a ${LIMITS.serviceFeeBpsMax / 100}%. Use 0 para não cobrar.`} error={errors.fee}>
-            <Input value={form.fee} onChange={(e) => set({ fee: e.target.value.replace(/[^\d,.]/g, '') })} invalid={!!errors.fee} inputMode="decimal" maxLength={5} required />
+          <Field label="Taxa de serviço (%)" hint={`De 0% a ${MAX_FEE_PCT}%. Use 0 para não cobrar.`} error={form.errors.fee}>
+            <Input {...form.bind('fee')} onChange={(e) => form.set('fee', e.target.value.replace(/[^\d,.]/g, ''))} inputMode="decimal" maxLength={5} />
           </Field>
           <label className="flex items-start gap-3 text-sm">
             <Switch label="O cliente pode recusar a taxa pelo cardápio" checked={feeRefusal} onChange={setFeeRefusal} />
