@@ -1,16 +1,27 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@elo/core';
 import { CurrentUser, NoImpersonation, Roles, TenantId } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { OrdersService } from './orders.service';
-import { AdvanceOrderDto, CancelStaffDto, ListOrdersQuery } from './orders.dto';
+import type { Env } from '../config/env';
+import { AdvanceOrderDto, CancelStaffDto, ListOrdersQuery, OrderHistoryQuery } from './orders.dto';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly config: ConfigService<Env, true>,
+  ) {}
+
+  @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
+  @Get('history')
+  history(@TenantId() rid: string, @CurrentUser() user: JwtUser, @Query() query: OrderHistoryQuery) {
+    return this.orders.history(rid, user, query, this.config.get('REPORT_TZ', { infer: true }));
+  }
 
   @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
   @Get()

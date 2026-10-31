@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CancelActor, cancellationRule, nextOrderStatus, OrderStatus, previousOrderStatus, returnRule } from '@elo/core';
+import { CancelActor, cancellationRule, nextOrderStatus, type OrderHistoryPage, orderHistoryStart, OrderStatus, orderTotalCents, previousOrderStatus, returnRule } from '@elo/core';
 import { TenantRepo } from '../common/tenant-repo';
 import type { JwtUser } from '../common/auth-types';
 import { Order, TableSession } from '../database/entities';
@@ -16,7 +16,8 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { SessionContext, TablesService } from '../tables/tables.service';
 import { priceItem } from './pricing';
-import { CreateOrderDto, ListOrdersQuery } from './orders.dto';
+import { CreateOrderDto, ListOrdersQuery, OrderHistoryQuery } from './orders.dto';
+import { StaffService } from '../staff/staff.service';
 
 @Injectable()
 export class OrdersService {
@@ -26,6 +27,7 @@ export class OrdersService {
     private readonly tables: TablesService,
     private readonly realtime: RealtimeService,
     private readonly audit: AuditService,
+    private readonly staff: StaffService,
   ) {}
 
   private scoped(rid: string) {
@@ -69,6 +71,50 @@ export class OrdersService {
       .take(q.limit ?? 300)
       .getMany();
     return this.withTableNames(rid, rows.reverse());
+  }
+
+  /**
+   * Past and current orders, newest first, 20 per page. Floor roles only reach back
+   * `ORDER_HISTORY_FLOOR_DAYS`; owner and managers see everything.
+   */
+  async history(rid: string, user: JwtUser, q: OrderHistoryQuery, timeZone: string): Promise<OrderHistoryPage> {
+    const pageSize = 20;
+    const page = q.page ?? 1;
+    const limit = orderHistoryStart(user.roles, new Date());
+    const qb = this.scoped(rid).qb('o').leftJoin(TableSession, 's', 's.id = o.sessionId').addSelect(['s.openedBy', 's.closedAt']);
+    if (q.status?.length) qb.andWhere('o.status IN (:...statuses)', { statuses: q.status });
+    if (q.tableId) qb.andWhere('o.tableId = :tableId', { tableId: q.tableId });
+    // Period in the restaurant's own days, so "today" matches the reports.
+    if (q.from) qb.andWhere(`o.createdAt >= (CAST(:from AS date)::timestamp AT TIME ZONE :tz)`, { from: q.from, tz: timeZone });
+    if (q.to) qb.andWhere(`o.createdAt < ((CAST(:to AS date) + 1)::timestamp AT TIME ZONE :tz)`, { to: q.to, tz: timeZone });
+    if (limit) qb.andWhere('o.createdAt >= :limit', { limit });
+    const total = await qb.getCount();
+    const { entities, raw } = await qb
+      .orderBy('o.createdAt', 'DESC')
+      .offset((page - 1) * pageSize)
+      .limit(pageSize)
+      .getRawAndEntities();
+    const sessions = new Map<string, { openedBy: string | null; closedAt: Date | null }>(
+      raw.map((r: { o_id: string; s_opened_by: string | null; s_closed_at: Date | null }) => [r.o_id, { openedBy: r.s_opened_by, closedAt: r.s_closed_at }]),
+    );
+    const names = await this.staff.names([...sessions.values()].map((s) => s.openedBy));
+    const named = await this.withTableNames(rid, entities);
+    return {
+      items: named.map((o) => {
+        const s = sessions.get(o.id);
+        return {
+          ...o,
+          createdAt: o.createdAt.toISOString(),
+          totalCents: orderTotalCents(o.items),
+          servedBy: s?.openedBy ? names.get(s.openedBy)?.name ?? null : null,
+          closedAt: s?.closedAt ? new Date(s.closedAt).toISOString() : null,
+        };
+      }),
+      total,
+      page,
+      pageSize,
+      limitedFrom: limit?.toISOString() ?? null,
+    };
   }
 
   /** Staff screens identify orders by table; the name travels with every order they receive. */

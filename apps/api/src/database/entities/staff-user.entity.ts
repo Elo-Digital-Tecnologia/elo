@@ -15,6 +15,8 @@ export class StaffUser {
   @Column({ type: 'varchar', length: 80 }) name: string;
   /** Name shown to guests ("Ana vai até a sua mesa"). */
   @Column({ type: 'varchar', length: 30, nullable: true }) displayName: string | null;
+  /** Optional profile photo, shown to the team only (never to guests). */
+  @Column({ type: 'varchar', length: 120, nullable: true }) avatarUrl: string | null;
   @Column() passwordHash: string;
   @Column({ type: 'text', array: true }) roles: Role[];
   @Column({ type: 'text', array: true, default: '{}' }) permissions: string[];

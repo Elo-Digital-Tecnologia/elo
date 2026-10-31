@@ -176,6 +176,10 @@ export class StaffService {
     return new Map(rows.map((u) => [u.id, { name: u.name, guestName: guestFacingName(u.name, u.displayName) }]));
   }
 
+  async profiles(ids: string[]): Promise<Pick<StaffUser, 'id' | 'name' | 'avatarUrl'>[]> {
+    return ids.length ? this.users.find({ where: { id: In(ids) }, select: { id: true, name: true, avatarUrl: true } }) : [];
+  }
+
   /** Readable name of a JWT subject, for history records. */
   async actorName(sub: string): Promise<string> {
     if (sub === 'superadmin') return 'Superadmin';
@@ -233,6 +237,20 @@ export class StaffService {
       target: target.name,
       meta: { formerOwner: owner?.name ?? null, ...('reason' in confirm ? { reason: confirm.reason } : {}) },
     });
+  }
+
+  /**
+   * Sets or clears a profile photo and returns the previous URL, so the caller can
+   * delete the old file. Members change their own; leads follow the usual team rules.
+   */
+  async setAvatar(id: string, restaurantId: string, actor: JwtUser, url: string | null): Promise<string | null> {
+    const user = await this.find(id, restaurantId);
+    if (actor.sub !== id) await this.authorize(actor, user, 'edit');
+    const previous = user.avatarUrl;
+    user.avatarUrl = url;
+    await this.users.save(user);
+    this.realtime.publish({ type: 'staff.updated', restaurantId, payload: { id } });
+    return previous;
   }
 
   async changePassword(id: string, current: string, next: string): Promise<void> {

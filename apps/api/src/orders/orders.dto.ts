@@ -67,3 +67,18 @@ export class ListOrdersQuery {
   /** Only orders of guests still at their tables (session not closed), for the floor. */
   @IsOptional() @Transform(({ value }) => value === true || value === 'true') @IsBoolean() open?: boolean;
 }
+
+/** Filters of GET /orders/history: a period (YYYY-MM-DD, restaurant days), statuses, a table and the page. */
+export class OrderHistoryQuery {
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value))
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsIn(Object.values(OrderStatus), { each: true })
+  status?: OrderStatus[];
+
+  @IsOptional() @Matches(DAY) from?: string;
+  @IsOptional() @Matches(DAY) to?: string;
+  @IsOptional() @IsUUID() tableId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000) page?: number;
+}

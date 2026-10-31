@@ -15,6 +15,10 @@ export interface Env {
   UPLOAD_DIR: string;
   /** Days a deleted restaurant's data is kept before it is erased for good. */
   RESTAURANT_PURGE_DAYS: number;
+  /** Activity log entries older than this many days are erased on a schedule. */
+  ACTIVITY_RETENTION_DAYS: number;
+  /** How often, in hours, the activity log cleanup runs. */
+  ACTIVITY_CLEANUP_HOURS: number;
   /** Web Push keys (`pnpm --filter @elo/api vapid:generate`). Without them, push stays off. */
   VAPID_PUBLIC_KEY: string | null;
   VAPID_PRIVATE_KEY: string | null;
@@ -44,15 +48,17 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
     // Relative paths (like ./uploads in .env.example) resolve from where the API runs; files are served by absolute path.
     UPLOAD_DIR: path.resolve(process.cwd(), raw.UPLOAD_DIR || 'uploads'),
     RESTAURANT_PURGE_DAYS: positive(raw.RESTAURANT_PURGE_DAYS, 90, 'RESTAURANT_PURGE_DAYS'),
+    ACTIVITY_RETENTION_DAYS: positive(raw.ACTIVITY_RETENTION_DAYS, 180, 'ACTIVITY_RETENTION_DAYS'),
+    ACTIVITY_CLEANUP_HOURS: positive(raw.ACTIVITY_CLEANUP_HOURS, 24, 'ACTIVITY_CLEANUP_HOURS', 'hours'),
     VAPID_PUBLIC_KEY: raw.VAPID_PUBLIC_KEY || null,
     VAPID_PRIVATE_KEY: raw.VAPID_PRIVATE_KEY || null,
     VAPID_SUBJECT: raw.VAPID_SUBJECT || (raw.PUBLIC_BASE_URL ?? 'http://localhost:3000'),
   };
 }
 
-function positive(value: string | undefined, fallback: number, name: string): number {
+function positive(value: string | undefined, fallback: number, name: string, unit = 'days'): number {
   if (value === undefined || value === '') return fallback;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive whole number of days`);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`${name} must be a positive whole number of ${unit}`);
   return n;
 }

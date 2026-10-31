@@ -11,6 +11,7 @@ import sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { RestaurantLifecycleService } from '../src/restaurants/restaurant-lifecycle.service';
+import { ActivityCleanupService } from '../src/audit/activity-cleanup.service';
 
 /**
  * Fluxos críticos contra Postgres real (migrations aplicadas).
@@ -876,5 +877,54 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post(`/tables/${t2.id}/reject-open`).set(auth(waiterP)).expect(201);
     const log = (await http().get('/restaurant/activity?category=settings').set(auth(owner)).expect(200)).body.items as { action: string }[];
     expect(log.filter((l) => l.action === 'pause_created')).toHaveLength(2);
+  });
+
+  it('histórico de pedidos por perfil, foto de perfil e limpeza dos registros antigos', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Historico ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `hi${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const owner = await login(`hi${suf}`, r.slug);
+    const w = (await http().post('/staff').set(auth(owner)).send({ username: `hw${suf}`, password: 'senha12345', name: 'Helena Garcom', roles: ['waiter'] }).expect(201)).body;
+    const waiterH = await login(`hw${suf}`, r.slug);
+    const cat = (await http().post('/catalog/categories').set(auth(owner)).send({ name: 'Bebidas' }).expect(201)).body;
+    const prod = (await http().post('/catalog/products').set(auth(owner)).send({ categoryId: cat.id, name: 'Suco', priceCents: 900 }).expect(201)).body;
+    const t = (await http().post('/tables').set(auth(owner)).send({ name: 'Mesa H' }).expect(201)).body;
+    const guest = cookieOf(await http().post(`/public/${r.slug}/${t.token}/session`).expect(201));
+    await http().post('/public/session/open').set('Cookie', guest).expect(201);
+    await http().post(`/tables/${t.id}/validate-open`).set(auth(waiterH)).expect(201);
+    await http().post('/public/session/orders').set('Cookie', guest).send({ items: [{ productId: prod.id, quantity: 2 }] }).expect(201);
+
+    // an old order: the waiter's window does not reach it, the owner's does
+    const db = app.get(DataSource);
+    const order = (await http().post('/public/session/orders').set('Cookie', guest).send({ items: [{ productId: prod.id, quantity: 1 }] }).expect(201)).body;
+    await db.query(`UPDATE orders SET created_at = now() - interval '10 days' WHERE id = $1`, [order.id]);
+    const full = (await http().get('/orders/history').set(auth(owner)).expect(200)).body;
+    expect(full).toMatchObject({ total: 2, limitedFrom: null });
+    expect(full.items[0]).toMatchObject({ tableName: 'Mesa H', totalCents: 1800, servedBy: 'Helena Garcom', closedAt: null });
+    const recent = (await http().get('/orders/history').set(auth(waiterH)).expect(200)).body;
+    expect(recent.total).toBe(1);
+    expect(recent.limitedFrom).not.toBeNull();
+    const old = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+    expect((await http().get(`/orders/history?from=${old}&to=${old}`).set(auth(owner)).expect(200)).body.total).toBe(1);
+    await http().get('/orders/history?from=ontem').set(auth(owner)).expect(400);
+
+    // profile photo: own or set by a lead, never by a waiter for someone else; shown to the team only
+    const png = await sharp({ create: { width: 600, height: 400, channels: 3, background: '#2e7d32' } }).png().toBuffer();
+    const mine = (await http().post('/me/avatar').set(auth(waiterH)).attach('file', png, 'eu.png').expect(201)).body;
+    expect(mine.avatarUrl).toMatch(/^\/api\/media\/[0-9a-f-]{36}\.webp$/);
+    expect((await http().get('/me').set(auth(waiterH)).expect(200)).body.avatarUrl).toBe(mine.avatarUrl);
+    const ownerId = ((await http().get('/staff').set(auth(owner)).expect(200)).body as { id: string; username: string }[]).find((u) => u.username === `hi${suf}`)!.id;
+    await http().post(`/staff/${ownerId}/avatar`).set(auth(waiterH)).attach('file', png, 'x.png').expect(403);
+    await http().post(`/staff/${w.id}/avatar`).set(auth(owner)).attach('file', Buffer.from('nada'), 'x.png').expect(400);
+    await http().delete(`/staff/${w.id}/avatar`).set(auth(owner)).expect(204);
+    expect(((await http().get('/staff').set(auth(owner)).expect(200)).body as { id: string; avatarUrl: string | null }[]).find((u) => u.id === w.id)?.avatarUrl).toBeNull();
+    await http().get(mine.avatarUrl).expect(404);
+
+    // old activity entries are erased by the scheduled cleanup; recent ones stay
+    const [{ id: oldLog }] = await db.query(`INSERT INTO audit_log (actor, actor_name, actor_kind, action, restaurant_id, created_at) VALUES ('system', 'Sistema', 'system', 'settings_updated', $1, now() - interval '400 days') RETURNING id`, [r.id]);
+    expect(await app.get(ActivityCleanupService).run()).toBeGreaterThanOrEqual(1);
+    expect(await db.query(`SELECT 1 FROM audit_log WHERE id = $1`, [oldLog])).toHaveLength(0);
+    expect((await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body.total).toBeGreaterThan(0);
   });
 });

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { mkdir, unlink, writeFile } from 'fs/promises';
+import { randomUUID } from 'crypto';
 import * as path from 'path';
 import sharp from 'sharp';
 import { Like, Repository } from 'typeorm';
@@ -86,6 +87,27 @@ export class MediaService implements OnModuleInit {
       writeFile(path.join(this.dir, `${row.id}-sm.webp`), thumb),
     ]);
     return view(row);
+  }
+
+  /** Square profile photo, kept apart from the restaurant's image bank. Returns its URL. */
+  async saveAvatar(buffer: Buffer): Promise<string> {
+    try {
+      const meta = await sharp(buffer, { limitInputPixels: 40_000_000 }).metadata();
+      if (!meta.format || !ACCEPTED.has(meta.format)) throw new BadRequestException('unsupported_image_type');
+    } catch (e) {
+      throw e instanceof BadRequestException ? e : new BadRequestException('invalid_image');
+    }
+    const id = randomUUID();
+    const data = await sharp(buffer, { limitInputPixels: 40_000_000 }).rotate().resize({ width: 256, height: 256, fit: 'cover' }).webp({ quality: 80 }).toBuffer();
+    await mkdir(this.dir, { recursive: true });
+    await writeFile(path.join(this.dir, `${id}.webp`), data);
+    return urlOf(id);
+  }
+
+  /** Deletes a profile photo file; unknown or foreign URLs are ignored. */
+  async dropAvatar(url: string | null | undefined): Promise<void> {
+    const file = url?.match(/^\/api\/media\/([0-9a-f-]{36})\.webp$/)?.[1];
+    if (file) await unlink(path.join(this.dir, `${file}.webp`)).catch(() => undefined);
   }
 
   async remove(rid: string, id: string): Promise<void> {

@@ -97,6 +97,14 @@ export class StaffController {
 export class MeController {
   constructor(private readonly staff: StaffService) {}
 
+  /** Who is signed in, with the profile photo the shell shows in the header. */
+  @Get()
+  async me(@CurrentUser() user: JwtUser) {
+    if (user.sub === 'superadmin' || user.impersonatedBy) return { id: user.sub, name: user.name ?? null, avatarUrl: null };
+    const [row] = await this.staff.profiles([user.sub]);
+    return { id: user.sub, name: row?.name ?? user.name ?? null, avatarUrl: row?.avatarUrl ?? null };
+  }
+
   @NoImpersonation()
   @HttpCode(204)
   @Patch('password')
