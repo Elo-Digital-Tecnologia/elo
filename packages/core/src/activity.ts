@@ -30,6 +30,7 @@ export const ACTIVITY_ACTIONS = {
   payment_voided: { category: 'payments', label: 'Lançamento estornado' },
   due_date_adjusted: { category: 'payments', label: 'Vencimento ajustado' },
   plan_changed: { category: 'payments', label: 'Plano alterado' },
+  trial_ended: { category: 'payments', label: 'Período de teste encerrado' },
   settings_updated: { category: 'settings', label: 'Configurações alteradas' },
   pause_created: { category: 'settings', label: 'Parada agendada' },
   pause_ended: { category: 'settings', label: 'Parada encerrada' },

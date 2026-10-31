@@ -17,6 +17,7 @@ import {
   slugify,
   type SuspensionReason,
   suspensionReasons,
+  trialEndsAt,
 } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
@@ -47,6 +48,7 @@ export interface SubscriptionInfo {
   warning: boolean;
   reasons: SuspensionReason[];
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
+  trialEndsAt: Date | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -207,7 +209,7 @@ export class RestaurantsService {
       dueDate: r.dueDate.toISOString(),
       suspended: r.suspended,
       createdAt: r.createdAt.toISOString(),
-      subscription: { ...sub, dueDate: sub.dueDate.toISOString(), graceEndsAt: sub.graceEndsAt.toISOString() },
+      subscription: { ...sub, dueDate: sub.dueDate.toISOString(), graceEndsAt: sub.graceEndsAt.toISOString(), trialEndsAt: sub.trialEndsAt?.toISOString() ?? null },
       deletedAt: r.deletedAt?.toISOString() ?? null,
       purgeAt: r.deletedAt ? new Date(r.deletedAt.getTime() + purgeDays * DAY_MS).toISOString() : null,
     };
@@ -255,6 +257,7 @@ export class RestaurantsService {
       warning: state === AccessState.Grace,
       reasons: suspensionReasons(r.dueDate, r.suspended, now),
       plan: r.plan ? { id: r.plan.id, name: r.plan.name, priceCents: r.plan.priceCents, cycleMonths: r.plan.cycleMonths } : null,
+      trialEndsAt: trialEndsAt(r.initialDueDate, now),
     };
   }
 

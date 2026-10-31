@@ -28,7 +28,10 @@ function View() {
           <div className="flex items-center gap-4">
             <span className={`grid shrink-0 h-14 w-14 place-items-center rounded-pill ${s.state === 'active' ? 'bg-success/15 text-success' : s.state === 'grace' ? 'bg-warning/20 text-warning' : 'bg-danger/15 text-danger'}`}><Icon size={28} /></span>
             <div>
-              <Badge tone={st.tone} dot>{st.label}</Badge>
+              <span className="flex flex-wrap items-center gap-2">
+                <Badge tone={st.tone} dot>{st.label}</Badge>
+                {s.trialEndsAt && <Badge tone="info">Em teste até {new Date(s.trialEndsAt).toLocaleDateString('pt-BR')}</Badge>}
+              </span>
               <p className="mt-2 text-muted">{st.text}</p>
             </div>
           </div>

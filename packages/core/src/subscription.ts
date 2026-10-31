@@ -24,3 +24,11 @@ export function accessState(
   if (overdueMs <= 0) return AccessState.Active;
   return overdueMs <= GRACE_DAYS * DAY_MS ? AccessState.Grace : AccessState.Suspended;
 }
+
+/**
+ * End of the free trial while it still runs, else null. The trial ends at the first
+ * due date set when the restaurant was created (or when the Elo team ended it early).
+ */
+export function trialEndsAt(initialDueDate: Date, now: Date = new Date()): Date | null {
+  return initialDueDate.getTime() > now.getTime() ? initialDueDate : null;
+}

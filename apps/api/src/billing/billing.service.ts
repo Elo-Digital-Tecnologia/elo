@@ -262,6 +262,24 @@ export class BillingService {
     return view(entry, null);
   }
 
+  /**
+   * Ends the free trial today: billing starts now, with the usual grace days. Payments
+   * already recorded keep their periods; to cut access at once, suspend instead.
+   */
+  async endTrial(restaurantId: string, reason: string, actor: JwtUser): Promise<void> {
+    const r = await this.restaurant(restaurantId);
+    const now = new Date();
+    if (r.initialDueDate.getTime() <= now.getTime()) throw new ConflictException('trial_over');
+    const today = dateOnly(now.toISOString().slice(0, 10))!;
+    const from = r.initialDueDate;
+    await this.data.transaction(async (em) => {
+      r.initialDueDate = today;
+      await em.update(Restaurant, { id: r.id }, { initialDueDate: today });
+      await this.syncDueDate(em, r);
+    });
+    await this.audit.record(actor, 'trial_ended', restaurantId, { meta: { reason: reason.trim(), from: from.toISOString() } });
+  }
+
   private async restaurant(id: string): Promise<Restaurant> {
     const r = await this.restaurants.findOne({ where: { id } });
     if (!r) throw new NotFoundException();

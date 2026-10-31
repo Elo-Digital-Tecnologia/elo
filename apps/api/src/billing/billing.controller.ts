@@ -79,4 +79,12 @@ export class BillingController {
   adjustDueDate(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AdjustDueDateDto, @CurrentUser() user: JwtUser) {
     return this.billing.adjustDueDate(id, dto.dueDate, dto.reason, user);
   }
+
+  /** Ends the free trial today (billing starts, with the grace days); reuses the reason-only body of a void. */
+  @RequirePermission(Permission.PaymentsRecord)
+  @HttpCode(204)
+  @Post('restaurants/:id/trial/end')
+  endTrial(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VoidEntryDto, @CurrentUser() user: JwtUser) {
+    return this.billing.endTrial(id, dto.reason, user);
+  }
 }

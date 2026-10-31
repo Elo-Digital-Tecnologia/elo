@@ -184,7 +184,12 @@ function View() {
 
   const status = (r: RestaurantListItem) => {
     const s = STATE[r.subscription.state];
-    return <Badge tone={s.tone} dot>{s.label}</Badge>;
+    return (
+      <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+        <Badge tone={s.tone} dot>{s.label}</Badge>
+        {r.subscription.trialEndsAt && <Badge tone="info">Em teste</Badge>}
+      </span>
+    );
   };
   /** Opens the public menu without leaving the list. */
   const menuLink = (r: RestaurantListItem) => (

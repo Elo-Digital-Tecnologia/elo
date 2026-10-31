@@ -61,6 +61,7 @@ function detail(a: ActivityView): string | null {
   if (a.action === 'ownership_transferred') {
     return [typeof m.formerOwner === 'string' ? `Antes: ${m.formerOwner}` : null, reason].filter(Boolean).join(' · ') || null;
   }
+  if (a.action === 'trial_ended') return [typeof m.from === 'string' ? `Terminaria em ${day(m.from)}` : null, reason].filter(Boolean).join(' · ') || null;
   if (a.action === 'plan_changed') return typeof m.from === 'string' ? `Antes: ${m.from}.` : null;
   if (a.action === 'payment_voided') {
     const amount = typeof m.amountCents === 'number' && m.amountCents > 0 ? formatBRL(m.amountCents) : null;

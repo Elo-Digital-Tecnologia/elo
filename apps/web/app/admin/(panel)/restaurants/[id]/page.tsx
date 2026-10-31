@@ -4,7 +4,7 @@ import { Ban, CalendarClock, Crown, CalendarCog, CircleCheck, ExternalLink, Laye
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
-import { cycleLabel, FIELD_RULES, formatBRL, type Role, type SubscriptionView } from '@elo/core';
+import { cycleLabel, FIELD_RULES, formatBRL, GRACE_DAYS, type Role, type SubscriptionView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
 import { PaymentSummaryCard } from './_components/payment-summary';
@@ -91,6 +91,8 @@ function View({ id }: { id: string }) {
   const [team, setTeam] = useState<TeamMember[] | null>(null);
   const [newOwner, setNewOwner] = useState(false);
   const ownerForm = useForm({ userId: '', reason: '' }, OWNER_CHECKS);
+  const [endingTrial, setEndingTrial] = useState(false);
+  const trialForm = useForm({ reason: '' }, OWNER_CHECKS);
 
   const load = useCallback(async () => {
     try {
@@ -197,12 +199,23 @@ function View({ id }: { id: string }) {
           </>
         }
       />
-      {error && !editing && !deleting && !access && !newOwner && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
+      {error && !editing && !deleting && !access && !newOwner && !endingTrial && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
 
       <div className="grid gap-5 lg:grid-cols-3">
         <GlassCard strong className="flex flex-col gap-4 p-6">
           <div className="space-y-2">
-            <Badge tone={st.tone} dot>{st.label}</Badge>
+            <span className="flex flex-wrap items-center gap-2">
+              <Badge tone={st.tone} dot>{st.label}</Badge>
+              {sub.trialEndsAt && <Badge tone="info">Em teste até {fmt(sub.trialEndsAt)}</Badge>}
+            </span>
+            {sub.trialEndsAt && (
+              <p className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted">
+                A cobrança começa em {fmt(sub.trialEndsAt)}.
+                {can('payments.record') && (
+                  <Button variant="ghost" onClick={() => { setError(null); trialForm.reset({ reason: '' }); setEndingTrial(true); }}>Encerrar teste</Button>
+                )}
+              </p>
+            )}
             {sub.reasons.length > 0 && (
               <ul className="space-y-1 text-sm">
                 {sub.reasons.includes('manual') && <li>Suspenso manualmente pela Elo Digital.</li>}
@@ -317,6 +330,31 @@ function View({ id }: { id: string }) {
           ) : (
             <p>A equipe volta a entrar no painel na hora.</p>
           )
+        )}
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={endingTrial}
+        title="Encerrar o período de teste?"
+        confirmLabel="Encerrar teste"
+        danger
+        loading={saving}
+        error={error}
+        onConfirm={async () => {
+          setError(null);
+          if (!trialForm.validate()) return;
+          if (await guard(() => api(`/api/admin/restaurants/${id}/trial/end`, { body: trialForm.values, token }), trialForm.fromServer)) setEndingTrial(false);
+        }}
+        onClose={() => setEndingTrial(false)}
+      >
+        <p>
+          O teste termina hoje e a cobrança começa: o vencimento passa a ser hoje e, sem pagamento, a equipe ainda tem os {GRACE_DAYS} dias de tolerância antes de perder o acesso.
+          Para cortar o acesso agora, use <strong>Suspender acesso</strong>.
+        </p>
+        {endingTrial && (
+          <Field label="Motivo" hint="Fica nos registros do restaurante." error={trialForm.errors.reason}>
+            <Textarea {...trialForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={3} placeholder="Por exemplo: o restaurante decidiu começar a usar já" />
+          </Field>
         )}
       </ConfirmModal>
 

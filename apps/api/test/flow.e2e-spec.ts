@@ -1018,4 +1018,19 @@ suite('fluxo da mesa (e2e)', () => {
     await http().get(`/admin/documents/${doc.id}`).set(auth(viewer)).expect(403);
     await http().get(`/admin/documents/${doc.id}`).expect(401);
   });
+
+  it('período de teste: aparece na assinatura e pode ser encerrado, começando a cobrança', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Teste ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `tt${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const before = (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body.subscription;
+    expect(before.trialEndsAt?.slice(0, 10)).toBe(due);
+    await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'x' }).expect(400);
+    await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'Começou a usar já' }).expect(204);
+    const after = (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body.subscription;
+    expect(after.trialEndsAt).toBeNull();
+    expect(after.dueDate.slice(0, 10)).toBe(new Date().toISOString().slice(0, 10));
+    await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'De novo' }).expect(409);
+  });
 });

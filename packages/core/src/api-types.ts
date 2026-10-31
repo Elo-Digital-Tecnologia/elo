@@ -104,6 +104,8 @@ export interface SubscriptionView {
   /** Why the team is locked out, empty while it is not. */
   reasons: SuspensionReason[];
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
+  /** While the free trial runs: when it ends. */
+  trialEndsAt: string | null;
 }
 
 export interface WaiterCallView {
