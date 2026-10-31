@@ -1,4 +1,4 @@
-import { addMonths, dateOnly, dueDateProblems, paymentPeriod, paymentProblems, suspensionReasons, toDay } from './billing';
+import { addMonths, dateOnly, dueDateProblems, paymentPeriod, paymentProblems, paymentSummary, suspensionReasons, toDay } from './billing';
 
 const day = (s: string) => dateOnly(s)!;
 
@@ -65,5 +65,41 @@ describe('suspensionReasons', () => {
     expect(suspensionReasons(day('2026-11-10'), false, now)).toEqual([]);
     expect(suspensionReasons(day('2026-11-10'), true, now)).toEqual(['manual']);
     expect(suspensionReasons(day('2026-01-11'), true, now)).toEqual(['manual', 'overdue']);
+  });
+});
+
+describe('payment receipts', () => {
+  const base = { paidAt: new Date('2026-10-10T12:00:00Z'), restaurantCreatedAt: new Date('2026-09-01T12:00:00Z'), cycles: 1, amountCents: 9900, expectedCents: 9900, now: new Date('2026-10-20T12:00:00Z') };
+  it('asks for the proof or a reason, never both', () => {
+    expect(paymentProblems({ ...base, receipt: {} })).toEqual(['receipt_required']);
+    expect(paymentProblems({ ...base, receipt: { noReceiptReason: 'ok' } })).toEqual(['receipt_required']);
+    expect(paymentProblems({ ...base, receipt: { noReceiptReason: 'Pago em dinheiro' } })).toEqual([]);
+    expect(paymentProblems({ ...base, receipt: { documentId: 'd1' } })).toEqual([]);
+    expect(paymentProblems({ ...base, receipt: { documentId: 'd1', noReceiptReason: 'Pago em dinheiro' } })).toEqual(['receipt_or_reason']);
+    expect(paymentProblems(base)).toEqual([]);
+  });
+});
+
+describe('paymentSummary', () => {
+  const restaurant = { createdAt: '2026-05-10T12:00:00.000Z', initialDueDate: '2026-06-10T12:00:00.000Z' };
+  const pay = (paidAt: string, start: string, end: string, extra: Partial<{ voidedAt: string }> = {}) => ({
+    kind: 'payment' as const, amountCents: 9900, paidAt, periodStart: start, newDueDate: end, voidedAt: null, createdAt: paidAt, ...extra,
+  });
+  const now = new Date('2026-10-20T12:00:00Z');
+  it('counts totals, punctuality and delay from the due date each payment settled', () => {
+    const s = paymentSummary([
+      pay('2026-06-08T12:00:00.000Z', '2026-06-10T12:00:00.000Z', '2026-07-10T12:00:00.000Z'),
+      pay('2026-07-15T12:00:00.000Z', '2026-07-10T12:00:00.000Z', '2026-08-10T12:00:00.000Z'),
+      pay('2026-08-01T12:00:00.000Z', '2026-08-10T12:00:00.000Z', '2026-09-10T12:00:00.000Z', { voidedAt: '2026-08-02T12:00:00.000Z' }),
+    ], restaurant, now);
+    expect(s).toMatchObject({ totalCents: 19800, payments: 2, onTimePct: 50, avgDelayDays: 2.5, lastPaidAt: '2026-07-15T12:00:00.000Z' });
+    const states = Object.fromEntries(s.months.map((m) => [m.month, m.state]));
+    expect(states).toMatchObject({ '2026-04': 'before', '2026-05': 'trial', '2026-06': 'paid_on_time', '2026-07': 'paid_late', '2026-09': 'uncovered', '2026-10': 'uncovered' });
+    expect(s.months).toHaveLength(12);
+  });
+  it('makes sense without payments', () => {
+    const s = paymentSummary([], restaurant, new Date('2026-05-20T12:00:00Z'));
+    expect(s).toMatchObject({ totalCents: 0, payments: 0, onTimePct: null, avgDelayDays: null, lastPaidAt: null });
+    expect(s.months.at(-1)).toEqual({ month: '2026-05', state: 'trial' });
   });
 });
