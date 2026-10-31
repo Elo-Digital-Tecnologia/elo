@@ -4,7 +4,7 @@ import type { OrderItem, Product } from '../database/entities';
 export interface RequestedItem {
   productId: string;
   quantity: number;
-  notes?: string;
+  notes?: string | null;
   options?: { group: string; label: string }[];
 }
 
@@ -39,7 +39,7 @@ export function priceItem(product: Product, req: RequestedItem): OrderItem {
     name: product.name,
     unitCents: product.priceCents + options.reduce((s, o) => s + o.priceCents, 0),
     quantity: req.quantity,
-    notes: req.notes,
+    notes: req.notes || undefined,
     options,
   };
 }

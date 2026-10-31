@@ -8,7 +8,7 @@ import { AuditService } from './audit.service';
 
 class ActivityQuery {
   @IsOptional() @IsIn(Object.keys(ACTIVITY_CATEGORIES)) category?: ActivityCategory;
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(5) @Max(50) pageSize?: number;
 }
 

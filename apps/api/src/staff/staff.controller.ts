@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { canGrant, Permission, RestaurantManagerRoles, Role, withRequired } from '@elo/core';
 import { CurrentUser, NoImpersonation, RequirePermission, Roles, TenantId } from '../common/decorators';
 import { StaffService } from './staff.service';
@@ -66,6 +67,7 @@ export class StaffController {
 
   @Roles(Role.RestaurantAdmin)
   @NoImpersonation()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(204)
   @Post(':id/transfer-ownership')
   transferOwnership(
@@ -106,6 +108,7 @@ export class MeController {
   }
 
   @NoImpersonation()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(204)
   @Patch('password')
   async changePassword(@CurrentUser() user: JwtUser, @Body() dto: ChangePasswordDto) {

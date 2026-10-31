@@ -4,6 +4,7 @@ import { PushService } from '../push/push.service';
 
 export const staffRoom = (restaurantId: string) => `r:${restaurantId}`;
 export const tableRoom = (tableId: string) => `t:${tableId}`;
+export const memberRoom = (userId: string) => `u:${userId}`;
 
 export interface RealtimeEvent {
   type: 'order.created' | 'order.updated' | 'order.cancelled' | 'table.updated' | 'call.created' | 'call.resolved' | 'bill.updated' | 'staff.updated' | 'restaurant.availability';
@@ -30,6 +31,11 @@ export class RealtimeService {
   /** Drops the staff sockets of a restaurant; on reconnect the gateway tells them why they are refused. */
   disconnectRestaurant(restaurantId: string): void {
     this.server?.in(staffRoom(restaurantId)).disconnectSockets(true);
+  }
+
+  /** Drops one member's live screens (deactivated or archived); on reconnect they are refused. */
+  disconnectMember(userId: string): void {
+    this.server?.in(memberRoom(userId)).disconnectSockets(true);
   }
 
   /** Emits to the open screens and, for alerts, to the staff phones subscribed to push. */

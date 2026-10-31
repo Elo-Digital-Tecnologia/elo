@@ -1,48 +1,33 @@
 import { Type } from 'class-transformer';
-import { PRODUCT_TAGS, type ProductTag } from '@elo/core';
-import { IMAGE_URL_PATTERN } from '../common/image-url';
-import {
-  ArrayMaxSize,
-  ArrayUnique,
-  IsArray,
-  IsBoolean,
-  IsIn,
-  IsInt,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Matches,
-  MaxLength,
-  Min,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
+import { FIELD_RULES, PRODUCT_TAGS, type ProductTag } from '@elo/core';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsOptional, IsUUID, ValidateNested } from 'class-validator';
+import { Field } from '../common/validation';
 
 export class CategoryDto {
-  @IsString() @MinLength(1) @MaxLength(80) name: string;
-  @IsOptional() @IsInt() @Min(0) position?: number;
+  @Field(FIELD_RULES.categoryName) name: string;
+  @Field(FIELD_RULES.position, { optional: true }) position?: number;
 }
 
 export class OptionChoiceDto {
-  @IsString() @MinLength(1) @MaxLength(80) label: string;
-  @IsInt() @Min(0) priceCents: number;
+  @Field(FIELD_RULES.optionName) label: string;
+  @Field(FIELD_RULES.priceCents) priceCents: number;
 }
 
 export class OptionGroupDto {
-  @IsString() @MinLength(1) @MaxLength(80) name: string;
+  @Field(FIELD_RULES.optionName) name: string;
   @IsBoolean() required: boolean;
   @IsBoolean() multiple: boolean;
-  @IsArray() @ArrayMaxSize(40) @ValidateNested({ each: true }) @Type(() => OptionChoiceDto)
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(40) @ValidateNested({ each: true }) @Type(() => OptionChoiceDto)
   choices: OptionChoiceDto[];
 }
 
 export class ProductDto {
   @IsUUID() categoryId: string;
-  @IsString() @MinLength(1) @MaxLength(120) name: string;
-  @IsOptional() @IsString() @MaxLength(500) description?: string;
-  @IsInt() @Min(0) priceCents: number;
-  /** Link externo ou imagem do banco do restaurante (/api/media/<id>.webp). */
-  @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) imageUrl?: string;
+  @Field(FIELD_RULES.productName) name: string;
+  @Field(FIELD_RULES.productDescription, { optional: true }) description?: string | null;
+  @Field(FIELD_RULES.priceCents) priceCents: number;
+  /** Link externo (https) ou imagem do banco do restaurante (/api/media/<id>.webp). */
+  @Field(FIELD_RULES.imageUrl, { optional: true }) imageUrl?: string | null;
   @IsOptional() @IsBoolean() featured?: boolean;
   @IsOptional() @IsArray() @ArrayMaxSize(PRODUCT_TAGS.length) @ArrayUnique() @IsIn(PRODUCT_TAGS, { each: true }) tags?: ProductTag[];
   @IsOptional() @IsBoolean() available?: boolean;

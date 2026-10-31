@@ -1,43 +1,30 @@
-import { Transform } from 'class-transformer';
-import {
-  ArrayMinSize,
-  ArrayUnique,
-  IsArray,
-  IsBoolean,
-  IsIn,
-  IsString,
-  Matches,
-  MaxLength,
-  MinLength,
-  IsOptional,
-} from 'class-validator';
-import { ALL_PERMISSIONS, PERSON_NAME, RestaurantStaffRoles, type Role } from '@elo/core';
-
-const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+import { ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ALL_PERMISSIONS, FIELD_RULES, RestaurantStaffRoles, type Role } from '@elo/core';
+import { Field } from '../common/validation';
 
 export class CreateRestaurantStaffDto {
-  @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) username: string;
-  @IsString() @MinLength(8) @MaxLength(128) password: string;
-  @Transform(trim) @IsString() @MinLength(2) @MaxLength(80) @Matches(PERSON_NAME) name: string;
-  @IsOptional() @Transform(trim) @IsString() @MaxLength(30) displayName?: string;
+  @Field(FIELD_RULES.username) username: string;
+  @Field(FIELD_RULES.password) password: string;
+  @Field(FIELD_RULES.personName) name: string;
+  @Field(FIELD_RULES.displayName, { optional: true }) displayName?: string | null;
   @IsArray() @ArrayMinSize(1) @ArrayUnique() @IsIn(RestaurantStaffRoles, { each: true }) roles: Role[];
 }
 
 export class UpdateRestaurantStaffDto {
-  @IsOptional() @Transform(trim) @IsString() @MinLength(2) @MaxLength(80) @Matches(PERSON_NAME) name?: string;
-  @IsOptional() @Transform(trim) @IsString() @MaxLength(30) displayName?: string | null;
+  @Field(FIELD_RULES.personName, { optional: true }) name?: string;
+  @Field(FIELD_RULES.displayName, { optional: true }) displayName?: string | null;
   @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayUnique() @IsIn(RestaurantStaffRoles, { each: true }) roles?: Role[];
 }
 
 export class CreateEloStaffDto {
-  @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) username: string;
-  @Transform(trim) @IsString() @MinLength(2) @MaxLength(80) @Matches(PERSON_NAME) name: string;
-  @IsString() @MinLength(8) @MaxLength(128) password: string;
+  @Field(FIELD_RULES.username) username: string;
+  @Field(FIELD_RULES.personName) name: string;
+  @Field(FIELD_RULES.password) password: string;
   @IsArray() @ArrayUnique() @IsIn(ALL_PERMISSIONS, { each: true }) permissions: string[];
 }
 
 export class UpdateEloStaffDto {
-  @IsOptional() @Transform(trim) @IsString() @MinLength(2) @MaxLength(80) @Matches(PERSON_NAME) name?: string;
+  @Field(FIELD_RULES.personName, { optional: true }) name?: string;
   @IsOptional() @IsArray() @ArrayUnique() @IsIn(ALL_PERMISSIONS, { each: true }) permissions?: string[];
 }
 
@@ -46,14 +33,15 @@ export class SetActiveDto {
 }
 
 export class ChangePasswordDto {
-  @IsString() @MinLength(8) @MaxLength(128) current: string;
-  @IsString() @MinLength(8) @MaxLength(128) next: string;
+  /** Only checked against the stored hash: a wrong one answers 401 whatever its size. */
+  @IsString() @MaxLength(128) current: string;
+  @Field(FIELD_RULES.password) next: string;
 }
 
 export class ResetPasswordDto {
-  @IsString() @MinLength(8) @MaxLength(128) password: string;
+  @Field(FIELD_RULES.password) password: string;
 }
 
 export class TransferOwnershipDto {
-  @IsString() @MinLength(1) @MaxLength(128) password: string;
+  @IsString() @MaxLength(128) password: string;
 }

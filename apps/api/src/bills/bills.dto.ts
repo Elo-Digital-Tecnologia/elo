@@ -1,10 +1,12 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean } from 'class-validator';
+import { FIELD_RULES } from '@elo/core';
+import { Field } from '../common/validation';
 
 export class AdjustmentDto {
-  @IsString() @MinLength(2) @MaxLength(80) label: string;
+  @Field(FIELD_RULES.adjustmentLabel) label: string;
   /** Positivo acrescenta, negativo dá desconto (centavos). */
-  @IsInt() @Min(-1_000_000) @Max(1_000_000) cents: number;
-  @IsOptional() @IsString() @MaxLength(200) reason?: string;
+  @Field(FIELD_RULES.adjustmentCents) cents: number;
+  @Field(FIELD_RULES.adjustmentReason, { optional: true }) reason?: string | null;
 }
 
 export class WaiveFeeDto {

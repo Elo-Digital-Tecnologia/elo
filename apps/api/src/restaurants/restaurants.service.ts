@@ -105,11 +105,11 @@ export class RestaurantsService {
 
   async create(data: NewRestaurant): Promise<Restaurant> {
     const slug = data.slug ?? slugify(data.name);
-    if (!slug) throw new ConflictException('invalid_slug');
-    if (isReservedSlug(slug)) throw new ConflictException('slug_reserved');
+    if (!slug) throw new ConflictException({ statusCode: 409, message: 'invalid_slug', field: 'slug' });
+    if (isReservedSlug(slug)) throw new ConflictException({ statusCode: 409, message: 'slug_reserved', field: 'slug' });
     // A deleted restaurant keeps its slug until it is purged.
     if (await this.restaurants.findOne({ where: { slug }, withDeleted: true })) {
-      throw new ConflictException('slug_taken');
+      throw new ConflictException({ statusCode: 409, message: 'slug_taken', field: 'slug' });
     }
     const due = dateOnly(data.initialDueDate);
     if (!due) throw new BadRequestException({ message: 'invalid_date', field: 'initialDueDate' });

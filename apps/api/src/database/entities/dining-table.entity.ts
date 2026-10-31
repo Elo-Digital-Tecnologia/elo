@@ -5,7 +5,7 @@ import { TableState } from '@elo/core';
 export class DiningTable {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Index() @Column({ type: 'uuid' }) restaurantId: string;
-  @Column() name: string;
+  @Column({ type: 'varchar', length: 40 }) name: string;
   /** Token permanente, aleatório e longo. Nunca aparece o número da mesa na URL. */
   @Column({ unique: true }) token: string;
   @Column({ type: 'varchar', default: 'closed' }) state: TableState;

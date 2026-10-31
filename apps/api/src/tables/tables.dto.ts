@@ -1,5 +1,6 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { FIELD_RULES } from '@elo/core';
+import { Field } from '../common/validation';
 
 export class CreateTableDto {
-  @IsString() @MinLength(1) @MaxLength(40) name: string;
+  @Field(FIELD_RULES.tableName) name: string;
 }

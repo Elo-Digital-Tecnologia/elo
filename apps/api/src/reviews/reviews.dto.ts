@@ -1,8 +1,8 @@
-import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsInt, Max, Min } from 'class-validator';
+import { FIELD_RULES } from '@elo/core';
+import { Field } from '../common/validation';
 
 export class ReviewDto {
   @IsInt() @Min(1) @Max(5) stars: number;
-  @Transform(({ value }) => (typeof value === 'string' ? (value.trim() === '' ? null : value.trim()) : value))
-  @IsOptional() @IsString() @MaxLength(300) comment?: string | null;
+  @Field(FIELD_RULES.reviewComment, { optional: true }) comment?: string | null;
 }

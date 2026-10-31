@@ -118,7 +118,7 @@ export class PublicController {
   @UseGuards(TableSessionGuard)
   @Post('session/orders/:id/cancel')
   cancel(@Session() ctx: SessionContext, @Param() { id }: OrderParams, @Body() dto: CancelCustomerDto) {
-    return this.orders.cancelByCustomer(ctx, id, dto.reason);
+    return this.orders.cancelByCustomer(ctx, id, dto.reason ?? undefined);
   }
 
   /** Null when the server has no push keys: the page then offers only on-screen alerts. */

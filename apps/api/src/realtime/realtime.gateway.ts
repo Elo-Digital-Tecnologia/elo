@@ -7,8 +7,9 @@ import { AccessState } from '@elo/core';
 import { corsOrigin } from '../config/cors';
 import { TableSession } from '../database/entities';
 import type { JwtUser } from '../common/auth-types';
+import { StaffService } from '../staff/staff.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
-import { RealtimeService, staffRoom, tableRoom } from './realtime.service';
+import { RealtimeService, staffRoom, tableRoom, memberRoom } from './realtime.service';
 
 export const TABLE_COOKIE = 'elo_table';
 
@@ -35,6 +36,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly realtime: RealtimeService,
     private readonly jwt: JwtService,
     private readonly restaurants: RestaurantsService,
+    private readonly staff: StaffService,
     @InjectRepository(TableSession) private readonly sessions: Repository<TableSession>,
   ) {}
 
@@ -63,7 +65,9 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
       const state = await this.restaurants.accessStateOf(user.restaurantId).catch(() => null);
       if (!state) return reject('invalid');
       if (state === AccessState.Suspended) return reject('suspended');
-      await client.join(staffRoom(user.restaurantId));
+      // A deactivated or archived member keeps a valid token for hours; the live feed stops at once.
+      if (!user.impersonatedBy && !(await this.staff.access(user.sub).catch(() => null))) return reject('invalid');
+      await client.join([staffRoom(user.restaurantId), memberRoom(user.sub)]);
       return;
     }
     const sessionId = parseCookie(client.handshake.headers.cookie, TABLE_COOKIE);

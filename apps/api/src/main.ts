@@ -1,7 +1,7 @@
 import 'reflect-metadata';
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { createValidationPipe } from './common/validation';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -16,9 +16,7 @@ async function bootstrap() {
   app.use(cookieParser());
   app.set('trust proxy', 1);
   app.enableCors({ origin: corsOrigin, credentials: true });
-  app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
-  );
+  app.useGlobalPipes(createValidationPipe());
 
   const doc = SwaggerModule.createDocument(
     app,

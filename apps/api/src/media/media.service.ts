@@ -8,9 +8,11 @@ import sharp from 'sharp';
 import { Like, Repository } from 'typeorm';
 import { TenantRepo } from '../common/tenant-repo';
 import type { Env } from '../config/env';
-import { Media, Product } from '../database/entities';
+import { Media, Product, Restaurant } from '../database/entities';
 
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+/** Images a restaurant may keep in its bank; old ones can be deleted to make room. */
+export const MEDIA_PER_RESTAURANT = 300;
 const ACCEPTED = new Set(['jpeg', 'png', 'webp']);
 
 export interface MediaView {
@@ -42,6 +44,7 @@ export class MediaService implements OnModuleInit {
   constructor(
     @InjectRepository(Media) private readonly media: Repository<Media>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     config: ConfigService<Env, true>,
   ) {
     this.dir = config.get('UPLOAD_DIR', { infer: true });
@@ -60,6 +63,7 @@ export class MediaService implements OnModuleInit {
   }
 
   async upload(rid: string, file: { buffer: Buffer; originalname: string }): Promise<MediaView> {
+    if ((await this.media.count({ where: { restaurantId: rid } })) >= MEDIA_PER_RESTAURANT) throw new ConflictException('media_limit');
     let meta: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>;
     try {
       // O formato vem do conteúdo, não da extensão nem do tipo informado pelo navegador.
@@ -113,9 +117,9 @@ export class MediaService implements OnModuleInit {
   async remove(rid: string, id: string): Promise<void> {
     const repo = this.repo(rid);
     if (!(await repo.findOne({ id }))) throw new NotFoundException();
-    if (await this.products.count({ where: { restaurantId: rid, imageUrl: Like(`%${id}%`) } })) {
-      throw new ConflictException('image_in_use');
-    }
+    const inProducts = await this.products.count({ where: { restaurantId: rid, imageUrl: Like(`%${id}%`) } });
+    const inProfile = await this.restaurants.count({ where: [{ id: rid, logoUrl: Like(`%${id}%`) }, { id: rid, coverUrl: Like(`%${id}%`) }] });
+    if (inProducts || inProfile) throw new ConflictException('image_in_use');
     await repo.remove({ id });
     await Promise.all([`${id}.webp`, `${id}-sm.webp`].map((f) => unlink(path.join(this.dir, f)).catch(() => undefined)));
   }

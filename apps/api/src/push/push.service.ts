@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
@@ -17,6 +17,8 @@ export interface NewSubscription {
  * subscribed, so a locked phone still hears about a call or an order, and
  * tells guests who asked for it how their table and orders are doing.
  */
+const GUEST_DEVICES_MAX = 5;
+
 @Injectable()
 export class PushService {
   private readonly log = new Logger(PushService.name);
@@ -50,6 +52,11 @@ export class PushService {
 
   /** A guest at an open table: the device is bound to the session and goes away with it. */
   async subscribeGuest(session: { restaurantId: string; tableId: string; sessionId: string }, sub: NewSubscription): Promise<void> {
+    // A few phones per table visit is plenty; more would only multiply outgoing requests.
+    const known = await this.guests.count({ where: { sessionId: session.sessionId } });
+    if (known >= GUEST_DEVICES_MAX && !(await this.guests.exist({ where: { sessionId: session.sessionId, endpoint: sub.endpoint } }))) {
+      throw new ConflictException('too_many_devices');
+    }
     await this.guests.upsert(
       { restaurantId: session.restaurantId, tableId: session.tableId, sessionId: session.sessionId, endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth },
       ['endpoint'],

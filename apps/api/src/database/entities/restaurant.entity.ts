@@ -5,11 +5,11 @@ import { Plan } from './plan.entity';
 @Entity('restaurants')
 export class Restaurant {
   @PrimaryGeneratedColumn('uuid') id: string;
-  @Column({ unique: true }) slug: string;
-  @Column() name: string;
+  @Column({ type: 'varchar', length: 60, unique: true }) slug: string;
+  @Column({ type: 'varchar', length: 120 }) name: string;
   /** LGPD: apenas nome e contato do gerente. */
-  @Column() managerName: string;
-  @Column() managerContact: string;
+  @Column({ type: 'varchar', length: 80 }) managerName: string;
+  @Column({ type: 'varchar', length: 120 }) managerContact: string;
   /** Kept in step with the billing history by BillingService; filters and access checks read it. */
   @Column({ type: 'timestamptz' }) dueDate: Date;
   /** End of the trial: the due date while there is no billing entry. */
@@ -29,8 +29,8 @@ export class Restaurant {
   @Column({ type: 'varchar', length: 30, nullable: true }) phone: string | null;
   @Column({ type: 'varchar', length: 40, nullable: true }) instagram: string | null;
   /** Só aparece para quem está numa mesa aberta, nunca no link de consulta. */
-  @Column({ type: 'varchar', length: 60, nullable: true }) wifiName: string | null;
-  @Column({ type: 'varchar', length: 80, nullable: true }) wifiPassword: string | null;
+  @Column({ type: 'varchar', length: 32, nullable: true }) wifiName: string | null;
+  @Column({ type: 'varchar', length: 63, nullable: true }) wifiPassword: string | null;
   @Column({ type: 'jsonb', nullable: true }) openingHours: OpeningHours | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
   /**

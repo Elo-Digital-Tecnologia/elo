@@ -18,7 +18,7 @@ export class Product {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Index() @Column({ type: 'uuid' }) restaurantId: string;
   @Column({ type: 'uuid' }) categoryId: string;
-  @Column() name: string;
+  @Column({ type: 'varchar', length: 120 }) name: string;
   @Column({ type: 'text', nullable: true }) description: string | null;
   @Column({ type: 'int' }) priceCents: number;
   @Column({ type: 'text', nullable: true }) imageUrl: string | null;

@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -10,6 +10,7 @@ import request from 'supertest';
 import sharp from 'sharp';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
+import { createValidationPipe } from '../src/common/validation';
 import { RestaurantLifecycleService } from '../src/restaurants/restaurant-lifecycle.service';
 import { ActivityCleanupService } from '../src/audit/activity-cleanup.service';
 
@@ -41,7 +42,7 @@ suite('fluxo da mesa (e2e)', () => {
     const mod = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(ThrottlerStorage).useValue(unlimited).compile();
     app = mod.createNestApplication<NestExpressApplication>();
     app.use(cookieParser());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app.useGlobalPipes(createValidationPipe());
     await app.listen(0);
     url = await app.getUrl();
 
@@ -643,11 +644,13 @@ suite('fluxo da mesa (e2e)', () => {
     expect((await http().get('/push/public-key').set(auth(waiterTok)).expect(200)).body).toHaveProperty('key');
     const keys = { p256dh: 'BOr' + 'a'.repeat(84), auth: 'b'.repeat(22) };
     await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: 'http://push.example/x', keys }).expect(400);
-    await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: `https://push.example/${suf}`, keys }).expect(204);
-    await http().post('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://push.example/${suf}`, keys }).expect(204);
+    // the server posts to the endpoint: only the browsers' push services are accepted
+    await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: 'https://169.254.169.254/latest', keys }).expect(400);
+    await http().post('/push/subscriptions').set(auth(waiterTok)).send({ endpoint: `https://fcm.googleapis.com/fcm/send/${suf}`, keys }).expect(204);
+    await http().post('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://fcm.googleapis.com/fcm/send/${suf}`, keys }).expect(204);
     const access = (await http().post(`/admin/restaurants/${r.id}/access`).set(auth(sa)).expect(201)).body.accessToken;
-    await http().post('/push/subscriptions').set(auth(access)).send({ endpoint: `https://push.example/elo${suf}`, keys }).expect(403);
-    await http().delete('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://push.example/${suf}` }).expect(204);
+    await http().post('/push/subscriptions').set(auth(access)).send({ endpoint: `https://fcm.googleapis.com/fcm/send/elo${suf}`, keys }).expect(403);
+    await http().delete('/push/subscriptions').set(auth(owner)).send({ endpoint: `https://fcm.googleapis.com/fcm/send/${suf}` }).expect(204);
   }, 30_000);
   it('assinatura: planos, pagamento calculado, estorno, ajuste de vencimento e modo suporte', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
@@ -738,7 +741,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = { Authorization: `Bearer ${waiter}` };
     const db = app.get(DataSource);
     const count = async () => Number((await db.query(`SELECT COUNT(*) AS n FROM guest_push_subscriptions WHERE table_id = $1`, [tableId]))[0].n);
-    const device = { endpoint: `https://push.example.com/guest-${suf}`, keys: { p256dh: 'BOr6fJp5q0q3mWJZ2zKj8yG', auth: 'c2VjcmV0' } };
+    const device = { endpoint: `https://fcm.googleapis.com/fcm/send/guest-${suf}`, keys: { p256dh: 'BOr6fJp5q0q3mWJZ2zKj8yG', auth: 'c2VjcmV0' } };
 
     await http().get('/public/push-key').expect(200);
     const g = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
@@ -926,5 +929,48 @@ suite('fluxo da mesa (e2e)', () => {
     expect(await app.get(ActivityCleanupService).run()).toBeGreaterThanOrEqual(1);
     expect(await db.query(`SELECT 1 FROM audit_log WHERE id = $1`, [oldLog])).toHaveLength(0);
     expect((await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body.total).toBeGreaterThan(0);
+  });
+
+  it('validação: um código por campo, texto em branco recusado, tetos e login sem revelar regras', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const bad = (await http().post('/tables').set(auth(admin)).send({ name: '    ' }).expect(400)).body;
+    expect(bad).toEqual({ statusCode: 400, message: 'validation_failed', fields: { name: { code: 'required' } } });
+    const many = (await http().post('/staff').set(auth(admin)).send({ username: 'Ana Lima', password: 'curta', name: 'Ana 123', roles: ['waiter'], extra: 1 }).expect(400)).body.fields;
+    expect(many).toEqual({
+      username: { code: 'invalid_username' },
+      password: { code: 'too_short', params: { min: 8 } },
+      name: { code: 'invalid_name' },
+      extra: { code: 'unknown_field' },
+    });
+    const cat = (await http().post('/catalog/categories').set(auth(admin)).send({ name: '  Sobremesas   da casa ' }).expect(201)).body;
+    expect(cat.name).toBe('Sobremesas da casa');
+    const tooExpensive = (await http().post('/catalog/products').set(auth(admin)).send({ categoryId: cat.id, name: 'Caro', priceCents: 1_000_001 }).expect(400)).body.fields;
+    expect(tooExpensive.priceCents).toEqual({ code: 'too_large', params: { max: 1_000_000, money: true } });
+    const empty = (await http().post('/catalog/products').set(auth(admin)).send({ categoryId: cat.id, name: 'Sem escolha', priceCents: 100, options: [{ name: 'Tamanho', required: true, multiple: false, choices: [] }] }).expect(400)).body.fields;
+    expect(empty['options.0.choices']).toEqual({ code: 'too_few' });
+    const notes = (await http().post('/catalog/products').set(auth(admin)).send({ categoryId: cat.id, name: 'Foto', priceCents: 100, imageUrl: 'http://exemplo.com/a.png' }).expect(400)).body.fields;
+    expect(notes.imageUrl).toEqual({ code: 'invalid_url' });
+
+    // sign-in never tells the rules: a short password is just wrong
+    await http().post(`/auth/restaurants/${slug}/login`).send({ username: 'ab', password: '123' }).expect(401);
+    await http().post('/auth/restaurants/NAO VALE/login').send({ username: 'ana', password: 'senha12345' }).expect(400);
+
+    // a very long name still gives a slug that fits every route
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const long = `${suf} Restaurante ${'muito '.repeat(15)}comprido`.slice(0, 118);
+    const created = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: long, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `lg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    expect(created.slug.length).toBeLessThanOrEqual(60);
+    await http().get(`/public/${created.slug}/menu`).expect(200);
+    // impossible days and explicit nulls in required settings are refused, not turned into 500s
+    expect((await http().get('/reports?from=2024-13-45&to=2024-13-46').set(auth(admin)).expect(400)).body.fields.from).toEqual({ code: 'invalid_date' });
+    const me = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body;
+    const base = { name: me.name, managerName: me.managerName, managerContact: me.managerContact, serviceFeeBps: me.serviceFeeBps };
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, guestFeeRefusal: null }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [{ open: '10:00', close: '22:00', extra: 'x'.repeat(50) }, null, null, null, null, null, null] }).expect(200);
+    expect(JSON.stringify((await http().get('/restaurant/me').set(auth(admin)).expect(200)).body.openingHours)).not.toContain('extra');
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: null }).expect(200);
+    const taken = (await http().post('/staff').set(auth(admin)).send({ username: `wai${suf}`, password: 'senha12345', name: 'Outra Pessoa', roles: ['waiter'] }).expect(409)).body;
+    expect(taken).toMatchObject({ message: 'username_taken', field: 'username' });
   });
 });

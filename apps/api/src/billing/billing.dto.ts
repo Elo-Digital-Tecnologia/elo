@@ -1,50 +1,48 @@
-import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
-import { BILLING_LIMITS } from '@elo/core';
-
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const trim = () => Transform(({ value }) => (typeof value === 'string' ? value.trim() : value));
+import { Type } from 'class-transformer';
+import { IsBoolean, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { BILLING_LIMITS, FIELD_RULES } from '@elo/core';
+import { Field, IsDay, Present } from '../common/validation';
 
 export class PlanDto {
-  @trim() @IsString() @MinLength(2) @MaxLength(BILLING_LIMITS.planNameMax) name: string;
-  @IsInt() @Min(1) @Max(BILLING_LIMITS.planPriceMaxCents) priceCents: number;
+  @Field(FIELD_RULES.planName) name: string;
+  @Field(FIELD_RULES.planPriceCents) priceCents: number;
   @IsInt() @Min(1) @Max(BILLING_LIMITS.cycleMonthsMax) cycleMonths: number;
-  @IsOptional() @IsBoolean() active?: boolean;
+  @Present() @IsBoolean() active?: boolean;
 }
 
 export class UpdatePlanDto {
-  @IsOptional() @trim() @IsString() @MinLength(2) @MaxLength(BILLING_LIMITS.planNameMax) name?: string;
-  @IsOptional() @IsInt() @Min(1) @Max(BILLING_LIMITS.planPriceMaxCents) priceCents?: number;
-  @IsOptional() @IsInt() @Min(1) @Max(BILLING_LIMITS.cycleMonthsMax) cycleMonths?: number;
-  @IsOptional() @IsBoolean() active?: boolean;
+  @Field(FIELD_RULES.planName, { optional: true }) name?: string;
+  @Field(FIELD_RULES.planPriceCents, { optional: true }) priceCents?: number;
+  @Present() @IsInt() @Min(1) @Max(BILLING_LIMITS.cycleMonthsMax) cycleMonths?: number;
+  @Present() @IsBoolean() active?: boolean;
 }
 
 /** `paidAt` is a calendar day (YYYY-MM-DD); the period is calculated by the server. */
 export class RecordPaymentDto {
   @IsInt() @Min(1) @Max(BILLING_LIMITS.cyclesMax) cycles: number;
-  @Matches(DAY) paidAt: string;
-  @IsOptional() @IsInt() @Min(1) amountCents?: number;
-  @IsOptional() @IsString() @MaxLength(BILLING_LIMITS.noteMax) note?: string;
+  @IsDay() paidAt: string;
+  @Field(FIELD_RULES.paymentCents, { optional: true }) amountCents?: number;
+  @Field(FIELD_RULES.paymentNote, { optional: true }) note?: string | null;
 }
 
 export class PaymentPreviewQuery {
   @Type(() => Number) @IsInt() @Min(1) @Max(BILLING_LIMITS.cyclesMax) cycles: number;
-  @Matches(DAY) paidAt: string;
+  @IsDay() paidAt: string;
 }
 
 export class EditPaymentDto {
-  @IsOptional() @IsInt() @Min(1) amountCents?: number;
-  @IsOptional() @Matches(DAY) paidAt?: string;
-  @IsOptional() @IsString() @MaxLength(BILLING_LIMITS.noteMax) note?: string | null;
+  @Field(FIELD_RULES.paymentCents, { optional: true }) amountCents?: number;
+  @IsOptional() @IsDay() paidAt?: string;
+  @Field(FIELD_RULES.paymentNote, { optional: true }) note?: string | null;
 }
 
 export class VoidEntryDto {
-  @trim() @IsString() @MinLength(BILLING_LIMITS.reasonMin) @MaxLength(BILLING_LIMITS.reasonMax) reason: string;
+  @Field(FIELD_RULES.reason) reason: string;
 }
 
 export class AdjustDueDateDto {
-  @Matches(DAY) dueDate: string;
-  @trim() @IsString() @MinLength(BILLING_LIMITS.reasonMin) @MaxLength(BILLING_LIMITS.reasonMax) reason: string;
+  @IsDay() dueDate: string;
+  @Field(FIELD_RULES.reason) reason: string;
 }
 
 export class ChangePlanDto {

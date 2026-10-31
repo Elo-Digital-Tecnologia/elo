@@ -7,26 +7,23 @@ import {
   IsIn,
   IsInt,
   IsOptional,
-  IsString,
   IsUUID,
-  Matches,
   Max,
-  MaxLength,
   Min,
-  MinLength,
   ValidateNested,
 } from 'class-validator';
-import { OrderStatus } from '@elo/core';
+import { FIELD_RULES, OrderStatus } from '@elo/core';
+import { Field, IsDay } from '../common/validation';
 
 export class ChosenOptionDto {
-  @IsString() @MaxLength(80) group: string;
-  @IsString() @MaxLength(80) label: string;
+  @Field(FIELD_RULES.optionName) group: string;
+  @Field(FIELD_RULES.optionName) label: string;
 }
 
 export class OrderItemDto {
   @IsUUID() productId: string;
   @IsInt() @Min(1) @Max(50) quantity: number;
-  @IsOptional() @IsString() @MaxLength(300) notes?: string;
+  @Field(FIELD_RULES.orderNotes, { optional: true }) notes?: string | null;
   @IsOptional() @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => ChosenOptionDto)
   options?: ChosenOptionDto[];
 }
@@ -41,14 +38,12 @@ export class AdvanceOrderDto {
 }
 
 export class CancelStaffDto {
-  @IsString() @MinLength(3) @MaxLength(300) reason: string;
+  @Field(FIELD_RULES.reason) reason: string;
 }
 
 export class CancelCustomerDto {
-  @IsOptional() @IsString() @MaxLength(300) reason?: string;
+  @Field(FIELD_RULES.optionalReason, { optional: true }) reason?: string | null;
 }
-
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Filtros de GET /orders. `status` aceita lista separada por vírgula. */
 export class ListOrdersQuery {
@@ -59,8 +54,8 @@ export class ListOrdersQuery {
   @IsIn(Object.values(OrderStatus), { each: true })
   status?: OrderStatus[];
 
-  @IsOptional() @Matches(DAY) from?: string;
-  @IsOptional() @Matches(DAY) to?: string;
+  @IsOptional() @IsDay() from?: string;
+  @IsOptional() @IsDay() to?: string;
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) limit?: number;
 
@@ -77,8 +72,8 @@ export class OrderHistoryQuery {
   @IsIn(Object.values(OrderStatus), { each: true })
   status?: OrderStatus[];
 
-  @IsOptional() @Matches(DAY) from?: string;
-  @IsOptional() @Matches(DAY) to?: string;
+  @IsOptional() @IsDay() from?: string;
+  @IsOptional() @IsDay() to?: string;
   @IsOptional() @IsUUID() tableId?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000) page?: number;
 }

@@ -68,7 +68,7 @@ export class StaffService {
       }
     }
     const scope = { username: data.username, restaurantId: data.restaurantId ?? IsNull(), ...notArchived };
-    if (await this.users.findOne({ where: scope })) throw new ConflictException('username_taken');
+    if (await this.users.findOne({ where: scope })) throw new ConflictException({ statusCode: 409, message: 'username_taken', field: 'username' });
     const user = await this.users.save(
       this.users.create({
         restaurantId: data.restaurantId,
@@ -129,6 +129,7 @@ export class StaffService {
     user.active = active;
     await this.users.save(user);
     this.activeCache.delete(id);
+    if (!active) this.realtime.disconnectMember(id);
     if (changed) await this.audit.record(actor, active ? 'staff_activated' : 'staff_deactivated', user.restaurantId, { target: user.name });
   }
 
@@ -162,6 +163,7 @@ export class StaffService {
     user.active = false;
     await this.users.save(user);
     this.activeCache.delete(id);
+    this.realtime.disconnectMember(id);
     await this.audit.record(actor, 'staff_archived', user.restaurantId, { target: user.name });
   }
 

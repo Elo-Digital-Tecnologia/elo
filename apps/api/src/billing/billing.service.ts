@@ -27,7 +27,7 @@ export interface PaymentInput {
   cycles: number;
   paidAt: string;
   amountCents?: number;
-  note?: string;
+  note?: string | null;
 }
 
 const day = (value: string, field: string) => {

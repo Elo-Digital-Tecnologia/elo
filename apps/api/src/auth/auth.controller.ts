@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser, NoImpersonation, Public } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { AuthService } from './auth.service';
-import { LoginDto, SuperadminLoginDto } from './auth.dto';
+import { LoginDto, RestaurantLoginParams, SuperadminLoginDto } from './auth.dto';
 
 @ApiTags('auth')
 @Public()
@@ -14,7 +14,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post('restaurants/:slug/login')
-  restaurantLogin(@Param('slug') slug: string, @Body() dto: LoginDto) {
+  restaurantLogin(@Param() { slug }: RestaurantLoginParams, @Body() dto: LoginDto) {
     return this.auth.restaurantLogin(slug, dto.username, dto.password);
   }
 

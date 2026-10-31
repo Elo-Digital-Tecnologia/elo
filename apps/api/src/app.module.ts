@@ -39,6 +39,8 @@ import { TABLE_COOKIE } from './realtime/realtime.gateway';
  * O guard roda antes do JwtAuthGuard, então o token é verificado aqui: um token
  * forjado cai no balde do IP e não consome o limite de outra pessoa.
  */
+const UUID = /^[0-9a-f-]{36}$/;
+
 @Injectable()
 class SessionOrIpThrottlerGuard extends ThrottlerGuard {
   constructor(
@@ -60,8 +62,12 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
         /* token inválido: segue para os outros critérios */
       }
     }
+    // Sign-in and starting a table session never trust the cookie: a made-up value
+    // would otherwise open a fresh bucket on every request and lift the limit.
+    const path = String(req.url ?? '').split('?')[0];
+    if (/\/auth\//.test(path) || /\/public\/[^/]+\/[^/]+\/session$/.test(path)) return `ip:${req.ip}`;
     const session = (req.cookies as Record<string, string> | undefined)?.[TABLE_COOKIE];
-    return session ? `s:${session}` : `ip:${req.ip}`;
+    return session && UUID.test(session) ? `s:${session}` : `ip:${req.ip}`;
   }
 }
 

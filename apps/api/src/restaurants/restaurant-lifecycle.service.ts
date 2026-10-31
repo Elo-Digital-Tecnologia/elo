@@ -144,6 +144,8 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
 
   private async purge(id: string) {
     const media = await this.db.manager.find(Media, { where: { restaurantId: id }, select: { id: true } });
+    // Team profile photos are personal data: they go with the restaurant.
+    const avatars: { avatar_url: string }[] = await this.db.query(`SELECT avatar_url FROM staff_users WHERE restaurant_id = $1 AND avatar_url IS NOT NULL`, [id]);
     await this.db.transaction(async (em) => {
       const tables: { table_name: string }[] = await em.query(
         `SELECT table_name FROM information_schema.columns
@@ -154,7 +156,8 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
     });
     await this.audit.record('system', 'restaurant_purged', id);
     const dir = this.config.get('UPLOAD_DIR', { infer: true });
-    const files = media.flatMap((m) => [`${m.id}.webp`, `${m.id}-sm.webp`]);
+    const photos = avatars.map((a) => /^\/api\/media\/([0-9a-f-]{36})\.webp$/.exec(a.avatar_url)?.[1]).filter((f): f is string => !!f);
+    const files = [...media.flatMap((m) => [`${m.id}.webp`, `${m.id}-sm.webp`]), ...photos.map((f) => `${f}.webp`)];
     await Promise.all(files.map((f) => unlink(path.join(dir, f)).catch(() => undefined)));
   }
 }

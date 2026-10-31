@@ -11,16 +11,11 @@ import {
   Max,
   MaxLength,
   Min,
-  MinLength,
   registerDecorator,
   type ValidationOptions,
 } from 'class-validator';
-import { brazilPhone, contact, instagramHandle, isHHMM, LIMITS, personName, RESTAURANT_LIST_STATUSES, type RestaurantListStatus, SLUG_PATTERN } from '@elo/core';
-import { Normalized } from '../common/validation';
-import { IMAGE_URL_PATTERN } from '../common/image-url';
-
-/** Texto vazio vira nulo: é como o formulário limpa um campo. */
-const emptyToNull = () => Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? null : typeof value === 'string' ? value.trim() : value));
+import { FIELD_RULES, isHHMM, RESTAURANT_LIST_STATUSES, type RestaurantListStatus } from '@elo/core';
+import { Field, Present } from '../common/validation';
 
 /** Sete dias (domingo a sábado), cada um nulo (fechado) ou { open, close } em "HH:MM". */
 function IsOpeningHours(options?: ValidationOptions) {
@@ -41,42 +36,46 @@ function IsOpeningHours(options?: ValidationOptions) {
 }
 
 export class CreateRestaurantDto {
-  @IsString() @MinLength(2) @MaxLength(120) name: string;
-  @IsOptional() @Matches(SLUG_PATTERN) @MaxLength(60) slug?: string;
-  @Normalized(personName, 'managerName must be a person name') managerName: string;
-  @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
+  @Field(FIELD_RULES.restaurantName) name: string;
+  @Field(FIELD_RULES.slug, { optional: true }) slug?: string;
+  @Field(FIELD_RULES.personName) managerName: string;
+  @Field(FIELD_RULES.contact) managerContact: string;
   @IsUUID() planId: string;
   /** End of the trial, a calendar day (YYYY-MM-DD): the first due date. */
   @Matches(/^\d{4}-\d{2}-\d{2}$/) initialDueDate: string;
-  @IsOptional() @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps?: number;
-  @IsString() @MinLength(3) @MaxLength(64) @Matches(/^[a-z0-9._-]+$/) adminUsername: string;
-  @IsString() @MinLength(8) @MaxLength(128) adminPassword: string;
+  @Field(FIELD_RULES.serviceFeeBps, { optional: true }) serviceFeeBps?: number;
+  @Field(FIELD_RULES.username) adminUsername: string;
+  @Field(FIELD_RULES.password) adminPassword: string;
 }
 
 /** Dados editáveis pelo próprio restaurante. O slug não muda: está impresso nos QR Codes e gravado nas tags. */
 export class UpdateSettingsDto {
-  @IsString() @MinLength(2) @MaxLength(120) name: string;
-  @Normalized(personName, 'managerName must be a person name') managerName: string;
-  @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact: string;
-  @IsInt() @Min(0) @Max(LIMITS.serviceFeeBpsMax) serviceFeeBps: number;
-  @IsOptional() @IsBoolean() guestFeeRefusal?: boolean;
+  @Field(FIELD_RULES.restaurantName) name: string;
+  @Field(FIELD_RULES.personName) managerName: string;
+  @Field(FIELD_RULES.contact) managerContact: string;
+  @Field(FIELD_RULES.serviceFeeBps) serviceFeeBps: number;
+  @Present() @IsBoolean() guestFeeRefusal?: boolean;
 
   // Perfil público. Ausente = não muda; nulo ou texto vazio = limpa.
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.description) description?: string | null;
-  @emptyToNull() @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) logoUrl?: string | null;
-  @emptyToNull() @IsOptional() @Matches(IMAGE_URL_PATTERN) @MaxLength(500) coverUrl?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.address) address?: string | null;
-  @IsOptional() @Normalized(brazilPhone, 'phone must be a Brazilian phone with area code', { nullable: true }) phone?: string | null;
-  @IsOptional() @Normalized(instagramHandle, 'instagram must be a profile name', { nullable: true }) instagram?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.wifiName) wifiName?: string | null;
-  @emptyToNull() @IsOptional() @IsString() @MaxLength(LIMITS.wifiPassword) wifiPassword?: string | null;
+  @Field(FIELD_RULES.description, { optional: true }) description?: string | null;
+  @Field(FIELD_RULES.imageUrl, { optional: true }) logoUrl?: string | null;
+  @Field(FIELD_RULES.imageUrl, { optional: true }) coverUrl?: string | null;
+  @Field(FIELD_RULES.address, { optional: true }) address?: string | null;
+  @Field(FIELD_RULES.phone, { optional: true }) phone?: string | null;
+  @Field(FIELD_RULES.instagram, { optional: true }) instagram?: string | null;
+  @Field(FIELD_RULES.wifiName, { optional: true }) wifiName?: string | null;
+  @Field(FIELD_RULES.wifiPassword, { optional: true }) wifiPassword?: string | null;
+  /** Rebuilt as `{ open, close }` per day, so nothing else lands in the stored JSON. */
+  @Transform(({ value }) =>
+    Array.isArray(value) ? value.map((d) => (d && typeof d === 'object' ? { open: (d as { open?: unknown }).open, close: (d as { close?: unknown }).close } : d)) : value,
+  )
   @IsOptional() @IsArray() @IsOpeningHours() openingHours?: ({ open: string; close: string } | null)[] | null;
 }
 
 export class EditRestaurantDto {
-  @IsOptional() @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(2) @MaxLength(120) name?: string;
-  @IsOptional() @Normalized(personName, 'managerName must be a person name') managerName?: string;
-  @IsOptional() @Normalized(contact, 'managerContact must be a Brazilian phone or an e-mail') managerContact?: string;
+  @Field(FIELD_RULES.restaurantName, { optional: true }) name?: string;
+  @Field(FIELD_RULES.personName, { optional: true }) managerName?: string;
+  @Field(FIELD_RULES.contact, { optional: true }) managerContact?: string;
 }
 
 export class RestaurantListQuery {
@@ -85,7 +84,7 @@ export class RestaurantListQuery {
   /** Only restaurants whose payment is due within this many days. */
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(90) dueWithin?: number;
   @IsOptional() @IsIn(['name', 'due', 'created']) sort?: 'name' | 'due' | 'created';
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(10_000) page?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(5) @Max(100) pageSize?: number;
 }
 
@@ -96,5 +95,5 @@ export class DeleteRestaurantDto {
 
 export class ChangeOwnerDto {
   @IsUUID() userId: string;
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value)) @IsString() @MinLength(3) @MaxLength(300) reason: string;
+  @Field(FIELD_RULES.reason) reason: string;
 }
