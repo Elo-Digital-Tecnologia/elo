@@ -15,3 +15,4 @@ export * from './duration';
 export * from './activity';
 export * from './validation';
 export * from './alerts';
+export * from './billing';

@@ -1,8 +1,9 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
-import type { OpeningHours, OpenStatus } from './open-status';
+import type { Availability, OpeningHours } from './open-status';
 import type { Role } from './roles';
 import type { AccessState } from './subscription';
+import type { SuspensionReason } from './billing';
 
 export interface OptionChoice {
   label: string;
@@ -77,8 +78,8 @@ export interface RestaurantProfileView {
   address: string | null;
   phone: string | null;
   instagram: string | null;
-  /** Calculado pelo servidor no fuso do restaurante; nulo sem horário cadastrado. */
-  openStatus: OpenStatus | null;
+  /** Computed by the server in the restaurant's time zone, closures included. */
+  availability: Availability;
 }
 
 export interface PublicMenuView {
@@ -100,6 +101,9 @@ export interface SubscriptionView {
   dueDate: string;
   graceEndsAt: string;
   warning: boolean;
+  /** Why the team is locked out, empty while it is not. */
+  reasons: SuspensionReason[];
+  plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
 }
 
 export interface WaiterCallView {
@@ -133,6 +137,8 @@ export interface BillView {
   state: TableState;
   serviceFeeBps: number;
   feeWaivedBy: FeeWaivedBy | null;
+  /** The restaurant lets guests refuse the service fee themselves. */
+  guestCanRefuseFee: boolean;
   lines: BillLineView[];
   adjustments: BillAdjustmentView[];
   subtotalCents: number;
@@ -180,6 +186,7 @@ export interface StaffReportView {
 
 /** Dados completos do restaurante para o painel. */
 export interface RestaurantSettingsView extends RestaurantProfileView {
+  guestFeeRefusal: boolean;
   wifiName: string | null;
   wifiPassword: string | null;
   openingHours: OpeningHours | null;
@@ -226,4 +233,22 @@ export interface RestaurantListView {
   pageSize: number;
   /** Totals per status, ignoring the status filter, for the filter chips. `deleted` only for who may see it. */
   counts: { all: number; active: number; grace: number; suspended: number; deleted?: number };
+}
+
+export interface PauseView {
+  id: string;
+  startsAt: string;
+  endsAt: string | null;
+  endedAt: string | null;
+  reason: string | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface PauseList {
+  availability: Availability;
+  /** Current and scheduled closures, soonest first. */
+  upcoming: PauseView[];
+  /** Closures that already happened, newest first, one page at a time. */
+  past: { items: PauseView[]; total: number; page: number; pageSize: number };
 }

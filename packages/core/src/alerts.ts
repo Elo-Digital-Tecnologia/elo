@@ -51,3 +51,36 @@ export function alertOf(event: string, payload: unknown): Alert | null {
 
 /** Whether a member with these roles should hear about it. */
 export const alertsRole = (kind: AlertKind, roles: readonly string[]) => ALERTS[kind].roles.some((r) => roles.includes(r));
+
+/** What the guest at the table hears about. */
+export type GuestAlertKind = 'table_opened' | 'order_preparing' | 'order_ready' | 'call_answered' | 'table_closed';
+
+export interface GuestAlert {
+  kind: GuestAlertKind;
+  title: string;
+  body: string;
+  tag: string;
+}
+
+/**
+ * Reads a realtime event sent to a table and says whether the guest should be
+ * told. Shared by the guest page (sound and banner) and the API (push).
+ * Table events carry `change`, so a waiter taking over the table is not
+ * mistaken for the table being opened.
+ */
+export function guestAlertOf(event: string, payload: unknown): GuestAlert | null {
+  const p = (payload ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v : '');
+  const who = str((p.handledBy as { name?: unknown } | null | undefined)?.name);
+  if (event === 'table.updated') {
+    const id = str(p.id);
+    if (p.change === 'opened') return { kind: 'table_opened', title: 'Sua mesa foi aberta', body: `${who || 'O garçom'} liberou os pedidos. Bom apetite!`, tag: `opened:${id}` };
+    if (p.change === 'closed') return { kind: 'table_closed', title: 'Mesa fechada', body: 'Obrigado pela visita! Volte sempre.', tag: `closed:${id}` };
+    return null;
+  }
+  const items = Array.isArray(p.items) ? (p.items as { quantity?: unknown; name?: unknown }[]).map((i) => `${i.quantity}x ${str(i.name)}`).join(', ') : '';
+  if (event === 'order.updated' && p.status === 'preparing') return { kind: 'order_preparing', title: 'Seu pedido está em preparo', body: items, tag: `order:${str(p.id)}` };
+  if (event === 'order.updated' && p.status === 'ready') return { kind: 'order_ready', title: 'Seu pedido está pronto', body: items || 'Logo chega à mesa.', tag: `order:${str(p.id)}` };
+  if (event === 'call.resolved') return { kind: 'call_answered', title: who ? `${who} está indo até você` : 'O garçom está indo até você', body: 'Seu chamado foi atendido.', tag: `call:${str(p.id)}` };
+  return null;
+}

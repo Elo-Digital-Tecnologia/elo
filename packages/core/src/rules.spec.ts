@@ -1,9 +1,9 @@
-import { openStatus } from './open-status';
+import { availability, openStatus, pauseProblems } from './open-status';
 import { cancellationRule, returnRule } from './cancellation';
 import { calculateBill, splitBillByItems, splitBillEqually } from './bill';
 import { canTransitionTable, canWaiterClose } from './table-state';
 import { Role, rolesOf } from './roles';
-import { staffRule } from './staff-rules';
+import { canTransferOwnership, ownershipRoles, staffRule } from './staff-rules';
 import { previousOrderStatus } from './orders';
 import { formatDuration } from './duration';
 import { canGrant, upgradePermissions, withRequired } from './permissions';
@@ -147,27 +147,87 @@ describe('openStatus', () => {
   });
 });
 
-describe('staffRule', () => {
-  const admin = { sub: 'a', roles: [Role.RestaurantAdmin] };
-  const otherAdmin = { id: 'b', roles: [Role.RestaurantAdmin, Role.Waiter] };
-  const waiter = { id: 'w', roles: [Role.Waiter] };
-  it('an admin manages non-admins but never another admin', () => {
-    expect(staffRule(admin, waiter, 'archive')).toEqual({ allowed: true });
-    expect(staffRule(admin, otherAdmin, 'reset_password')).toEqual({ allowed: false, why: 'other_admin' });
-    expect(staffRule({ ...admin, impersonatedBy: 'superadmin' }, otherAdmin, 'archive', { activeAdmins: 2 })).toEqual({ allowed: true });
+describe('availability', () => {
+  const TZ = 'America/Sao_Paulo';
+  const week = [null, ...Array(6).fill({ open: '18:00', close: '23:00' })];
+  const now = new Date('2026-11-10T22:30:00Z'); // terça 19:30 local
+  it('is always open without hours or closures', () => {
+    expect(availability({ hours: null, pauses: [], now, timeZone: TZ })).toEqual({ open: true, reason: null, label: null, pauseReason: null, changesAt: null });
   });
+  it('follows the hours and says when they change', () => {
+    expect(availability({ hours: week, pauses: [], now, timeZone: TZ })).toMatchObject({ open: true, reason: null, changesAt: '2026-11-11T02:00:00.000Z' });
+    const later = availability({ hours: week, pauses: [], now: new Date('2026-11-11T03:00:00Z'), timeZone: TZ });
+    expect(later).toMatchObject({ open: false, reason: 'hours', label: 'Fechado · abre hoje às 18:00', changesAt: '2026-11-11T21:00:00.000Z' });
+  });
+  it('a closure wins over the hours and ends early when someone reopens', () => {
+    const pause = { startsAt: '2026-11-10T21:00:00Z', endsAt: '2026-11-12T21:00:00Z', reason: ' Reforma ' };
+    expect(availability({ hours: week, pauses: [pause], now, timeZone: TZ })).toEqual({
+      open: false,
+      reason: 'pause',
+      label: 'Fechado temporariamente · volta em 12/11 às 18:00',
+      pauseReason: 'Reforma',
+      changesAt: '2026-11-12T21:00:00.000Z',
+    });
+    expect(availability({ hours: null, pauses: [{ ...pause, endsAt: null }], now, timeZone: TZ })).toMatchObject({ label: 'Fechado temporariamente', changesAt: null });
+    expect(availability({ hours: null, pauses: [{ ...pause, endedAt: '2026-11-10T22:00:00Z' }], now, timeZone: TZ }).open).toBe(true);
+    expect(availability({ hours: null, pauses: [{ ...pause, endsAt: '2026-11-11T01:00:00Z' }], now, timeZone: TZ }).label).toBe('Fechado temporariamente · volta hoje às 22:00');
+  });
+  it('a scheduled closure is the next change', () => {
+    const pause = { startsAt: '2026-11-10T23:00:00Z', endsAt: null };
+    expect(availability({ hours: null, pauses: [pause], now, timeZone: TZ })).toMatchObject({ open: true, changesAt: '2026-11-10T23:00:00.000Z' });
+  });
+  it('checks a new closure', () => {
+    const at = (iso: string) => new Date(iso);
+    expect(pauseProblems({ startsAt: now, endsAt: at('2026-11-10T22:00:00Z') }, [], now)).toEqual(['ends_before_start']);
+    expect(pauseProblems({ startsAt: at('2026-11-09T22:00:00Z'), endsAt: null }, [], now)).toEqual(['starts_in_past']);
+    expect(pauseProblems({ startsAt: at('2028-01-01T00:00:00Z'), endsAt: null }, [], now)).toEqual(['too_far_ahead']);
+    const other = { startsAt: '2026-11-11T00:00:00Z', endsAt: '2026-11-11T05:00:00Z' };
+    expect(pauseProblems({ startsAt: now, endsAt: at('2026-11-11T01:00:00Z') }, [other], now)).toEqual(['overlaps']);
+    expect(pauseProblems({ startsAt: now, endsAt: at('2026-11-10T23:00:00Z') }, [other], now)).toEqual([]);
+    expect(pauseProblems({ startsAt: now, endsAt: null }, [{ ...other, endedAt: '2026-11-10T22:00:00Z' }], now)).toEqual([]);
+  });
+});
+
+describe('staffRule', () => {
+  const owner = { sub: 'a', roles: [Role.RestaurantAdmin] };
+  const ownerRow = { id: 'a', roles: [Role.RestaurantAdmin, Role.Cashier] };
+  const waiter = { id: 'w', roles: [Role.Waiter] };
+  const manager = { sub: 'm', roles: [Role.Manager] };
+  const support = { sub: 'elo:x', roles: [Role.RestaurantAdmin], impersonatedBy: 'x' };
   it('nobody archives, deactivates or changes the roles of their own account', () => {
-    const me = { id: 'a', roles: admin.roles };
-    expect(staffRule(admin, me, 'edit')).toEqual({ allowed: true });
+    const me = { id: 'a', roles: owner.roles };
+    expect(staffRule(owner, me, 'edit')).toEqual({ allowed: true });
     for (const a of ['archive', 'set_active', 'change_roles', 'reset_password'] as const) {
-      expect(staffRule(admin, me, a)).toEqual({ allowed: false, why: 'self' });
+      expect(staffRule(owner, me, a)).toEqual({ allowed: false, why: 'self' });
     }
   });
-  it('the restaurant keeps one active admin', () => {
-    const support = { sub: 'elo:x', roles: [Role.RestaurantAdmin], impersonatedBy: 'x' };
-    expect(staffRule(support, otherAdmin, 'archive', { activeAdmins: 1 })).toEqual({ allowed: false, why: 'last_admin' });
-    expect(staffRule(support, otherAdmin, 'change_roles', { activeAdmins: 1, nextRoles: [Role.Waiter] })).toEqual({ allowed: false, why: 'last_admin' });
-    expect(staffRule(support, otherAdmin, 'change_roles', { activeAdmins: 1, nextRoles: [Role.RestaurantAdmin] })).toEqual({ allowed: true });
+  it('the owner manages managers; a manager only manages the floor and kitchen team', () => {
+    const otherManager = { id: 'm2', roles: [Role.Manager] };
+    expect(staffRule(owner, otherManager, 'reset_password')).toEqual({ allowed: true });
+    expect(staffRule(owner, waiter, 'change_roles', { nextRoles: [Role.Manager] })).toEqual({ allowed: true });
+    expect(staffRule(manager, waiter, 'reset_password')).toEqual({ allowed: true });
+    expect(staffRule(manager, waiter, 'change_roles', { nextRoles: [Role.Waiter, Role.Cashier] })).toEqual({ allowed: true });
+    expect(staffRule(manager, waiter, 'change_roles', { nextRoles: [Role.Manager] })).toEqual({ allowed: false, why: 'not_above' });
+    expect(staffRule(manager, otherManager, 'archive')).toEqual({ allowed: false, why: 'not_above' });
+    expect(staffRule(manager, ownerRow, 'edit')).toEqual({ allowed: false, why: 'not_above' });
+    expect(staffRule(manager, { id: 'm', roles: [Role.Manager] }, 'edit')).toEqual({ allowed: true });
+  });
+  it('the owner role only moves through a transfer, even for support', () => {
+    expect(staffRule(owner, waiter, 'change_roles', { nextRoles: [Role.RestaurantAdmin] })).toEqual({ allowed: false, why: 'owner' });
+    expect(staffRule(support, ownerRow, 'change_roles', { nextRoles: [Role.Waiter] })).toEqual({ allowed: false, why: 'owner' });
+    expect(staffRule(support, ownerRow, 'change_roles', { nextRoles: [Role.RestaurantAdmin, Role.Waiter] })).toEqual({ allowed: true });
+    expect(staffRule(support, ownerRow, 'archive')).toEqual({ allowed: false, why: 'owner' });
+    expect(staffRule(support, ownerRow, 'set_active')).toEqual({ allowed: false, why: 'owner' });
+    expect(staffRule(support, ownerRow, 'reset_password')).toEqual({ allowed: true });
+  });
+  it('ownership goes to an active member and swaps the lead roles', () => {
+    const member = { ...waiter, active: true, archived: false };
+    expect(canTransferOwnership(ownerRow, member)).toBe(true);
+    expect(canTransferOwnership(ownerRow, { ...member, active: false })).toBe(false);
+    expect(canTransferOwnership(ownerRow, { ...member, archived: true })).toBe(false);
+    expect(canTransferOwnership(ownerRow, { ...ownerRow, active: true, archived: false })).toBe(false);
+    expect(ownershipRoles([Role.Manager, Role.Cashier], 'owner')).toEqual([Role.RestaurantAdmin, Role.Cashier]);
+    expect(ownershipRoles([Role.RestaurantAdmin, Role.Waiter], 'former')).toEqual([Role.Manager, Role.Waiter]);
   });
 });
 

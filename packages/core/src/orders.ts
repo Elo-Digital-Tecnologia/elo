@@ -31,6 +31,16 @@ export function previousOrderStatus(status: OrderStatus): OrderStatus | null {
   return PREVIOUS[status] ?? null;
 }
 
+/** Sent to the kitchen and not ready yet. */
+export const ORDER_IN_PROGRESS: OrderStatus[] = [OrderStatus.Sent, OrderStatus.Received, OrderStatus.Preparing];
+
+/**
+ * The guest asks for the bill only once the kitchen is done with every order:
+ * the bill must not close over food still being made. The waiter still
+ * confirms by closing the table.
+ */
+export const canRequestBill = (statuses: readonly string[]) => !statuses.some((s) => (ORDER_IN_PROGRESS as string[]).includes(s));
+
 export const TableState = {
   Closed: 'closed',
   PendingOpen: 'pending_open',
