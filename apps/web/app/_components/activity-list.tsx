@@ -62,11 +62,15 @@ function detail(a: ActivityView): string | null {
   if (a.action === 'ownership_transferred') {
     return [typeof m.formerOwner === 'string' ? `Antes: ${m.formerOwner}` : null, reason].filter(Boolean).join(' · ') || null;
   }
-  if (a.action === 'trial_ended') return [typeof m.from === 'string' ? `Terminaria em ${day(m.from)}` : null, reason].filter(Boolean).join(' · ') || null;
-  if (a.action === 'contract_registered' || a.action === 'contract_converted' || a.action === 'contract_renewed') {
+  if (a.action === 'trial_ended') {
+    const from = typeof m.from === 'string' ? `Cobrança começaria em ${m.from.length === 10 ? calendarDay(m.from) : day(m.from)}` : null;
+    return [from, reason].filter(Boolean).join(' · ') || null;
+  }
+  if (a.action === 'contract_registered' || a.action === 'contract_converted' || a.action === 'contract_renewed' || a.action === 'contract_voided') {
     const kind = typeof m.kind === 'string' ? CONTRACT_KIND_LABEL[m.kind as ContractKind] : null;
     const term = typeof m.startsOn === 'string' && typeof m.endsOn === 'string' ? `de ${calendarDay(m.startsOn)} a ${calendarDay(m.endsOn)}` : null;
-    return [kind, term].filter(Boolean).join(' · ') || null;
+    const trial = typeof m.trialDays === 'number' && m.trialDays > 0 ? `teste de ${m.trialDays} ${m.trialDays === 1 ? 'dia' : 'dias'}` : null;
+    return [kind, term, trial, a.action === 'contract_voided' ? reason : null].filter(Boolean).join(' · ') || null;
   }
   if (a.action === 'plan_changed') return typeof m.from === 'string' ? `Antes: ${m.from}.` : null;
   if (a.action === 'payment_voided') {

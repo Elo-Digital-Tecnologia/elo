@@ -27,6 +27,7 @@ const PROBLEM: Record<PaymentProblem | 'due_in_past' | 'reason_required', string
 
 const CODE: Record<string, string> = {
   no_plan: 'Este restaurante não tem plano. Escolha um plano antes de registrar o pagamento.',
+  contract_pending: 'A cobrança começa com o contrato. Registre o contrato antes do pagamento.',
   not_latest_entry: 'Só o lançamento mais recente pode ser estornado.',
   already_voided: 'Este lançamento já foi estornado.',
   plan_inactive: 'Este plano foi desativado. Escolha outro.',

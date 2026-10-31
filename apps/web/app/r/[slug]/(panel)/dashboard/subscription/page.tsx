@@ -1,8 +1,9 @@
 'use client';
 
-import { CalendarClock, CircleCheck, Layers, ShieldAlert, TimerReset } from 'lucide-react';
+import { CalendarClock, CircleCheck, FileSignature, Hourglass, Layers, ShieldAlert, TimerReset } from 'lucide-react';
 import { cycleLabel, formatBRL } from '@elo/core';
 import { Badge, GlassCard, PageHeader } from '@elo/ui';
+import { dayBR, trialLine } from '../../../../../_lib/restaurant-status';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const STATE = {
@@ -18,6 +19,7 @@ function View() {
   const s = me.subscription;
   const st = STATE[s.state];
   const Icon = st.icon;
+  const trial = trialLine(s.trial);
   const daysLeft = Math.ceil((new Date(s.dueDate).getTime() - Date.now()) / 86_400_000);
 
   return (
@@ -28,10 +30,7 @@ function View() {
           <div className="flex items-center gap-4">
             <span className={`grid shrink-0 h-14 w-14 place-items-center rounded-pill ${s.state === 'active' ? 'bg-success/15 text-success' : s.state === 'grace' ? 'bg-warning/20 text-warning' : 'bg-danger/15 text-danger'}`}><Icon size={28} /></span>
             <div>
-              <span className="flex flex-wrap items-center gap-2">
-                <Badge tone={st.tone} dot>{st.label}</Badge>
-                {s.trialEndsAt && <Badge tone="info">Em teste até {new Date(s.trialEndsAt).toLocaleDateString('pt-BR')}</Badge>}
-              </span>
+              <Badge tone={st.tone} dot>{st.label}</Badge>
               <p className="mt-2 text-muted">{st.text}</p>
             </div>
           </div>
@@ -39,6 +38,7 @@ function View() {
             {daysLeft >= 0 ? `${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'}` : `${-daysLeft} ${-daysLeft === 1 ? 'dia' : 'dias'} de atraso`}
           </div>
           <p className="text-sm text-muted">{daysLeft >= 0 ? 'até o próximo vencimento' : 'desde o vencimento'}</p>
+          {trial && <p className="flex items-start gap-2 border-t border-line/40 pt-4 text-sm"><Hourglass size={16} className="mt-0.5 shrink-0 text-info" /> {trial}</p>}
         </GlassCard>
         <GlassCard className="space-y-4 p-7 lg:col-span-2">
           {s.plan && (
@@ -46,6 +46,7 @@ function View() {
           )}
           <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={22} /><div><div className="text-sm text-muted">Vencimento</div><div className="font-semibold">{fmt(s.dueDate)}</div></div></div>
           <div className="flex items-center gap-3"><TimerReset className="text-brand" size={22} /><div><div className="text-sm text-muted">Acesso mantido até</div><div className="font-semibold">{fmt(s.graceEndsAt)}</div></div></div>
+          {s.contract.endsOn && <div className="flex items-center gap-3"><FileSignature className="text-brand" size={22} /><div><div className="text-sm text-muted">Contrato vigente até</div><div className="font-semibold">{dayBR(s.contract.endsOn)}</div></div></div>}
           <p className="border-t border-line/40 pt-4 text-sm text-muted">O pagamento é confirmado manualmente pela equipe Elo Digital. O prazo de tolerância após o vencimento é de 7 dias.</p>
         </GlassCard>
       </div>

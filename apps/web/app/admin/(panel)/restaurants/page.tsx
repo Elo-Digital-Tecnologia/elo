@@ -4,20 +4,17 @@ import { ArchiveRestore, Building2, Download, ExternalLink, Paperclip, Plus, Sea
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, apiUpload } from '@elo/client';
-import { addYears, type ContractProblem, cycleLabel, DOCUMENT_LIMITS, type DocumentView, FIELD_RULES, fieldError, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
+import { businessDay, cycleLabel, DOCUMENT_LIMITS, type DocumentView, FIELD_RULES, formatBRL, type PlanView, RESTAURANT_STATUS_LABEL, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, PasswordInput, Select, SkeletonCards } from '@elo/ui';
+import { STATUS_TONE } from '../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
-import { CONTRACT_PROBLEM, contractChecks, ContractFields, type ContractFormState } from './[id]/_components/contracts';
+import { contractBody, contractChecks, contractDraft, contractError, ContractFields, type ContractFormState } from './[id]/_components/contracts';
 import { fileSize } from './[id]/_components/documents';
 import { downloadExport } from './export';
 
-const STATE = { active: { label: 'Ativa', tone: 'success' }, grace: { label: 'Em tolerância', tone: 'warning' }, suspended: { label: 'Suspensa', tone: 'danger' } } as const;
-const TRIAL_SHORTCUTS = [0, 7, 14, 30];
-const EMPTY = { name: '', managerName: '', managerContact: '', planId: '', trialDays: '14', adminUsername: '', adminPassword: '' };
-const today = () => new Date().toLocaleDateString('sv-SE');
-const yearFrom = (start: string) => new Date(Date.parse(`${addYears(start, 1)}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-const EMPTY_CONTRACT: ContractFormState = { kind: 'pilot', signedOn: '', startsOn: '', endsOn: '', name: '', role: '', contact: '', document: null };
+const EMPTY = { name: '', managerName: '', managerContact: '', planId: '', adminUsername: '', adminPassword: '' };
+const EMPTY_CONTRACT: ContractFormState = contractDraft('', { name: '', contact: '' });
 const PAGE_SIZE = 10;
 const REQUIRED = { code: 'required' } as const;
 
@@ -28,7 +25,6 @@ const CHECKS = {
   adminUsername: rule(FIELD_RULES.username),
   adminPassword: rule(FIELD_RULES.password),
   planId: (v: string) => (v ? null : REQUIRED),
-  trialDays: (v: string) => fieldError(FIELD_RULES.trialDays, v.trim() === '' ? undefined : Number(v)),
 };
 
 /** The link comes from the name (there is no link field), so link conflicts land under the name. */
@@ -154,8 +150,7 @@ function View() {
   const toggleContract = (on: boolean) => {
     setWithContract(on);
     if (!on) return;
-    const start = today();
-    contract.reset({ ...EMPTY_CONTRACT, signedOn: start, startsOn: start, endsOn: yearFrom(start), name: form.values.managerName, contact: form.values.managerContact });
+    contract.reset(contractDraft(businessDay(), { name: form.values.managerName, contact: form.values.managerContact }));
     setContractFile(null);
     setFileError(null);
   };
@@ -169,12 +164,8 @@ function View() {
 
   /** Sends the signed file and registers the first contract of a restaurant just created. */
   const registerContract = async (id: string) => {
-    const v = contract.values;
     const doc = await apiUpload<DocumentView>(`/api/admin/restaurants/${id}/documents`, contractFile!, token, { kind: 'contract' });
-    await api(`/api/admin/restaurants/${id}/contracts`, {
-      body: { kind: v.kind, origin: 'initial', signedOn: v.signedOn, startsOn: v.startsOn, endsOn: v.endsOn, signatory: { name: v.name, role: v.role, contact: v.contact }, documentId: doc.id },
-      token,
-    });
+    await api(`/api/admin/restaurants/${id}/contracts`, { body: contractBody(contract.values, 'initial', doc.id), token });
   };
 
   const create = async (e: React.FormEvent) => {
@@ -187,7 +178,7 @@ function View() {
     setSaving(true);
     let restaurant: { id: string; name: string } | null = null;
     try {
-      restaurant = await api<{ id: string; name: string }>('/api/admin/restaurants', { body: { ...form.values, trialDays: Number(form.values.trialDays) }, token });
+      restaurant = await api<{ id: string; name: string }>('/api/admin/restaurants', { body: form.values, token });
       if (withContract) await registerContract(restaurant.id);
       form.reset(EMPTY);
       setWithContract(false);
@@ -195,8 +186,7 @@ function View() {
       await load();
     } catch (err) {
       if (restaurant) {
-        const problems = err instanceof ApiError && Array.isArray(err.data.problems) ? (err.data.problems as ContractProblem[]) : [];
-        const problem = problems.length ? problems.map((p) => CONTRACT_PROBLEM[p]).join(' ') : (err instanceof ApiError && CONTRACT_STEP_ERRORS[err.code]) || unexpected(err);
+        const problem = (err instanceof ApiError && CONTRACT_STEP_ERRORS[err.code]) || contractError(err);
         form.reset(EMPTY);
         setWithContract(false);
         setOpen(false);
@@ -236,17 +226,17 @@ function View() {
     ['grace', 'Em tolerância', counts?.grace],
     ['suspended', 'Suspensos', counts?.suspended],
     ['pending', 'Pendentes', counts?.pending],
+    ['ended', 'Encerrados', counts?.ended],
     ...(canDelete ? [['deleted', 'Excluídos', counts?.deleted] as [RestaurantListStatus, string, number | undefined]] : []),
   ];
   const filtered = !!(filters.q || filters.status || filters.dueSoon);
 
   const status = (r: RestaurantListItem) => {
-    const s = STATE[r.subscription.state];
-    const contractState = r.subscription.contract.state;
+    const s = r.subscription.status;
     return (
       <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-        {contractState === 'pending' ? <Badge tone="danger" dot>Pendente</Badge> : contractState === 'ended' ? <Badge tone="danger" dot>Contrato encerrado</Badge> : <Badge tone={s.tone} dot>{s.label}</Badge>}
-        {r.subscription.trialEndsAt && <Badge tone="info">Em teste</Badge>}
+        <Badge tone={STATUS_TONE[s]} dot>{RESTAURANT_STATUS_LABEL[s]}</Badge>
+        {s === 'active' && r.subscription.trial.state === 'running' && <Badge tone="info">Em teste</Badge>}
       </span>
     );
   };
@@ -378,19 +368,6 @@ function View() {
                   {(plans ?? []).map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
                 </Select>
               </Field>
-              <Field label="Período de teste (dias)" hint="Conta a partir do início do primeiro contrato. 0 = sem teste." error={form.errors.trialDays}>
-                <Input {...form.bind('trialDays')} inputMode="numeric" maxLength={2} onChange={(e) => form.set('trialDays', e.target.value.replace(/\D/g, ''))} />
-                <span className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Atalhos do período de teste">
-                  {TRIAL_SHORTCUTS.map((d) => {
-                    const on = form.values.trialDays === String(d);
-                    return (
-                      <button key={d} type="button" aria-pressed={on} onClick={() => form.set('trialDays', String(d))} className={`rounded-pill border px-3 py-1 text-xs font-medium transition ${on ? 'border-brand bg-brand text-brand-fg' : 'border-line/60 text-muted hover:text-fg'}`}>
-                        {d === 0 ? 'Sem teste' : `${d} dias`}
-                      </button>
-                    );
-                  })}
-                </span>
-              </Field>
             </div>
           )}
           <div className="grid gap-4 sm:grid-cols-2">
@@ -411,7 +388,7 @@ function View() {
             </label>
             {withContract && (
               <>
-                <ContractFields form={contract} />
+                <ContractFields form={contract} withTrial />
                 <Field label="Contrato assinado" error={fileError ?? undefined}>
                   <div className="space-y-1.5">
                     {contractFile ? (
