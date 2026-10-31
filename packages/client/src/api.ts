@@ -1,4 +1,15 @@
+/** One field's problem, as `@elo/core` describes it (`FieldError`): a code and its limits. */
+export interface ApiFieldError {
+  code: string;
+  params?: { min?: number; max?: number; money?: boolean };
+}
+
 export class ApiError extends Error {
+  /** Per-field problems of a `validation_failed` answer, keyed by path (`items.0.notes`). */
+  readonly fields: Record<string, ApiFieldError>;
+  /** The field a conflict is about (`username_taken` → `username`), when the API says. */
+  readonly field: string | null;
+
   constructor(
     readonly status: number,
     readonly code: string,
@@ -6,6 +17,8 @@ export class ApiError extends Error {
     readonly data: Record<string, unknown> = {},
   ) {
     super(code);
+    this.fields = data.fields && typeof data.fields === 'object' ? (data.fields as Record<string, ApiFieldError>) : {};
+    this.field = typeof data.field === 'string' ? data.field : null;
   }
 }
 
