@@ -35,6 +35,8 @@ const FIELD: Record<string, string> = {
   amountCents: 'valor',
   paidAt: 'data do pagamento',
   note: 'observação',
+  receipt: 'comprovante',
+  noReceiptReason: 'motivo da falta de comprovante',
 };
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');

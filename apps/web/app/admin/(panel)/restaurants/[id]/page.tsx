@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
 import { cycleLabel, FIELD_RULES, formatBRL, type Role, type SubscriptionView } from '@elo/core';
-import { Badge, Button, ColumnChart, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
+import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
+import { PaymentSummaryCard } from './_components/payment-summary';
 import { ActivityList } from '../../../../_components/activity-list';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { useAdmin } from '../../../_components/shell';
@@ -18,6 +19,8 @@ interface Detail {
   managerName: string;
   managerContact: string;
   suspended: boolean;
+  createdAt: string;
+  initialDueDate: string;
   subscription: SubscriptionView;
 }
 
@@ -166,8 +169,6 @@ function View({ id }: { id: string }) {
   const overdueDays = Math.floor((Date.now() - new Date(sub.dueDate).getTime()) / 86_400_000);
   const owner = team?.find((m) => m.roles.includes('restaurant_admin')) ?? null;
   const candidates = (team ?? []).filter((m) => m.active && m.id !== owner?.id);
-  const paid = billing.entries.filter((p) => p.kind === 'payment' && !p.voidedAt);
-  const chart = [...paid].reverse().slice(-8).map((p) => ({ label: new Date(p.paidAt).toLocaleDateString('pt-BR', { month: 'short' }), value: p.amountCents / 100 }));
 
   return (
     <>
@@ -247,8 +248,8 @@ function View({ id }: { id: string }) {
         </GlassCard>
         {can('payments.view') && (
           <GlassCard className="p-6 lg:col-span-2">
-            <h2 className="mb-4 text-lg font-semibold">Pagamentos recebidos</h2>
-            {chart.length >= 2 ? <ColumnChart data={chart} format={(n) => formatBRL(n * 100)} /> : <p className="text-sm text-muted">O gráfico aparece a partir do segundo pagamento registrado.</p>}
+            <h2 className="mb-4 text-lg font-semibold">Resumo dos pagamentos</h2>
+            <PaymentSummaryCard entries={billing.entries} restaurant={r} />
           </GlassCard>
         )}
       </div>

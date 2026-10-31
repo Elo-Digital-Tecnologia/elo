@@ -1,11 +1,12 @@
 'use client';
 
-import { CalendarCog, Pencil, Undo2, Wallet } from 'lucide-react';
+import { CalendarCog, Paperclip, Pencil, Undo2, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { BILLING_LIMITS, type BillingEntryView, cycleLabel, dayError, FIELD_RULES, fieldError, formatBRL, parseCents, type PaymentPreview, type PaymentProblem, type PlanView, type SubscriptionView } from '@elo/core';
+import { BILLING_LIMITS, type BillingEntryView, cycleLabel, type DocumentView, dayError, FIELD_RULES, fieldError, formatBRL, parseCents, type PaymentPreview, type PaymentProblem, type PlanView, type SubscriptionView } from '@elo/core';
 import { Badge, Button, DataTable, DateInput, EmptyState, Field, Input, Modal, MoneyInput, Textarea } from '@elo/ui';
 import { money as moneyCheck, rule, unexpected, useForm } from '../../../../../_lib/use-form';
+import { DocumentPicker, DocumentPreview } from './documents';
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
 const today = () => new Date().toISOString().slice(0, 10);
@@ -18,6 +19,8 @@ const PROBLEM: Record<PaymentProblem | 'due_in_past' | 'reason_required', string
   amount_out_of_range: 'Valor fora do esperado para este plano.',
   note_required: 'O valor é diferente do plano: explique na observação (por exemplo, um desconto).',
   note_too_long: `A observação pode ter até ${BILLING_LIMITS.noteMax} caracteres.`,
+  receipt_required: 'Anexe o comprovante ou explique por que não há um.',
+  receipt_or_reason: 'Com o comprovante anexado, não é preciso explicar a falta dele.',
   due_in_past: 'O vencimento não pode ser antes de hoje.',
   reason_required: 'Informe o motivo.',
 };
@@ -30,6 +33,9 @@ const CODE: Record<string, string> = {
   invalid_date: 'Data inválida.',
   plan_not_found: 'Este plano não existe mais. Escolha outro.',
   not_a_payment: 'Só pagamentos podem ser corrigidos. Para um ajuste, estorne e faça de novo.',
+  receipt_in_use: 'Este comprovante já está em outro pagamento. Envie o arquivo certo.',
+  receipt_already_attached: 'Este pagamento já tem comprovante.',
+  invalid_document: 'O arquivo enviado não pertence a este restaurante. Envie de novo.',
 };
 
 function explain(e: unknown): string {
@@ -41,7 +47,9 @@ function explain(e: unknown): string {
 
 const NOTE_NEEDED = { code: 'invalid' } as const;
 /** API paths of the payment forms that have another name here. */
-const PAYMENT_PATHS = { amountCents: 'amount' } as const;
+const PAYMENT_PATHS = { amountCents: 'amount', receiptId: 'receipt' } as const;
+
+const RECEIPT_MISSING = { code: 'required' } as const;
 
 /** A payment cannot be dated in the future; a new due date cannot be in the past. */
 const paidDay = (v: string) => dayError(v, { max: today() });
@@ -50,7 +58,20 @@ const EDIT_CHECKS = { amount: moneyCheck(FIELD_RULES.paymentCents), paidAt: paid
 const VOID_CHECKS = { reason: rule(FIELD_RULES.reason) };
 const ADJUST_CHECKS = { dueDate: (v: string) => dayError(v, { min: today() }), reason: rule(FIELD_RULES.reason) };
 
-type Dialog = 'pay' | 'adjust' | 'plan' | { edit: BillingEntryView } | { void: BillingEntryView } | null;
+type Dialog = 'pay' | 'adjust' | 'plan' | { edit: BillingEntryView } | { void: BillingEntryView } | { detail: BillingEntryView } | null;
+
+interface PayFormState {
+  cycles: string;
+  paidAt: string;
+  amount: string;
+  note: string;
+  receipt: DocumentView | null;
+  /** Ticked when there is no proof: then the reason is required instead. */
+  noReceipt: boolean;
+  noReceiptReason: string;
+}
+
+const PAY_EMPTY = (): PayFormState => ({ cycles: '1', paidAt: today(), amount: '', note: '', receipt: null, noReceipt: false, noReceiptReason: '' });
 
 /**
  * Billing of one restaurant in the Elo panel: payment form with the period calculated by
@@ -65,15 +86,18 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
   const [preview, setPreview] = useState<PaymentPreview | null>(null);
   const expected = useRef<number | null>(null);
   /** The note becomes mandatory when the amount differs from the plan's. */
-  const payForm = useForm(
-    { cycles: '1', paidAt: today(), amount: '', note: '' },
+  const payForm = useForm<PayFormState>(
+    PAY_EMPTY(),
     {
       paidAt: paidDay,
       amount: moneyCheck(FIELD_RULES.paymentCents),
-      note: (v: string, all: { amount: string }) => fieldError(FIELD_RULES.paymentNote, v) ?? (preview && parseCents(all.amount) !== preview.expectedCents && !v.trim() ? NOTE_NEEDED : null),
+      note: (v: string, all: PayFormState) => fieldError(FIELD_RULES.paymentNote, v) ?? (preview && parseCents(all.amount) !== preview.expectedCents && !v.trim() ? NOTE_NEEDED : null),
+      receipt: (v: DocumentView | null, all: PayFormState) => (!v && !all.noReceipt ? RECEIPT_MISSING : null),
+      noReceiptReason: (v: string, all: PayFormState) => (all.noReceipt ? fieldError(FIELD_RULES.reason, v) : null),
     },
-    { invalid: 'O valor é diferente do plano: explique aqui (por exemplo, um desconto).' },
+    { invalid: 'O valor é diferente do plano: explique aqui (por exemplo, um desconto).', required: 'Preencha este campo.' },
   );
+  const [attaching, setAttaching] = useState<DocumentView | null>(null);
   const { values: pay, setValues: setPay } = payForm;
   const editForm = useForm({ amount: '', paidAt: '', note: '' }, EDIT_CHECKS);
   const voidForm = useForm({ reason: '' }, VOID_CHECKS);
@@ -133,13 +157,14 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
     if (d === 'pay') {
       setPreview(null);
       expected.current = null;
-      payForm.reset({ cycles: '1', paidAt: today(), amount: '', note: '' });
+      payForm.reset(PAY_EMPTY());
     }
     if (d === 'adjust') adjustForm.reset({ dueDate: '', reason: '' });
     if (d === 'plan') {
       setPlanId(subscription?.plan?.id ?? '');
       void api<PlanView[]>('/api/admin/plans', { token }).then((list) => setPlans(list.filter((p) => p.active || p.id === subscription?.plan?.id)));
     }
+    if (typeof d === 'object' && 'detail' in d) setAttaching(null);
     if (typeof d === 'object' && 'edit' in d) editForm.reset({ amount: money(d.edit.amountCents), paidAt: d.edit.paidAt.slice(0, 10), note: d.edit.note ?? '' });
     setDialog(d);
   };
@@ -149,7 +174,8 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
     setError(null);
     if (!payForm.validate()) return;
     const amountCents = parseCents(pay.amount);
-    void run(() => api(`/api/admin/restaurants/${id}/payments`, { body: { cycles: Number(pay.cycles), paidAt: pay.paidAt, amountCents, note: pay.note.trim() || undefined }, token }), (err) => payForm.fromServer(err, PAYMENT_PATHS));
+    const proof = pay.noReceipt ? { noReceiptReason: pay.noReceiptReason.trim() } : { receiptId: pay.receipt?.id };
+    void run(() => api(`/api/admin/restaurants/${id}/payments`, { body: { cycles: Number(pay.cycles), paidAt: pay.paidAt, amountCents, note: pay.note.trim() || undefined, ...proof }, token }), (err) => payForm.fromServer(err, PAYMENT_PATHS));
   };
 
   const submitEdit = (e: React.FormEvent, entry: BillingEntryView) => {
@@ -158,7 +184,13 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
     if (!editForm.validate()) return;
     const edit = editForm.values;
     const amountCents = parseCents(edit.amount);
-    void run(() => api(`/api/admin/restaurants/${id}/payments/${entry.id}`, { method: 'PATCH', body: { amountCents, paidAt: edit.paidAt, note: edit.note.trim() || null }, token }), (err) => editForm.fromServer(err, PAYMENT_PATHS));
+    void run(() => api(`/api/admin/restaurants/${id}/payments/${entry.id}`, { method: 'PATCH', body: { amountCents, paidAt: edit.paidAt, note: edit.note.trim() || null }, token }), (err) => editForm.fromServer(err, { amountCents: 'amount' }));
+  };
+
+  /** A proof sent after the payment was recorded (it replaces the reason given then). */
+  const attach = (entry: BillingEntryView) => {
+    if (!attaching) return;
+    void run(() => api(`/api/admin/restaurants/${id}/payments/${entry.id}`, { method: 'PATCH', body: { receiptId: attaching.id }, token }));
   };
 
   const submitVoid = (e: React.FormEvent, entry: BillingEntryView) => {
@@ -188,6 +220,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
         rows={entries}
         rowKey={(p) => p.id}
         mobile="cards"
+        onRowClick={(p) => open({ detail: p })}
         columns={[
           {
             key: 'p',
@@ -195,7 +228,10 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
             mobile: 'title',
             cell: (p) => (
               <span className={`block min-w-0 ${p.voidedAt ? 'text-muted line-through' : ''}`}>
-                <span className="block font-medium">{p.kind === 'payment' ? `${p.planName ?? 'Pagamento'} · ${p.cycles ?? 1} ${p.cycles === 1 ? 'ciclo' : 'ciclos'}` : 'Vencimento ajustado'}</span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  {p.kind === 'payment' ? `${p.planName ?? 'Pagamento'} · ${p.cycles ?? 1} ${p.cycles === 1 ? 'ciclo' : 'ciclos'}` : 'Vencimento ajustado'}
+                  {p.receipt && <Paperclip size={14} className="shrink-0 text-brand" aria-label="Com comprovante" />}
+                </span>
                 <span className="block text-xs text-muted">
                   {p.kind === 'payment' ? `Pago em ${fmt(p.paidAt)} · ` : ''}
                   {p.periodStart ? `${fmt(p.periodStart)} a ${fmt(p.newDueDate)}` : `vence em ${fmt(p.newDueDate)}`}
@@ -229,7 +265,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
                 <Badge tone="neutral">Estornado</Badge>
               ) : (
                 canRecord && (
-                  <span className="flex justify-end gap-1">
+                  <span className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                     {p.kind === 'payment' && <Button variant="ghost" onClick={() => open({ edit: p })} aria-label="Corrigir lançamento"><Pencil size={15} /></Button>}
                     {p.id === latestActive?.id && <Button variant="ghost" onClick={() => open({ void: p })} aria-label="Estornar lançamento"><Undo2 size={15} /> <span className="hidden sm:inline">Estornar</span></Button>}
                   </span>
@@ -262,6 +298,24 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
           <Field label={differs ? 'Observação (obrigatória)' : 'Observação'} error={payForm.errors.note}>
             <Input {...payForm.bind('note')} maxLength={FIELD_RULES.paymentNote.max} placeholder={differs ? 'Por exemplo: desconto de lançamento' : undefined} />
           </Field>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm font-medium">Comprovante</legend>
+            {!pay.noReceipt && (
+              <>
+                <DocumentPicker restaurantId={id} kind="receipt" token={token} value={pay.receipt} onChange={(doc) => { payForm.set('receipt', doc); payForm.touch('receipt'); }} invalid={!!payForm.errors.receipt} />
+                {payForm.errors.receipt && <p aria-live="polite" className="text-xs text-danger">Anexe o comprovante ou marque que não há um.</p>}
+              </>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={pay.noReceipt} onChange={(e) => { payForm.set('noReceipt', e.target.checked); if (e.target.checked) payForm.set('receipt', null); }} />
+              Não há comprovante
+            </label>
+            {pay.noReceipt && (
+              <Field label="Por que não há comprovante?" error={payForm.errors.noReceiptReason}>
+                <Textarea {...payForm.bind('noReceiptReason')} maxLength={FIELD_RULES.reason.max} rows={2} placeholder="Por exemplo: pago em dinheiro, na visita" />
+              </Field>
+            )}
+          </fieldset>
           {preview && (
             <div className="rounded-md border border-brand/30 bg-brand/5 px-4 py-3 text-sm">
               Período de <strong>{fmt(preview.periodStart)}</strong> a <strong>{fmt(preview.newDueDate)}</strong>. Novo vencimento: <strong>{fmt(preview.newDueDate)}</strong>.
@@ -303,6 +357,59 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
             </div>
           </form>
         )}
+      </Modal>
+
+      <Modal open={!!dialog && typeof dialog === 'object' && 'detail' in dialog} onClose={() => setDialog(null)} title="Lançamento" sheet>
+        {dialog && typeof dialog === 'object' && 'detail' in dialog && (() => {
+          const p = dialog.detail;
+          const row = (label: string, value: React.ReactNode) => (
+            <div className="flex justify-between gap-4 border-b border-line/30 py-2 last:border-0">
+              <dt className="shrink-0 text-muted">{label}</dt>
+              <dd className="min-w-0 text-right [overflow-wrap:anywhere]">{value}</dd>
+            </div>
+          );
+          const payment = p.kind === 'payment';
+          return (
+            <div className="space-y-4 text-sm">
+              {p.voidedAt && <p className="rounded-md bg-danger/10 px-3 py-2 text-danger">Estornado em {fmt(p.voidedAt)} por {p.voidedByName ?? '—'}: {p.voidReason}</p>}
+              <dl>
+                {row('Tipo', payment ? 'Pagamento' : 'Ajuste de vencimento')}
+                {payment && row('Plano', `${p.planName ?? '—'} · ${p.cycles ?? 1} ${p.cycles === 1 ? 'ciclo' : 'ciclos'}`)}
+                {payment && row('Valor pago', <strong className="tabular-nums">{formatBRL(p.amountCents)}</strong>)}
+                {payment && p.expectedCents !== null && p.expectedCents !== p.amountCents && row('Valor do plano', formatBRL(p.expectedCents))}
+                {payment && row('Pago em', fmt(p.paidAt))}
+                {row('Período', p.periodStart ? `${fmt(p.periodStart)} a ${fmt(p.newDueDate)}` : `vence em ${fmt(p.newDueDate)}`)}
+                {row(payment ? 'Observação' : 'Motivo', p.note ?? '—')}
+                {row('Registrado por', `${p.recordedByName ?? '—'}, em ${new Date(p.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`)}
+              </dl>
+              {payment && (
+                <section className="space-y-2">
+                  <h3 className="font-semibold">Comprovante</h3>
+                  {p.receipt ? (
+                    <DocumentPreview doc={p.receipt} token={token} />
+                  ) : (
+                    <>
+                      <p className="text-muted">{p.noReceiptReason ? `Sem comprovante: ${p.noReceiptReason}` : 'Registrado antes dos comprovantes serem pedidos.'}</p>
+                      {canRecord && !p.voidedAt && (
+                        <div className="space-y-2">
+                          <DocumentPicker restaurantId={id} kind="receipt" token={token} value={attaching} onChange={setAttaching} />
+                          {attaching && <Button onClick={() => attach(p)} loading={saving}><Paperclip size={16} /> Anexar comprovante</Button>}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </section>
+              )}
+              {errorLine}
+              {canRecord && !p.voidedAt && (
+                <div className="flex flex-wrap justify-end gap-2 border-t border-line/30 pt-3">
+                  {payment && <Button variant="ghost" onClick={() => open({ edit: p })}><Pencil size={15} /> Corrigir</Button>}
+                  {p.id === latestActive?.id && <Button variant="ghost" onClick={() => open({ void: p })}><Undo2 size={15} /> Estornar</Button>}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
 
       <Modal open={dialog === 'adjust'} onClose={() => setDialog(null)} title="Ajustar vencimento" sheet>
