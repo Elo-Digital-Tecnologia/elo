@@ -15,7 +15,7 @@ class UploadDocumentDto {
 }
 
 /** Who may send and who may read each kind of document. */
-const WRITE: Record<DocumentKind, Permission> = { receipt: Permission.PaymentsRecord, contract: Permission.RestaurantsEdit };
+const WRITE: Record<DocumentKind, Permission> = { receipt: Permission.PaymentsRecord, contract: Permission.ContractsManage };
 const READ: Record<DocumentKind, Permission> = { receipt: Permission.PaymentsView, contract: Permission.RestaurantsView };
 
 const allowed = (user: JwtUser, p: Permission) => user.roles.includes(Role.Superadmin) || user.permissions.includes(p);

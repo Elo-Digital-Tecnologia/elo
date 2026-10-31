@@ -153,6 +153,8 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
         `SELECT table_name FROM information_schema.columns
          WHERE table_schema = current_schema() AND column_name = 'restaurant_id' AND table_name <> 'audit_log'`,
       );
+      // Contracts point at their documents, so they go first.
+      await em.query(`DELETE FROM "contracts" WHERE "restaurant_id" = $1`, [id]);
       for (const { table_name } of tables) await em.query(`DELETE FROM "${table_name}" WHERE "restaurant_id" = $1`, [id]);
       await em.query(`DELETE FROM "restaurants" WHERE "id" = $1`, [id]);
     });

@@ -34,6 +34,38 @@ suite('fluxo da mesa (e2e)', () => {
   let slug: string, tableId: string, tableToken: string, productId: string, planId: string;
   const today = () => new Date().toISOString().slice(0, 10);
 
+  const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+  let saToken: string | null = null;
+  const superadmin = async () => (saToken ??= (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string);
+
+  /** A signed contract from today for a year, so the restaurant's team and menu are on. */
+  const activate = async (restaurantId: string) => {
+    const sa = await superadmin();
+    const doc = (await http().post(`/admin/restaurants/${restaurantId}/documents`).set('Authorization', `Bearer ${sa}`).field('kind', 'contract').attach('file', PDF, 'contrato.pdf').expect(201)).body;
+    const start = today();
+    const end = `${Number(start.slice(0, 4)) + 1}${start.slice(4)}`;
+    await http()
+      .post(`/admin/restaurants/${restaurantId}/contracts`)
+      .set('Authorization', `Bearer ${sa}`)
+      .send({ kind: 'definitive', origin: 'initial', signedOn: start, startsOn: start, endsOn: end, signatory: { name: 'Rita Souza', role: 'Sócia', contact: '11977777777' }, documentId: doc.id })
+      .expect(201);
+  };
+
+  /**
+   * Creates a restaurant with a contract in force. `initialDueDate` (the old field)
+   * becomes trial days; a date in the past is written straight to the database.
+   */
+  const restaurant = async (token: string, body: Record<string, unknown>, status = 201) => {
+    const { initialDueDate, ...rest } = body as { initialDueDate?: string };
+    const days = initialDueDate ? Math.round((Date.parse(initialDueDate) - Date.parse(today())) / 86_400_000) : 14;
+    const res = await http().post('/admin/restaurants').set('Authorization', `Bearer ${token}`).send({ ...rest, trialDays: Math.max(0, days) }).expect(status);
+    if (status === 201) {
+      await activate(res.body.id);
+      if (days < 0) await app.get(DataSource).query(`UPDATE restaurants SET initial_due_date = $2, due_date = $2 WHERE id = $1`, [res.body.id, `${initialDueDate}T12:00:00Z`]);
+    }
+    return res;
+  };
+
   beforeAll(async () => {
     // The suite signs in far more than the 10/min login limit allows from one address.
     const unlimited: ThrottlerStorage = {
@@ -49,13 +81,7 @@ suite('fluxo da mesa (e2e)', () => {
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken;
     planId = (await http().post('/admin/plans').set('Authorization', `Bearer ${sa}`).send({ name: `Plano ${suf}`, priceCents: 9900, cycleMonths: 1 }).expect(201)).body.id;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const r = await http()
-      .post('/admin/restaurants')
-      .set('Authorization', `Bearer ${sa}`)
-      .send({ name: `E2E ${suf}`, managerName: 'Maria', managerContact: '11999999999', planId, initialDueDate: due, adminUsername: `adm${suf}`, adminPassword: 'senha12345' })
-      .expect((res) => {
-        if (res.status !== 201) throw new Error(JSON.stringify(res.body));
-      });
+    const r = await restaurant(sa, { name: `E2E ${suf}`, managerName: 'Maria', managerContact: '11999999999', planId, initialDueDate: due, adminUsername: `adm${suf}`, adminPassword: 'senha12345' });
     slug = r.body.slug;
     admin = await login(`adm${suf}`);
     for (const [u, role] of [['wai', 'waiter'], ['kit', 'kitchen']]) {
@@ -269,7 +295,7 @@ suite('fluxo da mesa (e2e)', () => {
     // outro restaurante não enxerga nada disto
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const outro = await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Outro ${suf}`, managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `out${suf}`, adminPassword: 'senha12345' }).expect(201);
+    const outro = await restaurant(sa, { name: `Outro ${suf}`, managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `out${suf}`, adminPassword: 'senha12345' }, 201);
     const other = await login(`out${suf}`, outro.body.slug);
 
     // login é por restaurante: usuário de um não entra no outro, e o mesmo nome pode existir nos dois
@@ -296,7 +322,7 @@ suite('fluxo da mesa (e2e)', () => {
     const paid = (await http().get(`/admin/restaurants/${rid}/payments`).set(auth(sa)).expect(200)).body;
     expect(paid[0]).toMatchObject({ kind: 'payment', amountCents: 9900, recordedByName: 'Superadmin' });
     // slug reservado não vira restaurante
-    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Admin', managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `res${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await restaurant(sa, { name: 'Admin', managerName: 'Joao', managerContact: '11988888888', planId, initialDueDate: due, adminUsername: `res${suf}`, adminPassword: 'senha12345' }, 409);
     await http().get(`/bills/${tableId}`).set(auth(other)).expect(404);
     const otherRep = (await http().get('/reports').set(auth(other)).expect(200)).body;
     expect(otherRep.totals).toMatchObject({ revenueCents: 0, orders: 0, returned: 0 });
@@ -533,7 +559,7 @@ suite('fluxo da mesa (e2e)', () => {
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
     const newRestaurant = (name: string, admin: string) =>
-      http().post('/admin/restaurants').set(auth(sa)).send({ name, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: admin, adminPassword: 'senha12345' }).expect(201);
+      restaurant(sa, { name, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: admin, adminPassword: 'senha12345' }, 201);
     const teamLogin = async (username: string) => (await http().post('/auth/team/login').send({ username, password: 'senha12345' }).expect(201)).body.accessToken as string;
 
     // permissões: cada uma depende de "ver"; ninguém concede o que não tem; excluir só o superadmin concede
@@ -545,7 +571,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post('/admin/staff').set(auth(manager)).send({ username: `x1${suf}`, name: 'Xis Um', password: 'senha12345', permissions: ['payments.view'] }).expect(201);
     await http().patch(`/admin/staff/${viewer.id}`).set(auth(manager)).send({ permissions: ['restaurants.delete'] }).expect(403);
     const vw = await teamLogin(`vw${suf}`);
-    await http().post('/admin/restaurants').set(auth(vw)).send({}).expect(403);
+    await restaurant(vw, {}, 403);
     await http().get('/admin/restaurants?status=deleted').set(auth(vw)).expect(403);
     // tokens emitidos antes da separação continuam valendo pelo que cobriam
     const legacy = app.get(JwtService).sign({ sub: viewer.id, role: 'elo_admin', restaurantId: null, permissions: ['subscriptions'] });
@@ -574,7 +600,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().delete(`/admin/restaurants/${b.id}`).set(auth(manager)).send({ confirmSlug: b.slug }).expect(204);
     await http().get(`/public/${b.slug}/menu`).expect(404);
     await http().post(`/auth/restaurants/${b.slug}/login`).send({ username: `bb${suf}`, password: 'senha12345' }).expect(401);
-    await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Xis', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bz${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await restaurant(sa, { name: 'Xis', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bz${suf}`, adminPassword: 'senha12345' }, 409);
     const afterDelete = (await http().get(`/admin/restaurants?q=${encodeURIComponent(`busca ${suf}`)}`).set(auth(sa)).expect(200)).body;
     expect(afterDelete.items.map((r: { id: string }) => r.id)).toEqual([a.id]);
     expect(afterDelete.counts.deleted).toBe(1);
@@ -595,7 +621,7 @@ suite('fluxo da mesa (e2e)', () => {
     expect(await lifecycle.purgeExpired({ ids: [b.id] })).toEqual([]);
     expect(await lifecycle.purgeExpired({ now: new Date(Date.now() + 91 * 86_400_000), ids: [b.id] })).toEqual([b.id]);
     await http().get(`/admin/restaurants/${b.id}/export`).set(auth(sa)).expect(404);
-    const slugFree = await http().post('/admin/restaurants').set(auth(sa)).send({ name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }).expect(201);
+    const slugFree = await restaurant(sa, { name: 'Volta', slug: b.slug, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `bb${suf}`, adminPassword: 'senha12345' }, 201);
     expect(slugFree.body.slug).toBe(b.slug);
   }, 30_000);
 
@@ -603,7 +629,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Registro ${suf}`, managerName: 'Rita Souza', managerContact: '(11) 97777-7777', planId, initialDueDate: due, adminUsername: `rg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Registro ${suf}`, managerName: 'Rita Souza', managerContact: '(11) 97777-7777', planId, initialDueDate: due, adminUsername: `rg${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const owner = await login(`rg${suf}`, r.slug);
 
     // campos validados e normalizados com as mesmas regras do formulário
@@ -663,7 +689,7 @@ suite('fluxo da mesa (e2e)', () => {
     };
 
     // trial ended a month ago: suspended for being overdue, and "reactivate" alone does not fix it
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Cobranca ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: dayFrom(-30), adminUsername: `cb${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Cobranca ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: dayFrom(-30), adminUsername: `cb${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const detail = async () => (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body;
     expect((await detail()).subscription).toMatchObject({ state: 'suspended', reasons: ['overdue'], plan: { id: planId, priceCents: 9900 } });
 
@@ -699,7 +725,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().delete(`/admin/plans/${planId}`).set(auth(sa)).expect(409);
     const spare = (await http().post('/admin/plans').set(auth(sa)).send({ name: `Avulso ${suf}`, priceCents: 1000, cycleMonths: 1 }).expect(201)).body;
     await http().patch(`/admin/plans/${spare.id}`).set(auth(sa)).send({ active: false }).expect(200);
-    await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Inativo ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId: spare.id, initialDueDate: dayFrom(10), adminUsername: `in${suf}`, adminPassword: 'senha12345' }).expect(409);
+    await restaurant(sa, { name: `Inativo ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId: spare.id, initialDueDate: dayFrom(10), adminUsername: `in${suf}`, adminPassword: 'senha12345' }, 409);
     await http().delete(`/admin/plans/${spare.id}`).set(auth(sa)).expect(204);
 
     // Elo support inside the panel: watches the operation, fixes configuration and passwords
@@ -780,7 +806,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Titular ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `ti${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Titular ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `ti${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const owner = await login(`ti${suf}`, r.slug);
     const settings = { name: 'Titular', managerName: 'Rita', managerContact: '11977777777', serviceFeeBps: 1000 };
     const gm = (await http().post('/staff').set(auth(owner)).send({ username: `tg${suf}`, password: 'senha12345', name: 'Gina Gerente', roles: ['manager', 'cashier'] }).expect(201)).body;
@@ -818,7 +844,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Pausa ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `pa${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Pausa ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `pa${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const owner = await login(`pa${suf}`, r.slug);
     for (const [u, roles] of [['pg', ['manager']], ['pw', ['waiter']]] as const) {
       await http().post('/staff').set(auth(owner)).send({ username: u + suf, password: 'senha12345', name: `Pessoa ${u}`, roles }).expect(201);
@@ -886,7 +912,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Historico ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `hi${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Historico ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `hi${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const owner = await login(`hi${suf}`, r.slug);
     const w = (await http().post('/staff').set(auth(owner)).send({ username: `hw${suf}`, password: 'senha12345', name: 'Helena Garcom', roles: ['waiter'] }).expect(201)).body;
     const waiterH = await login(`hw${suf}`, r.slug);
@@ -959,7 +985,7 @@ suite('fluxo da mesa (e2e)', () => {
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
     const long = `${suf} Restaurante ${'muito '.repeat(15)}comprido`.slice(0, 118);
-    const created = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: long, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `lg${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const created = (await restaurant(sa, { name: long, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `lg${suf}`, adminPassword: 'senha12345' }, 201)).body;
     expect(created.slug.length).toBeLessThanOrEqual(60);
     await http().get(`/public/${created.slug}/menu`).expect(200);
     // impossible days and explicit nulls in required settings are refused, not turned into 500s
@@ -979,7 +1005,7 @@ suite('fluxo da mesa (e2e)', () => {
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
     const make = async (name: string, user: string) =>
-      (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `${name} ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: user + suf, adminPassword: 'senha12345' }).expect(201)).body as { id: string };
+      (await restaurant(sa, { name: `${name} ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: user + suf, adminPassword: 'senha12345' }, 201)).body as { id: string };
     const [a, b] = [await make('Recibo A', 'ra'), await make('Recibo B', 'rb')];
     const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
     const send = (rid: string, file: Buffer, name: string, kind = 'receipt') =>
@@ -1023,7 +1049,7 @@ suite('fluxo da mesa (e2e)', () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
     const due = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
-    const r = (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `Teste ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `tt${suf}`, adminPassword: 'senha12345' }).expect(201)).body;
+    const r = (await restaurant(sa, { name: `Teste ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: `tt${suf}`, adminPassword: 'senha12345' }, 201)).body;
     const before = (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body.subscription;
     expect(before.trialEndsAt?.slice(0, 10)).toBe(due);
     await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'x' }).expect(400);
@@ -1032,5 +1058,58 @@ suite('fluxo da mesa (e2e)', () => {
     expect(after.trialEndsAt).toBeNull();
     expect(after.dueDate.slice(0, 10)).toBe(new Date().toISOString().slice(0, 10));
     await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'De novo' }).expect(409);
+  });
+
+  it('contratos: pendente sem contrato, piloto libera, conversão e renovação guardam o histórico, fim bloqueia', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = await superadmin();
+    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    const create = async (name: string, user: string) =>
+      (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `${name} ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, trialDays: 7, adminUsername: user + suf, adminPassword: 'senha12345' }).expect(201)).body as { id: string; slug: string };
+    const upload = async (rid: string) => (await http().post(`/admin/restaurants/${rid}/documents`).set(auth(sa)).field('kind', 'contract').attach('file', PDF, 'contrato.pdf').expect(201)).body.id as string;
+    const signatory = { name: 'Rita Souza', role: 'Sócia', contact: '11977777777' };
+    const contract = (rid: string, body: Record<string, unknown>) => http().post(`/admin/restaurants/${rid}/contracts`).set(auth(sa)).send({ signatory, signedOn: day(0), ...body });
+
+    // pending: the team is locked out with the reason, the menu is not published
+    const r = await create('Contrato', 'ct');
+    const owner = await login(`ct${suf}`, r.slug);
+    const locked = (await http().get('/catalog').set(auth(owner)).expect(403)).body;
+    expect(locked).toMatchObject({ message: 'subscription_suspended', reasons: ['contract_pending'] });
+    expect((await http().get(`/public/${r.slug}/menu`).expect(404)).body.message).toBe('menu_unavailable');
+    const listed = (await http().get('/admin/restaurants?status=pending&q=' + encodeURIComponent(`Contrato ${suf}`)).set(auth(sa)).expect(200)).body;
+    expect(listed.items.map((x: { id: string }) => x.id)).toEqual([r.id]);
+
+    // a contract file of another restaurant is refused; a pilot starting today turns everything on
+    const other = await create('Outro contrato', 'oc');
+    const foreign = await upload(other.id);
+    await contract(r.id, { kind: 'pilot', origin: 'initial', startsOn: day(0), endsOn: day(60), documentId: foreign }).expect(400);
+    await contract(r.id, { kind: 'pilot', origin: 'renewal', startsOn: day(0), endsOn: day(60), documentId: await upload(r.id) }).expect(400);
+    await contract(r.id, { kind: 'pilot', origin: 'initial', startsOn: day(0), endsOn: day(60), documentId: await upload(r.id) }).expect(201);
+    await http().get('/catalog').set(auth(owner)).expect(200);
+    await http().get(`/public/${r.slug}/menu`).expect(200);
+    const sub = (await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body.subscription;
+    expect(sub.contract).toMatchObject({ state: 'active', endsOn: day(60) });
+    // the trial counts from the start of the first contract
+    expect(sub.dueDate.slice(0, 10)).toBe(day(7));
+
+    // conversion and renewal keep every contract, each with its own file
+    await contract(r.id, { kind: 'pilot', origin: 'conversion', startsOn: day(30), endsOn: day(395), documentId: await upload(r.id) }).expect(400);
+    await contract(r.id, { kind: 'definitive', origin: 'conversion', startsOn: day(30), endsOn: day(394), documentId: await upload(r.id) }).expect(201);
+    await contract(r.id, { kind: 'definitive', origin: 'renewal', startsOn: day(395), endsOn: day(759), documentId: await upload(r.id) }).expect(201);
+    const history = (await http().get(`/admin/restaurants/${r.id}/contracts`).set(auth(sa)).expect(200)).body as { origin: string; effectiveEndsOn: string; document: { id: string } }[];
+    expect(history.map((c) => c.origin)).toEqual(['renewal', 'conversion', 'initial']);
+    expect(history[2].effectiveEndsOn).toBe(day(29));
+    expect((await http().get(`/admin/restaurants/${r.id}`).set(auth(sa)).expect(200)).body.subscription.contract.endsOn).toBe(day(759));
+    const file = await http().get(`/admin/documents/${history[0].document.id}`).set(auth(sa)).expect(200);
+    expect(file.headers['content-type']).toBe('application/pdf');
+
+    // a contract that already ended without renewal locks the team and takes the menu down
+    const ended = await create('Encerrado', 'en');
+    await contract(ended.id, { kind: 'definitive', origin: 'initial', signedOn: day(-400), startsOn: day(-365), endsOn: day(-1), documentId: await upload(ended.id) }).expect(201);
+    const endedOwner = await login(`en${suf}`, ended.slug);
+    const endedLock = (await http().get('/catalog').set(auth(endedOwner)).expect(403)).body;
+    expect(endedLock.contractEndsOn).toBe(day(-1));
+    expect(endedLock.reasons).toContain('contract_ended');
+    await http().get(`/public/${ended.slug}/menu`).expect(404);
   });
 });

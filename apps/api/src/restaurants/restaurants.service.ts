@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -18,6 +18,10 @@ import {
   type SuspensionReason,
   suspensionReasons,
   trialEndsAt,
+  CONTRACT_LIMITS,
+  type ContractState,
+  contractState,
+  toDay,
 } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
@@ -33,8 +37,8 @@ export interface NewRestaurant {
   managerName: string;
   managerContact: string;
   planId: string;
-  /** End of the trial, YYYY-MM-DD. */
-  initialDueDate: string;
+  /** Free days, counted from the start of the first contract. */
+  trialDays: number;
   serviceFeeBps?: number;
   adminUsername: string;
   adminPassword: string;
@@ -49,20 +53,27 @@ export interface SubscriptionInfo {
   reasons: SuspensionReason[];
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
   trialEndsAt: Date | null;
+  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null };
 }
 
 const DAY_MS = 86_400_000;
 
+/** A contract in force today; `:today` is the calendar day. */
+const IN_FORCE = `(r.contractStartsOn IS NOT NULL AND r.contractStartsOn <= :today AND r.contractEndsOn >= :today)`;
+
 /** SQL twin of `accessState` from core; `:grace` is `GRACE_DAYS`. */
-const STATUS_SQL: Record<'active' | 'grace' | 'suspended', string> = {
-  active: `(r.suspended = false AND r.dueDate >= now())`,
-  grace: `(r.suspended = false AND r.dueDate < now() AND r.dueDate >= now() - make_interval(days => :grace))`,
-  suspended: `(r.suspended = true OR r.dueDate < now() - make_interval(days => :grace))`,
+const STATUS_SQL: Record<'active' | 'grace' | 'suspended' | 'pending' | 'ending', string> = {
+  active: `(r.suspended = false AND r.dueDate >= now() AND ${IN_FORCE})`,
+  grace: `(r.suspended = false AND r.dueDate < now() AND r.dueDate >= now() - make_interval(days => :grace) AND ${IN_FORCE})`,
+  suspended: `(r.suspended = true OR r.dueDate < now() - make_interval(days => :grace) OR NOT ${IN_FORCE})`,
+  pending: `(r.contractStartsOn IS NULL OR r.contractStartsOn > :today)`,
+  ending: `(${IN_FORCE} AND r.contractEndsOn <= :warn)`,
 };
 
 function applyStatus(qb: SelectQueryBuilder<Restaurant>, status: Exclude<RestaurantListStatus, 'deleted'>) {
-  const sql = status === 'attention' ? `(${STATUS_SQL.grace} OR ${STATUS_SQL.suspended})` : STATUS_SQL[status];
-  qb.andWhere(sql, { grace: GRACE_DAYS });
+  const sql = status === 'attention' ? `(${STATUS_SQL.grace} OR ${STATUS_SQL.suspended} OR ${STATUS_SQL.ending})` : STATUS_SQL[status];
+  const today = toDay(new Date());
+  qb.andWhere(sql, { grace: GRACE_DAYS, today, warn: toDay(new Date(Date.now() + CONTRACT_LIMITS.warnDays * 86_400_000)) });
 }
 
 @Injectable()
@@ -113,8 +124,8 @@ export class RestaurantsService {
     if (await this.restaurants.findOne({ where: { slug }, withDeleted: true })) {
       throw new ConflictException({ statusCode: 409, message: 'slug_taken', field: 'slug' });
     }
-    const due = dateOnly(data.initialDueDate);
-    if (!due) throw new BadRequestException({ message: 'invalid_date', field: 'initialDueDate' });
+    // Provisional first due date; registering the first contract counts the trial from its start.
+    const due = new Date(dateOnly(toDay(new Date()))!.getTime() + data.trialDays * DAY_MS);
     const plan = await this.plans.findOne({ where: { id: data.planId } });
     if (!plan) throw new NotFoundException('plan_not_found');
     if (!plan.active) throw new ConflictException('plan_inactive');
@@ -126,6 +137,7 @@ export class RestaurantsService {
         managerContact: data.managerContact,
         dueDate: due,
         initialDueDate: due,
+        trialDays: data.trialDays,
         planId: plan.id,
         plan,
         serviceFeeBps: data.serviceFeeBps ?? 1000,
@@ -172,9 +184,11 @@ export class RestaurantsService {
       .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.active})::int`, 'active')
       .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.grace})::int`, 'grace')
       .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.suspended})::int`, 'suspended')
+      .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NULL AND ${STATUS_SQL.pending})::int`, 'pending')
       .addSelect(`COUNT(*) FILTER (WHERE r.deletedAt IS NOT NULL)::int`, 'deleted')
       .setParameter('grace', GRACE_DAYS)
-      .getRawOne<{ all: number; active: number; grace: number; suspended: number; deleted: number }>();
+      .setParameter('today', toDay(new Date()))
+      .getRawOne<{ all: number; active: number; grace: number; suspended: number; pending: number; deleted: number }>();
 
     const qb = base();
     if (q.status === 'deleted') qb.withDeleted().andWhere('r.deletedAt IS NOT NULL');
@@ -187,7 +201,7 @@ export class RestaurantsService {
       .take(pageSize)
       .getManyAndCount();
 
-    const { deleted, ...counts } = counted ?? { all: 0, active: 0, grace: 0, suspended: 0, deleted: 0 };
+    const { deleted, ...counts } = counted ?? { all: 0, active: 0, grace: 0, suspended: 0, pending: 0, deleted: 0 };
     return {
       items: rows.map((r) => this.listItem(r)),
       total,
@@ -248,16 +262,26 @@ export class RestaurantsService {
     return r.deletedAt ? AccessState.Suspended : this.stateOf(r);
   }
 
+  /** The restaurant's contract right now, from the cached coverage. */
+  contractOf(r: Restaurant, now = new Date()): SubscriptionInfo['contract'] {
+    const today = toDay(now);
+    const state = contractState({ startsOn: r.contractStartsOn, endsOn: r.contractEndsOn }, today);
+    const daysLeft = state === 'active' && r.contractEndsOn ? Math.round((Date.parse(`${r.contractEndsOn}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / DAY_MS) : null;
+    return { state, endsOn: r.contractEndsOn, daysLeft };
+  }
+
   subscriptionOf(r: Restaurant, now = new Date()): SubscriptionInfo {
-    const state = accessState(r.dueDate, now, r.suspended);
+    const contract = this.contractOf(r, now);
+    const state = accessState(r.dueDate, now, r.suspended, contract.state);
     return {
       state,
       dueDate: r.dueDate,
       graceEndsAt: new Date(r.dueDate.getTime() + GRACE_DAYS * DAY_MS),
       warning: state === AccessState.Grace,
-      reasons: suspensionReasons(r.dueDate, r.suspended, now),
+      reasons: suspensionReasons(r.dueDate, r.suspended, now, contract.state),
       plan: r.plan ? { id: r.plan.id, name: r.plan.name, priceCents: r.plan.priceCents, cycleMonths: r.plan.cycleMonths } : null,
       trialEndsAt: trialEndsAt(r.initialDueDate, now),
+      contract,
     };
   }
 
@@ -284,13 +308,23 @@ export class RestaurantsService {
 
   async overview() {
     const all = await this.restaurants.find();
-    const counts = { total: all.length, active: 0, grace: 0, suspended: 0 };
-    for (const r of all) counts[this.stateOf(r)]++;
+    const counts = { total: all.length, active: 0, grace: 0, suspended: 0, pending: 0, contractsEnding: 0 };
+    for (const r of all) {
+      counts[this.stateOf(r)]++;
+      const contract = this.contractOf(r);
+      if (contract.state === 'pending') counts.pending++;
+      if (contract.daysLeft !== null && contract.daysLeft <= CONTRACT_LIMITS.warnDays) counts.contractsEnding++;
+    }
     return counts;
   }
 
   private stateOf(r: Restaurant): AccessState {
-    return accessState(r.dueDate, new Date(), r.suspended);
+    return accessState(r.dueDate, new Date(), r.suspended, this.contractOf(r).state);
+  }
+
+  /** The public menu and tables exist only while a signed contract is in force. */
+  assertPublished(r: Restaurant): void {
+    if (this.contractOf(r).state !== 'active') throw new NotFoundException('menu_unavailable');
   }
 }
 

@@ -7,7 +7,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Matches,
   Max,
   MaxLength,
   Min,
@@ -41,8 +40,8 @@ export class CreateRestaurantDto {
   @Field(FIELD_RULES.personName) managerName: string;
   @Field(FIELD_RULES.contact) managerContact: string;
   @IsUUID() planId: string;
-  /** End of the trial, a calendar day (YYYY-MM-DD): the first due date. */
-  @Matches(/^\d{4}-\d{2}-\d{2}$/) initialDueDate: string;
+  /** Free days, counted from the start of the first contract (0 = no trial). */
+  @Field(FIELD_RULES.trialDays) trialDays: number;
   @Field(FIELD_RULES.serviceFeeBps, { optional: true }) serviceFeeBps?: number;
   @Field(FIELD_RULES.username) adminUsername: string;
   @Field(FIELD_RULES.password) adminPassword: string;

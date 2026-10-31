@@ -227,11 +227,13 @@ export function dueDateProblems(p: { dueDate: Date; reason: string; now?: Date }
   return problems;
 }
 
-export type SuspensionReason = 'manual' | 'overdue';
+export type SuspensionReason = 'manual' | 'overdue' | 'contract_pending' | 'contract_ended';
 
 /** Why a restaurant's team is locked out (both can hold), so the screen can say what fixes each. */
-export function suspensionReasons(dueDate: Date, manuallySuspended: boolean, now: Date = new Date()): SuspensionReason[] {
+export function suspensionReasons(dueDate: Date, manuallySuspended: boolean, now: Date = new Date(), contract: 'pending' | 'active' | 'ended' = 'active'): SuspensionReason[] {
   const reasons: SuspensionReason[] = [];
+  if (contract === 'pending') reasons.push('contract_pending');
+  if (contract === 'ended') reasons.push('contract_ended');
   if (manuallySuspended) reasons.push('manual');
   if (accessState(dueDate, now) === AccessState.Suspended) reasons.push('overdue');
   return reasons;

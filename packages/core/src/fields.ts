@@ -185,6 +185,7 @@ export const FIELD_RULES = {
   adjustmentLabel: text({ ...FIELD_LIMITS.adjustmentLabel }),
   adjustmentReason: text({ max: FIELD_LIMITS.adjustmentReason, optional: true }),
   planName: text({ ...FIELD_LIMITS.planName }),
+  signatoryRole: text({ min: 2, max: 80 }),
   paymentNote: text({ max: FIELD_LIMITS.paymentNote, optional: true }),
   pauseReason: text({ max: FIELD_LIMITS.pauseReason, optional: true }),
   imageUrl: text({ max: FIELD_LIMITS.imageUrl, optional: true, raw: true, pattern: IMAGE_URL, patternCode: 'invalid_url' }),
@@ -194,6 +195,8 @@ export const FIELD_RULES = {
   adjustmentCents: int({ min: -MONEY_MAX_CENTS, max: MONEY_MAX_CENTS, money: true, nonZero: true }),
   serviceFeeBps: int({ min: 0, max: LIMITS.serviceFeeBpsMax }),
   position: int({ min: 0, max: FIELD_LIMITS.position }),
+  /** Free days before the first due date, counted from the start of the first contract. */
+  trialDays: int({ min: 0, max: 90 }),
 } satisfies Record<string, FieldRule>;
 
 export type FieldRuleName = keyof typeof FIELD_RULES;

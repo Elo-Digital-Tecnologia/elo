@@ -1,12 +1,14 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { OrderStatus, Role, ROLE_LABEL, TableState, toDay } from '@elo/core';
+import { type ContractKind, OrderStatus, Role, ROLE_LABEL, TableState, toDay } from '@elo/core';
 import { type ObjectLiteral, Repository } from 'typeorm';
 import { AppModule } from '../../app.module';
 import { BillingService } from '../../billing/billing.service';
 import type { JwtUser } from '../../common/auth-types';
 import { CatalogService } from '../../catalog/catalog.service';
+import { ContractsService } from '../../contracts/contracts.service';
+import { DocumentsService } from '../../documents/documents.service';
 import { RestaurantsService } from '../../restaurants/restaurants.service';
 import { StaffService } from '../../staff/staff.service';
 import { newToken } from '../../tables/tables.service';
@@ -32,6 +34,7 @@ interface DemoRestaurant {
   trialEndsIn: number;
   /** Days ago a one-cycle payment was received, if any. */
   paidDaysAgo?: number;
+  contract: ContractKind;
   prefix: string;
   menu: { category: string; products: { name: string; priceCents: number; description?: string }[] }[];
 }
@@ -44,6 +47,7 @@ const RESTAURANTS: DemoRestaurant[] = [
     managerContact: '(11) 98765-4321',
     trialEndsIn: -10,
     paidDaysAgo: 10,
+    contract: 'pilot',
     prefix: 'bm',
     menu: [
       { category: 'Entradas', products: [{ name: 'Bruschetta', priceCents: 2890, description: 'Pão italiano, tomate e manjericão' }, { name: 'Burrata', priceCents: 4690 }] },
@@ -58,6 +62,7 @@ const RESTAURANTS: DemoRestaurant[] = [
     managerName: 'Diego Martins',
     managerContact: 'contato@brasaburger.com.br',
     trialEndsIn: -3,
+    contract: 'definitive',
     prefix: 'bb',
     menu: [
       { category: 'Hambúrgueres', products: [{ name: 'Clássico', priceCents: 3290, description: 'Blend 160 g, queijo e salada' }, { name: 'Bacon duplo', priceCents: 4290 }, { name: 'Veggie', priceCents: 3490 }] },
@@ -71,6 +76,29 @@ const PLANS = [
   { name: 'Essencial', priceCents: 9900, cycleMonths: 1 },
   { name: 'Essencial semestral', priceCents: 53_400, cycleMonths: 6 },
 ];
+
+/** A one-page PDF standing in for the signed contract of a demo restaurant. */
+function samplePdf(name: string): Buffer {
+  const text = `Contrato de demonstracao - ${name.normalize('NFD').replace(/[^\x20-\x7e]/g, '')}`;
+  const stream = `BT /F1 14 Tf 72 720 Td (${text}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objects.forEach((o, i) => {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(body, 'latin1');
+}
 
 const SEED_ACTOR: JwtUser = { sub: 'superadmin', roles: [Role.Superadmin], name: 'Dados de demonstração', restaurantId: null, permissions: [] };
 
@@ -97,6 +125,8 @@ async function main() {
     const staff = app.get(StaffService);
     const catalog = app.get(CatalogService);
     const billing = app.get(BillingService);
+    const documents = app.get(DocumentsService);
+    const contracts = app.get(ContractsService);
     const credentials: string[] = [];
     const [plan] = await Promise.all(PLANS.map((p) => billing.createPlan(p)));
 
@@ -107,14 +137,31 @@ async function main() {
         managerName: demo.managerName,
         managerContact: demo.managerContact,
         planId: plan.id,
-        initialDueDate: toDay(new Date(Date.now() + demo.trialEndsIn * DAY)),
+        trialDays: 14,
         adminUsername: `${demo.prefix}admin`,
         adminPassword: PASSWORD,
       });
+      // A signed contract (a sample PDF) so the menu and the team are on.
+      const startsOn = toDay(new Date(Date.now() - 45 * DAY));
+      const file = await documents.upload(r.id, 'contract', { buffer: samplePdf(demo.name), originalname: `contrato-${demo.slug}.pdf` }, SEED_ACTOR);
+      await contracts.register(
+        r.id,
+        {
+          kind: demo.contract,
+          origin: 'initial',
+          signedOn: startsOn,
+          startsOn,
+          endsOn: toDay(new Date(Date.now() + (demo.contract === 'pilot' ? 45 : 320) * DAY)),
+          signatory: { name: demo.managerName, role: 'Sócio-proprietário', contact: demo.managerContact },
+          documentId: file.id,
+        },
+        SEED_ACTOR,
+      );
       // The demo restaurants have been customers for a while; their history goes back further than today.
-      await restaurantsRepo.update({ id: r.id }, { createdAt: new Date(Date.now() - 45 * DAY) });
+      const firstDue = new Date(Date.now() + demo.trialEndsIn * DAY);
+      await restaurantsRepo.update({ id: r.id }, { createdAt: new Date(Date.now() - 45 * DAY), initialDueDate: firstDue, dueDate: firstDue });
       if (demo.paidDaysAgo !== undefined) {
-        await billing.record(r.id, { cycles: 1, paidAt: toDay(new Date(Date.now() - demo.paidDaysAgo * DAY)) }, SEED_ACTOR);
+        await billing.record(r.id, { cycles: 1, paidAt: toDay(new Date(Date.now() - demo.paidDaysAgo * DAY)), noReceiptReason: 'Dados de demonstração' }, SEED_ACTOR);
       }
       credentials.push(`/r/${r.slug}/login  ${demo.prefix}admin (${ROLE_LABEL[Role.RestaurantAdmin]})`);
 

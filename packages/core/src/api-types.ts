@@ -1,6 +1,7 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
 import type { Availability, OpeningHours } from './open-status';
+import type { ContractState } from './contracts';
 import type { Role } from './roles';
 import type { AccessState } from './subscription';
 import type { SuspensionReason } from './billing';
@@ -106,6 +107,8 @@ export interface SubscriptionView {
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
   /** While the free trial runs: when it ends. */
   trialEndsAt: string | null;
+  /** Whether a signed contract is in force, and until when (renewals included). */
+  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null };
 }
 
 export interface WaiterCallView {
@@ -210,7 +213,7 @@ export interface ReviewSummaryView {
 }
 
 /** Filters of the Elo restaurant list. `attention` = in grace or suspended. */
-export const RESTAURANT_LIST_STATUSES = ['active', 'grace', 'suspended', 'attention', 'deleted'] as const;
+export const RESTAURANT_LIST_STATUSES = ['active', 'grace', 'suspended', 'pending', 'attention', 'deleted'] as const;
 export type RestaurantListStatus = (typeof RESTAURANT_LIST_STATUSES)[number];
 
 export interface RestaurantListItem {
@@ -234,7 +237,7 @@ export interface RestaurantListView {
   page: number;
   pageSize: number;
   /** Totals per status, ignoring the status filter, for the filter chips. `deleted` only for who may see it. */
-  counts: { all: number; active: number; grace: number; suspended: number; deleted?: number };
+  counts: { all: number; active: number; grace: number; suspended: number; pending: number; deleted?: number };
 }
 
 export interface PauseView {

@@ -57,6 +57,7 @@ export class PublicController {
   @Get(':slug/menu')
   async menu(@Param() { slug }: SlugParams) {
     const r = await this.restaurants.getBySlug(slug);
+    this.restaurants.assertPublished(r);
     return {
       readOnly: true,
       restaurant: { name: r.name, slug: r.slug, ...(await this.restaurants.publicProfile(r)) },
@@ -72,6 +73,8 @@ export class PublicController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
+    // No contract in force, no menu: a new visit is refused before any session is made.
+    this.restaurants.assertPublished(await this.restaurants.getBySlug(slug));
     const { session, table, restaurant } = await this.tables.startSession(
       slug,
       token,

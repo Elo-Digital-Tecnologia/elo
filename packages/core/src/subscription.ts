@@ -18,8 +18,10 @@ export function accessState(
   dueDate: Date,
   now: Date = new Date(),
   manuallySuspended = false,
+  /** Without a contract in force (pending or ended) nobody gets in, whatever the payments. */
+  contract: 'pending' | 'active' | 'ended' = 'active',
 ): AccessState {
-  if (manuallySuspended) return AccessState.Suspended;
+  if (manuallySuspended || contract !== 'active') return AccessState.Suspended;
   const overdueMs = now.getTime() - dueDate.getTime();
   if (overdueMs <= 0) return AccessState.Active;
   return overdueMs <= GRACE_DAYS * DAY_MS ? AccessState.Grace : AccessState.Suspended;

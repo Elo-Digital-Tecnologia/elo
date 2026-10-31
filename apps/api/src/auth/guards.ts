@@ -100,7 +100,12 @@ export class SubscriptionGuard implements CanActivate {
       return true;
     }
     const state = await this.restaurants.accessStateOf(user.restaurantId);
-    if (state === AccessState.Suspended) throw new ForbiddenException('subscription_suspended');
+    if (state === AccessState.Suspended) {
+      // The panel says what to do: pay, wait for the Elo team, or sign a new contract.
+      const r = await this.restaurants.get(user.restaurantId).catch(() => null);
+      const sub = r ? this.restaurants.subscriptionOf(r) : null;
+      throw new ForbiddenException({ statusCode: 403, message: 'subscription_suspended', reasons: sub?.reasons ?? [], contractEndsOn: sub?.contract.endsOn ?? null });
+    }
     return true;
   }
 }

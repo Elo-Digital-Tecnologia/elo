@@ -122,7 +122,8 @@ export class DocumentsService implements OnModuleInit, OnApplicationBootstrap, O
       const stale: { id: string }[] = await this.docs.query(
         `SELECT d.id FROM documents d
          WHERE d.created_at < now() - make_interval(hours => $1)
-           AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.receipt_id = d.id)`,
+           AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.receipt_id = d.id)
+           AND NOT EXISTS (SELECT 1 FROM contracts c WHERE c.document_id = d.id)`,
         [UNUSED_HOURS],
       );
       if (!stale.length) return 0;

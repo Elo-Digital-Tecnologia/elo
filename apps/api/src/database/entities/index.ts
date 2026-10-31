@@ -15,6 +15,7 @@ import { Plan } from './plan.entity';
 import { GuestPushSubscription } from './guest-push-subscription.entity';
 import { RestaurantPause } from './restaurant-pause.entity';
 import { Document } from './document.entity';
+import { Contract } from './contract.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -33,6 +34,7 @@ export * from './plan.entity';
 export * from './guest-push-subscription.entity';
 export * from './restaurant-pause.entity';
 export * from './document.entity';
+export * from './contract.entity';
 
 export const ENTITIES = [
   Restaurant,
@@ -52,4 +54,5 @@ export const ENTITIES = [
   GuestPushSubscription,
   RestaurantPause,
   Document,
+  Contract,
 ];

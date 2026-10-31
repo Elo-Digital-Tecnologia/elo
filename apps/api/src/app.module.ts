@@ -30,6 +30,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { RestaurantsModule } from './restaurants/restaurants.module';
 import { BillingModule } from './billing/billing.module';
 import { DocumentsModule } from './documents/documents.module';
+import { ContractsModule } from './contracts/contracts.module';
 import { PausesModule } from './pauses/pauses.module';
 import { StaffModule } from './staff/staff.module';
 import { TablesModule } from './tables/tables.module';
@@ -107,6 +108,7 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
     RestaurantsModule,
     BillingModule,
     DocumentsModule,
+    ContractsModule,
     PausesModule,
     CatalogModule,
     MediaModule,
