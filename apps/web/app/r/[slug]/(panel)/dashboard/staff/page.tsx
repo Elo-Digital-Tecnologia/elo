@@ -1,11 +1,11 @@
 'use client';
 
-import { KeyRound, Pencil, Trash2, UserPlus, Users } from 'lucide-react';
+import { Crown, KeyRound, Pencil, Power, Trash2, UserPlus, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { formatDuration, ROLE_LABEL, type Role, RestaurantStaffRoles, type StaffPerformanceRow, type StaffReportView } from '@elo/core';
-import { Badge, Button, DataTable, EmptyState, Field, Input, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
+import { ActionMenu, Badge, Button, DataTable, EmptyState, Field, Input, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 interface Staff {
   id: string;
@@ -28,21 +28,34 @@ const EMPTY: FormState = { name: '', displayName: '', username: '', password: ''
 
 const ERRORS: Record<string, string> = {
   username_taken: 'Esse usuário já existe na equipe.',
-  other_admin: 'Um administrador não altera outro administrador.',
+  not_above: 'Gerentes cuidam só de garçons, cozinha e caixa. Gerentes são definidos pelo titular.',
   self: 'Você não pode desativar, excluir ou trocar os perfis da própria conta.',
-  last_admin: 'O restaurante precisa de pelo menos um administrador ativo.',
+  owner: 'O titular não é desativado nem excluído. Para trocar, use "Tornar titular".',
+  owner_locked: 'Só o próprio titular altera os dados dele.',
+  wrong_password: 'Senha incorreta.',
+  invalid_owner: 'Escolha alguém ativo da equipe.',
 };
 
-/** Which service numbers apply: tables are a waiter's job; calls can also be answered by an administrator. */
+/** The owner role is never picked in the form: it only moves through a transfer. */
+const PICKABLE = RestaurantStaffRoles.filter((r) => r !== 'restaurant_admin');
+const roleLabel = (r: Role) => ROLE_LABEL[r] ?? r;
+
+/** Service numbers apply to waiters only: they answer calls and open and close tables. */
 const metricsOf = (roles: Role[]) => ({
-  calls: roles.includes('waiter') || roles.includes('restaurant_admin'),
+  calls: roles.includes('waiter'),
   tables: roles.includes('waiter'),
 });
+
+const LEADS: Role[] = ['restaurant_admin', 'manager'];
+const leads = (roles: readonly Role[]) => roles.some((r) => LEADS.includes(r));
 
 const messageOf = (e: unknown, fallback: string) => (e instanceof ApiError ? ERRORS[e.code] ?? fallback : fallback);
 
 function View() {
-  const { token, sub, impersonated } = useStaff();
+  const { token, sub, roles: myRoles, impersonated } = useStaff();
+  /** The owner (and Elo support) handles managers; a manager only the rest of the team. */
+  const isOwner = myRoles.includes('restaurant_admin') && !impersonated;
+  const isAdmin = impersonated || isOwner;
   const [list, setList] = useState<Staff[] | null>(null);
   const [editing, setEditing] = useState<Staff | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
@@ -53,6 +66,9 @@ function View() {
   const [viewing, setViewing] = useState<Staff | null>(null);
   const [stats, setStats] = useState<StaffPerformanceRow | null | undefined>(undefined);
   const [listError, setListError] = useState<string | null>(null);
+  const [handing, setHanding] = useState<Staff | null>(null);
+  const [ownerPassword, setOwnerPassword] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => setList(await api<Staff[]>('/api/staff', { token })), [token]);
   useEffect(() => {
@@ -62,9 +78,11 @@ function View() {
   /** Mirrors the server rule so locked actions show up disabled, with the reason on hover. */
   const lockOf = (u: Staff): string | null => {
     if (u.id === sub) return 'Sua conta: altere o nome em Editar e a senha em Minha conta.';
-    if (u.roles.includes('restaurant_admin') && !impersonated) return ERRORS.other_admin;
+    if (!isAdmin && leads(u.roles)) return ERRORS.not_above;
+    if (u.roles.includes('restaurant_admin') && !impersonated) return ERRORS.owner_locked;
     return null;
   };
+  const ownerLock = (u: Staff) => (u.roles.includes('restaurant_admin') ? ERRORS.owner : null);
 
   const openForm = (target: Staff | 'new') => {
     setError(null);
@@ -132,6 +150,23 @@ function View() {
     }
   };
 
+  const handOver = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!handing) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await api(`/api/staff/${handing.id}/transfer-ownership`, { body: { password: ownerPassword }, token });
+      setHanding(null);
+      setOwnerPassword('');
+      await load();
+    } catch (err) {
+      setError(messageOf(err, 'Não foi possível transferir.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const showStats = async (u: Staff) => {
     setViewing(u);
     setStats(undefined);
@@ -162,10 +197,12 @@ function View() {
         <DataTable
           rows={list}
           rowKey={(u) => u.id}
+          mobile="cards"
           columns={[
             {
               key: 'n',
               header: 'Nome',
+              mobile: 'title',
               cell: (u) => (
                 <button className="min-w-0 text-left" onClick={() => showStats(u)}>
                   <span className="block truncate font-semibold hover:underline">{u.name}{u.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span>
@@ -173,21 +210,31 @@ function View() {
                 </button>
               ),
             },
-            { key: 'r', header: 'Perfis', cell: (u) => <span className="flex flex-wrap gap-1">{u.roles.map((r) => <Badge key={r} tone="brand">{ROLE_LABEL[r] ?? r}</Badge>)}</span> },
+            { key: 'r', header: 'Perfis', cell: (u) => <span className="flex flex-wrap gap-1">{u.roles.map((r) => <Badge key={r} tone={r === 'restaurant_admin' ? 'success' : 'brand'}>{roleLabel(r)}</Badge>)}</span> },
             { key: 's', header: 'Situação', cell: (u) => <Badge tone={u.active ? 'success' : 'neutral'} dot>{u.active ? 'Ativo' : 'Desativado'}</Badge> },
             {
               key: 'a',
               header: '',
               align: 'right',
+              mobile: 'actions',
               cell: (u) => {
                 const lock = lockOf(u);
+                const removal = lock ?? ownerLock(u);
                 const self = u.id === sub;
                 return (
-                  <span className="flex flex-wrap justify-end gap-1" title={lock ?? undefined}>
-                    <Button variant="ghost" disabled={!!lock && !self} onClick={() => openForm(u)} aria-label={`Editar ${u.name}`}><Pencil size={15} /> Editar</Button>
-                    <Button variant="ghost" disabled={!!lock} onClick={() => { setError(null); setNewPassword(''); setResetting(u); }}><KeyRound size={15} /> Nova senha</Button>
-                    <Button variant="ghost" disabled={!!lock} onClick={() => toggle(u)}>{u.active ? 'Desativar' : 'Ativar'}</Button>
-                    <Button variant="ghost" disabled={!!lock} onClick={() => { setError(null); setRemoving(u); }} aria-label={`Excluir ${u.name}`} className="text-danger"><Trash2 size={15} /></Button>
+                  <span className="inline-flex items-center justify-end gap-1">
+                    <Button variant="ghost" disabled={!!lock && !self} onClick={() => openForm(u)} aria-label={`Editar ${u.name}`} title={lock && !self ? lock : undefined}>
+                      <Pencil size={15} /> <span className="hidden md:inline">Editar</span>
+                    </Button>
+                    <ActionMenu
+                      title={u.name}
+                      items={[
+                        { label: 'Tornar titular', icon: Crown, hidden: !isOwner || self || !u.active, onSelect: () => { setError(null); setOwnerPassword(''); setHanding(u); } },
+                        { label: 'Nova senha', icon: KeyRound, disabledReason: lock, onSelect: () => { setError(null); setNewPassword(''); setResetting(u); } },
+                        { label: u.active ? 'Desativar acesso' : 'Reativar acesso', icon: Power, disabledReason: removal, onSelect: () => void toggle(u) },
+                        { label: 'Excluir', icon: Trash2, danger: true, disabledReason: removal, onSelect: () => { setError(null); setRemoving(u); } },
+                      ]}
+                    />
                   </span>
                 );
               },
@@ -211,12 +258,15 @@ function View() {
           <fieldset disabled={editingSelf}>
             <legend className="mb-2 text-sm font-medium">Perfis</legend>
             <div className="grid grid-cols-2 gap-2">
-              {RestaurantStaffRoles.map((r) => (
-                <label key={r} className="surface flex cursor-pointer items-center gap-2.5 px-3.5 py-3 text-sm has-[:checked]:border-brand has-[:checked]:bg-brand/10">
-                  <input type="checkbox" checked={form.roles.includes(r)} onChange={() => toggleRole(r)} />
-                  {ROLE_LABEL[r]}
-                </label>
-              ))}
+              {PICKABLE.map((r) => {
+                const locked = !isAdmin && LEADS.includes(r);
+                return (
+                  <label key={r} title={locked ? ERRORS.not_above : undefined} className={`surface flex items-center gap-2.5 px-3.5 py-3 text-sm has-[:checked]:border-brand has-[:checked]:bg-brand/10 ${locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+                    <input type="checkbox" checked={form.roles.includes(r)} disabled={locked} onChange={() => toggleRole(r)} />
+                    {ROLE_LABEL[r]}
+                  </label>
+                );
+              })}
             </div>
             <p className="mt-2 text-xs text-muted">{editingSelf ? 'Você não pode trocar os perfis da própria conta.' : 'Marque mais de um quando a pessoa atua em mais de uma área.'}</p>
           </fieldset>
@@ -242,6 +292,20 @@ function View() {
         </div>
       </Modal>
 
+      <Modal open={!!handing} onClose={() => setHanding(null)} title={`Tornar ${handing?.name ?? ''} titular?`} sheet>
+        <form onSubmit={handOver} className="space-y-4 text-sm">
+          <p className="text-muted">
+            {handing?.name} passa a administrar o restaurante, com Configurações e Assinatura. Você vira <strong>Gerente</strong> e só volta a ser titular se essa pessoa transferir de volta.
+          </p>
+          <Field label="Sua senha"><PasswordInput autoComplete="current-password" value={ownerPassword} onChange={(e) => setOwnerPassword(e.target.value)} required autoFocus /></Field>
+          {error && <p role="alert" className="text-danger">{error}</p>}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="ghost" type="button" onClick={() => setHanding(null)}>Voltar</Button>
+            <Button type="submit" variant="danger" loading={busy}>Transferir</Button>
+          </div>
+        </form>
+      </Modal>
+
       <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing?.name ?? ''} sheet>
         {viewing && <Profile staff={viewing} stats={stats} />}
       </Modal>
@@ -254,7 +318,7 @@ function Profile({ staff, stats }: { staff: Staff; stats: StaffPerformanceRow | 
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        {staff.roles.map((r) => <Badge key={r} tone="brand">{ROLE_LABEL[r] ?? r}</Badge>)}
+        {staff.roles.map((r) => <Badge key={r} tone={r === 'restaurant_admin' ? 'success' : 'brand'}>{roleLabel(r)}</Badge>)}
         <span className="ml-1 text-sm text-muted">{staff.username}</span>
       </div>
       {!m.calls && !m.tables ? (
@@ -288,8 +352,8 @@ const StatLine = ({ label, value }: { label: string; value: string }) => (
 
 export default function StaffPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <View />
-    </Shell>
+    </RequireRoles>
   );
 }

@@ -6,7 +6,7 @@ import { api } from '@elo/client';
 import { type BillView, formatBRL } from '@elo/core';
 import { Button } from '@elo/ui';
 
-/** Conta da mesa vista pelo cliente. A taxa de serviço pode ser recusada por ele. */
+/** Conta da mesa vista pelo cliente. Quando o restaurante permite, ele mesmo recusa a taxa de serviço. */
 export function BillPanel({ active, version, children }: { active: boolean; version: number; children?: ReactNode }) {
   const [bill, setBill] = useState<BillView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,7 +63,7 @@ export function BillPanel({ active, version, children }: { active: boolean; vers
           </dl>
         </div>
       )}
-      {bill && bill.lines.length > 0 && bill.serviceFeeBps > 0 && bill.feeWaivedBy !== 'staff' && (
+      {bill && bill.lines.length > 0 && bill.serviceFeeBps > 0 && (bill.feeWaivedBy === 'customer' || (bill.feeWaivedBy === null && bill.guestCanRefuseFee)) && (
         <Button className="w-full" variant="soft" loading={busy} onClick={toggleFee}>
           <Percent size={16} /> {bill.feeWaivedBy === 'customer' ? 'Aceitar a taxa de serviço' : 'Recusar a taxa de serviço'}
         </Button>

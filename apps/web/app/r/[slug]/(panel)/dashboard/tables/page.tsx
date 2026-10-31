@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import type { TableView } from '@elo/core';
 import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards, Stagger, StaggerItem } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const STATE: Record<string, { label: string; tone: 'neutral' | 'warning' | 'success' }> = {
   closed: { label: 'Livre', tone: 'neutral' },
@@ -126,8 +126,8 @@ function View() {
 
 export default function TablesPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <View />
-    </Shell>
+    </RequireRoles>
   );
 }

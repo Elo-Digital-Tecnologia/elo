@@ -3,6 +3,9 @@
 import {
   BarChart3,
   BellRing,
+  BookOpen,
+  CalendarClock,
+  Clock,
   ChefHat,
   CreditCard,
   KeyRound,
@@ -18,12 +21,13 @@ import {
   History,
   Trophy,
 } from 'lucide-react';
-import { useParams, useRouter } from 'next/navigation';
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, ApiError, type RealtimeStatus, useAuth, useRealtimeStatus } from '@elo/client';
+import Link from 'next/link';
+import { useParams, usePathname, useRouter } from 'next/navigation';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { api, ApiError, type RealtimeStatus, useAuth, useRealtime, useRealtimeStatus } from '@elo/client';
 import { useAlertsControl, useStaffAlerts } from './alerts';
-import { ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
-import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, SkeletonCards } from '@elo/ui';
+import { type Availability, ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
+import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, PageLoading, SkeletonCards } from '@elo/ui';
 
 interface Me extends RestaurantSettingsView {
   id: string;
@@ -53,6 +57,7 @@ export const useStaff = () => useContext(Ctx)!;
 /** First match wins: a waiter who also cooks lands on the salon. */
 const HOME_ORDER: [string, string][] = [
   ['restaurant_admin', '/dashboard'],
+  ['manager', '/dashboard'],
   ['waiter', '/waiter'],
   ['kitchen', '/kitchen'],
   ['cashier', '/cashier'],
@@ -63,35 +68,46 @@ export const homeOf = (slug: string, roles: string[]) =>
   `/r/${slug}${HOME_ORDER.find(([r]) => roles.includes(r))?.[1] ?? '/login'}`;
 
 /** Navigation for every role the member holds, without repeated screens. */
-function navFor(base: string, roles: string[]): NavItem[] {
+function navFor(base: string, roles: string[], impersonated: boolean): NavItem[] {
   const item = (path: string, label: string, icon: NavItem['icon'], allowed: string[]): NavItem | null =>
     roles.some((r) => allowed.includes(r)) ? { href: base + path, label, icon } : null;
+  // The restaurant's own settings and subscription stay with the administrator; the rest is shared with managers.
   const admin = ['restaurant_admin'];
+  const leads = ['restaurant_admin', 'manager'];
   return [
-    item('/dashboard', 'Visão geral', LayoutDashboard, admin),
-    item('/dashboard/reports', 'Relatórios', BarChart3, admin),
-    item('/dashboard/team-performance', 'Desempenho', Trophy, admin),
-    item('/dashboard/reviews', 'Avaliações', Star, admin),
-    item('/dashboard/menu', 'Cardápio', UtensilsCrossed, admin),
-    item('/dashboard/tables', 'Mesas e QR Codes', Table2, admin),
-    item('/waiter', 'Salão', ConciergeBell, ['restaurant_admin', 'waiter']),
-    item('/cashier', 'Caixa', Receipt, ['restaurant_admin', 'waiter', 'cashier']),
-    item('/kitchen', 'Cozinha', ChefHat, ['restaurant_admin', 'kitchen']),
-    item('/dashboard/staff', 'Equipe', Users, admin),
+    item('/dashboard', 'Visão geral', LayoutDashboard, leads),
+    item('/dashboard/reports', 'Relatórios', BarChart3, leads),
+    item('/dashboard/team-performance', 'Desempenho', Trophy, leads),
+    item('/dashboard/reviews', 'Avaliações', Star, leads),
+    item('/dashboard/menu', 'Cardápio', UtensilsCrossed, leads),
+    item('/dashboard/tables', 'Mesas e QR Codes', Table2, leads),
+    item('/waiter', 'Salão', ConciergeBell, [...leads, 'waiter']),
+    item('/cashier', 'Caixa', Receipt, [...leads, 'waiter', 'cashier']),
+    item('/kitchen', 'Cozinha', ChefHat, [...leads, 'kitchen']),
+    item('/dashboard/staff', 'Equipe', Users, leads),
+    item('/dashboard/hours', 'Funcionamento', CalendarClock, leads),
     item('/dashboard/settings', 'Configurações', Settings, admin),
-    item('/dashboard/activity', 'Registros', History, admin),
+    item('/dashboard/activity', 'Registros', History, leads),
     item('/dashboard/subscription', 'Assinatura', CreditCard, admin),
-    item('/account', 'Minha conta', KeyRound, ['restaurant_admin', 'waiter', 'kitchen', 'cashier']),
+    // Elo support has a temporary pass, not an account of this restaurant.
+    impersonated ? null : item('/account', 'Minha conta', KeyRound, [...leads, 'waiter', 'kitchen', 'cashier']),
   ].filter((i): i is NavItem => !!i);
 }
 
 const rolesLabel = (roles: string[]) => roles.map((r) => ROLE_LABEL[r as Role] ?? r).join(' · ');
 
-/** Exige login e perfil permitido; mostra aviso de vencimento e bloqueio por suspensão. */
-export function Shell({ roles, children }: { roles: string[]; children: ReactNode; bare?: boolean }) {
+/**
+ * The panel around every tab: sign-in, restaurant data, live connection, alerts
+ * and banners. It lives in the layout, so it stays mounted while the member moves
+ * between tabs; each page only says which roles may open it.
+ */
+export function PanelShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   const base = `/r/${slug}`;
+  const pathname = usePathname();
+  /** Where signing out leads: Elo support goes back to the restaurant in the Elo panel, not to this login. */
+  const leavingTo = useRef<string | null>(null);
   const { token, user, ready, setToken } = useAuth(slug);
   const [me, setMe] = useState<Me | null>(null);
   const [suspended, setSuspended] = useState(false);
@@ -101,10 +117,36 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
   const alerts = useAlertsControl({ token, slug, roles: roleList });
   useStaffAlerts({ token, roles: roleList, base, push: alerts.push, enabled: !!me && alerts.enabled });
 
+  // An administrator changed this member's roles or name: swap the token so menus and screens follow, without signing in again.
+  useRealtime(
+    {
+      'staff.updated': (p: { id: string }) => {
+        if (!token || p.id !== user?.sub || user?.impersonatedBy) return;
+        api<{ accessToken: string }>('/api/auth/refresh', { method: 'POST', body: {}, token })
+          .then((res) => setToken(res.accessToken))
+          .catch(() => undefined);
+      },
+      'restaurant.availability': (a: Availability) => setMe((m) => (m ? { ...m, availability: a } : m)),
+    },
+    token,
+    !!me,
+  );
+
+  // Opening hours change on their own: fetch the status again right after the next change.
+  const changesAt = me?.availability.changesAt;
+  useEffect(() => {
+    if (!changesAt || !token) return;
+    const wait = new Date(changesAt).getTime() - Date.now() + 1000;
+    if (wait > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => {
+      api<Me>('/api/restaurant/me', { token }).then(setMe).catch(() => undefined);
+    }, Math.max(wait, 1000));
+    return () => clearTimeout(timer);
+  }, [changesAt, token]);
+
   useEffect(() => {
     if (!ready) return;
-    if (!token || !user) return void router.replace(`${base}/login`);
-    if (!user.roles.some((r) => roles.includes(r))) return void router.replace(homeOf(slug, user.roles));
+    if (!token || !user) return void router.replace(leavingTo.current ?? `${base}/login`);
     let retry: ReturnType<typeof setTimeout> | undefined;
     const load = (attempt: number) =>
       api<Me>('/api/restaurant/me', { token })
@@ -123,7 +165,7 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
     void load(0);
     return () => clearTimeout(retry);
     // Depende de role/sub, não do objeto `user`.
-  }, [ready, token, user?.roles.join(','), user?.sub, roles.join(','), router, setToken, slug, base]);
+  }, [ready, token, user?.roles.join(','), user?.sub, router, setToken, slug, base]);
 
   // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
   useEffect(() => {
@@ -178,14 +220,13 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
     <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe }}>
       <AppShell
         brandSub={me.name}
-        nav={navFor(base, user.roles)}
-        user={{ name: user.name ?? me.name, role: rolesLabel(user.roles) }}
+        nav={navFor(base, user.roles, !!user.impersonatedBy)}
+        user={{ name: user.name ?? me.name, role: user.impersonatedBy ? 'Suporte Elo Digital' : rolesLabel(user.roles) }}
         onLogout={() => {
           // This device stops getting the team's alerts before the next person signs in.
           void alerts.leave();
+          if (user.impersonatedBy) leavingTo.current = `/admin/restaurants/${me.id}`;
           setToken(null);
-          // Quem entrou pelo painel Elo volta para ele.
-          if (user.impersonatedBy) router.replace(`/admin/restaurants/${me.id}`);
         }}
         defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
         headerExtra={
@@ -194,18 +235,18 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
             <span className="ml-auto">{alerts.bell}</span>
           </span>
         }
-        footerLinks={[{ label: 'Cardápio dos clientes', href: `/${me.slug}` }]}
+        links={[{ href: `/${me.slug}`, label: 'Cardápio dos clientes', icon: BookOpen, external: true }]}
         banner={
           <>
           {user.impersonatedBy ? (
-            <GlassCard className="mb-5 flex items-center gap-3 border-brand/40 px-5 py-3 text-sm">
+            <GlassCard className="mb-5 flex items-start gap-3 border-brand/40 px-4 py-3 text-sm sm:items-center sm:px-5">
               <ShieldAlert size={20} className="shrink-0 text-brand" />
               <span>
-                Você está no painel de {me.name} como equipe Elo Digital. Use <strong>Sair</strong> para voltar ao painel Elo. O acesso termina em 45 minutos.
+                Você está no painel de {me.name} como equipe Elo Digital: pode ver tudo e corrigir cardápio, mesas, equipe e configurações. Pedidos, chamados, mesas em uso e contas ficam com a equipe do restaurante. Use <strong>Sair</strong> para voltar ao painel Elo; o acesso termina em 45 minutos.
               </span>
             </GlassCard>
           ) : warn ? (
-            <GlassCard className="mb-5 flex items-center gap-3 border-warning/40 px-5 py-3 text-sm">
+            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
               <BellRing size={20} className="shrink-0 text-warning" />
               <span>
                 Pagamento vencido em {new Date(me.subscription.dueDate).toLocaleDateString('pt-BR')}. Regularize até{' '}
@@ -213,6 +254,18 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
               </span>
             </GlassCard>
           ) : null}
+          {!me.availability.open && (
+            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+              <Clock size={20} className="shrink-0 text-warning" />
+              <span>
+                <strong>{me.availability.label}</strong>
+                {me.availability.pauseReason && <> · {me.availability.pauseReason}</>}. Nenhuma mesa nova abre; as mesas e os pedidos em andamento seguem normalmente.
+                {user.roles.some((r) => r === 'restaurant_admin' || r === 'manager') && pathname !== `${base}/dashboard/hours` && (
+                  <> <Link href={`${base}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Ver funcionamento</Link></>
+                )}
+              </span>
+            </GlassCard>
+          )}
           {alerts.prompt}
           </>
         }
@@ -221,6 +274,17 @@ export function Shell({ roles, children }: { roles: string[]; children: ReactNod
       </AppShell>
     </Ctx.Provider>
   );
+}
+
+/** Opens the page only for the given roles; anyone else goes to their own first tab. */
+export function RequireRoles({ roles, children }: { roles: string[]; children: ReactNode }) {
+  const ctx = useContext(Ctx);
+  const router = useRouter();
+  const allowed = !!ctx && ctx.roles.some((r) => roles.includes(r));
+  useEffect(() => {
+    if (ctx && !allowed) router.replace(homeOf(ctx.me.slug, ctx.roles));
+  }, [ctx, allowed, router]);
+  return allowed ? <>{children}</> : <PageLoading />;
 }
 
 const LIVE: Record<RealtimeStatus, { label: string; dot: string }> = {

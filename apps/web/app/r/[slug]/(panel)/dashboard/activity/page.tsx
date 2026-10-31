@@ -1,8 +1,8 @@
 'use client';
 
 import { PageHeader } from '@elo/ui';
-import { ActivityList } from '../../../../_components/activity-list';
-import { Shell, useStaff } from '../../_components/shell';
+import { ActivityList } from '../../../../../_components/activity-list';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 function Activity() {
   const { token } = useStaff();
@@ -16,8 +16,8 @@ function Activity() {
 
 export default function ActivityPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <Activity />
-    </Shell>
+    </RequireRoles>
   );
 }

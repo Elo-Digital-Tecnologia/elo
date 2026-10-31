@@ -28,17 +28,19 @@ function CopyWifi({ password }: { password: string }) {
 
 /** Descrição, aberto/fechado, contatos e Wi-Fi. Não mostra nada que o restaurante não preencheu. */
 export function RestaurantInfo({ profile }: { profile: Profile }) {
-  const { description, openStatus, address, phone, instagram, wifi } = profile;
+  const { description, availability, address, phone, instagram, wifi } = profile;
   const handle = instagram?.replace(/^@/, '');
-  if (!description && !openStatus && !address && !phone && !handle && !wifi) return null;
+  const status = availability.label;
+  if (!description && !status && !address && !phone && !handle && !wifi) return null;
   return (
     <section aria-label="Sobre o restaurante" className="space-y-3 px-4 pt-3">
       {description && <p className="text-[15px] leading-relaxed">{description}</p>}
       <div className="flex flex-wrap gap-2">
-        {openStatus && (
+        {status && (
           <span className="inline-flex items-center gap-2 rounded-pill bg-brand/10 px-3 py-1.5 text-sm font-semibold">
-            <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${openStatus.open ? 'bg-success' : 'bg-danger'}`} />
-            {openStatus.label}
+            <span aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${availability.open ? 'bg-success' : 'bg-danger'}`} />
+            {status}
+            {availability.pauseReason && <span className="font-normal text-muted">· {availability.pauseReason}</span>}
           </span>
         )}
         {address && (

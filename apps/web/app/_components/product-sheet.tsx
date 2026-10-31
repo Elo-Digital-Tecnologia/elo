@@ -4,7 +4,7 @@ import { Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { formatBRL, type ProductView } from '@elo/core';
 import { Button, Sheet } from '@elo/ui';
-import { TagChips } from './menu-list';
+import { ProductPlaceholder, TagChips } from './menu-list';
 
 export interface CartLine {
   product: ProductView;
@@ -41,7 +41,7 @@ function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line:
     <Sheet
       open
       onClose={onClose}
-      media={product.imageUrl ? <img src={product.imageUrl} alt="" className="aspect-[4/3] w-full object-cover" /> : undefined}
+      media={product.imageUrl ? <img src={product.imageUrl} alt="" className="aspect-[4/3] w-full object-cover" /> : <ProductPlaceholder className="aspect-[4/3] w-full" size={48} />}
       title={product.name}
       footer={
         <div className="flex items-center gap-3">

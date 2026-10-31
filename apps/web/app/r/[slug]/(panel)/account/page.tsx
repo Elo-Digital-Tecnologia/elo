@@ -1,13 +1,20 @@
 'use client';
 
 import { KeyRound } from 'lucide-react';
-import { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { Button, Field, GlassCard, PageHeader } from '@elo/ui';
-import { Shell, useStaff } from '../_components/shell';
+import { RequireRoles, useStaff } from '../../_components/shell';
 
 function Account() {
-  const { token } = useStaff();
+  const { token, impersonated } = useStaff();
+  const router = useRouter();
+  const { slug } = useParams<{ slug: string }>();
+  // Elo support enters with a temporary pass: there is no account of its own to change here.
+  useEffect(() => {
+    if (impersonated) router.replace(`/r/${slug}/dashboard`);
+  }, [impersonated, router, slug]);
   const [form, setForm] = useState({ current: '', next: '', again: '' });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,7 +40,7 @@ function Account() {
 
   return (
     <>
-      <PageHeader title="Minha conta" description="Se esqueceu a senha, peça ao administrador para redefinir." />
+      <PageHeader title="Minha conta" description="Se esqueceu a senha, peça ao titular ou a um gerente para redefinir." />
       <GlassCard strong className="max-w-md p-6">
         <form onSubmit={submit} className="space-y-4">
           <Field label="Senha atual"><input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} required /></Field>
@@ -49,8 +56,8 @@ function Account() {
 
 export default function AccountPage() {
   return (
-    <Shell roles={['restaurant_admin', 'waiter', 'kitchen', 'cashier']}>
+    <RequireRoles roles={['restaurant_admin', 'manager', 'waiter', 'kitchen', 'cashier']}>
       <Account />
-    </Shell>
+    </RequireRoles>
   );
 }

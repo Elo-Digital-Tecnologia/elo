@@ -79,7 +79,7 @@ export default function Home() {
     <div className="relative min-h-dvh">
       <Aurora />
       <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-        <Logo sub="Cardápio" />
+        <Logo />
         <ThemeToggle />
       </header>
 

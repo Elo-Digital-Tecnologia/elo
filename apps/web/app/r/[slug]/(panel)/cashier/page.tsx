@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
 import { type BillView, formatBRL, parseCents, splitBillByItems, splitBillEqually, splitEqually } from '@elo/core';
 import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, PageHeader, SkeletonCards } from '@elo/ui';
-import { Shell, useStaff } from '../_components/shell';
+import { RequireRoles, useStaff } from '../../_components/shell';
 
 const STATE_LABEL = { pending_open: 'Abrindo', open: 'Aberta', pending_close: 'Pediu a conta', closed: 'Fechada' } as const;
 const STATE_TONE = { pending_open: 'info', open: 'success', pending_close: 'warning', closed: 'neutral' } as const;
@@ -73,7 +73,7 @@ function Cashier() {
 }
 
 function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<void> }) {
-  const { token } = useStaff();
+  const { token, impersonated } = useStaff();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [adj, setAdj] = useState({ label: '', value: '', kind: 'discount' as 'discount' | 'extra' });
@@ -136,9 +136,11 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
             <div key={i} className="flex items-center justify-between gap-3">
               <dt className="flex items-center gap-2 text-muted">
                 {a.label}{a.reason && <span className="text-xs">({a.reason})</span>}
-                <button aria-label={`Remover ajuste ${a.label}`} disabled={busy} className="text-danger" onClick={() => run(() => api(`/api/bills/${bill.tableId}/adjustments/${i}`, { method: 'DELETE', token }))}>
-                  <Trash2 size={14} />
-                </button>
+                {!impersonated && (
+                  <button aria-label={`Remover ajuste ${a.label}`} disabled={busy} className="text-danger" onClick={() => run(() => api(`/api/bills/${bill.tableId}/adjustments/${i}`, { method: 'DELETE', token }))}>
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </dt>
               <dd className="tabular-nums">{a.cents < 0 ? '−' : '+'} {formatBRL(Math.abs(a.cents))}</dd>
             </div>
@@ -151,27 +153,31 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
         {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button variant="soft" disabled={busy} onClick={() => run(() => api(`/api/bills/${bill.tableId}/fee`, { method: 'PUT', body: { waived: bill.feeWaivedBy === null }, token }))}>
-            <Percent size={16} /> {bill.feeWaivedBy === null ? 'Remover taxa de serviço' : 'Cobrar taxa de serviço'}
-          </Button>
+          {!impersonated && (
+            <Button variant="soft" disabled={busy} onClick={() => run(() => api(`/api/bills/${bill.tableId}/fee`, { method: 'PUT', body: { waived: bill.feeWaivedBy === null }, token }))}>
+              <Percent size={16} /> {bill.feeWaivedBy === null ? 'Remover taxa de serviço' : 'Cobrar taxa de serviço'}
+            </Button>
+          )}
           <Button variant="ghost" disabled={busy} onClick={() => run(async () => undefined)}>Recalcular</Button>
         </div>
       </GlassCard>
 
-      <GlassCard className="p-6">
-        <h3 className="mb-3 text-lg font-semibold">Ajuste na conta</h3>
-        <form onSubmit={addAdjustment} className="grid gap-3 sm:grid-cols-[1fr_9rem_9rem_auto] sm:items-end">
-          <Field label="Descrição"><input value={adj.label} onChange={(e) => setAdj({ ...adj, label: e.target.value })} placeholder="Ex.: cortesia da casa" required minLength={2} /></Field>
-          <Field label="Valor"><input value={adj.value} onChange={(e) => setAdj({ ...adj, value: e.target.value })} placeholder="5,00" inputMode="decimal" required /></Field>
-          <Field label="Tipo">
-            <select value={adj.kind} onChange={(e) => setAdj({ ...adj, kind: e.target.value as 'discount' | 'extra' })}>
-              <option value="discount">Desconto</option>
-              <option value="extra">Acréscimo</option>
-            </select>
-          </Field>
-          <Button type="submit" disabled={busy}>Aplicar</Button>
-        </form>
-      </GlassCard>
+      {!impersonated && (
+        <GlassCard className="p-6">
+          <h3 className="mb-3 text-lg font-semibold">Ajuste na conta</h3>
+          <form onSubmit={addAdjustment} className="grid gap-3 sm:grid-cols-[1fr_9rem_9rem_auto] sm:items-end">
+            <Field label="Descrição"><input value={adj.label} onChange={(e) => setAdj({ ...adj, label: e.target.value })} placeholder="Ex.: cortesia da casa" required minLength={2} /></Field>
+            <Field label="Valor"><input value={adj.value} onChange={(e) => setAdj({ ...adj, value: e.target.value })} placeholder="5,00" inputMode="decimal" required /></Field>
+            <Field label="Tipo">
+              <select value={adj.kind} onChange={(e) => setAdj({ ...adj, kind: e.target.value as 'discount' | 'extra' })}>
+                <option value="discount">Desconto</option>
+                <option value="extra">Acréscimo</option>
+              </select>
+            </Field>
+            <Button type="submit" disabled={busy}>Aplicar</Button>
+          </form>
+        </GlassCard>
+      )}
 
       {bill.lines.length > 0 && <Split bill={bill} />}
     </div>
@@ -260,8 +266,8 @@ function Split({ bill }: { bill: BillView }) {
 
 export default function CashierPage() {
   return (
-    <Shell roles={['cashier', 'waiter', 'restaurant_admin']}>
+    <RequireRoles roles={['cashier', 'waiter', 'restaurant_admin', 'manager']}>
       <Cashier />
-    </Shell>
+    </RequireRoles>
   );
 }

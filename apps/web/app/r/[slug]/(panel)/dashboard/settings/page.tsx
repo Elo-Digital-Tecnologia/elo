@@ -1,12 +1,13 @@
 'use client';
 
 import { Save } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@elo/client';
 import { brazilPhone, contact, instagramHandle, LIMITS, maskPhone, type OpeningHours, personName } from '@elo/core';
-import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch } from '@elo/ui';
-import { ImageField } from '../../../../_components/image-field';
-import { Shell, useStaff } from '../../_components/shell';
+import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, TimeInput } from '@elo/ui';
+import { ImageField } from '../../../../../_components/image-field';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -50,6 +51,7 @@ function Settings() {
     managerContact: me.managerContact,
     fee: String(me.serviceFeeBps / 100).replace('.', ','),
   });
+  const [feeRefusal, setFeeRefusal] = useState(me.guestFeeRefusal);
   const [showHours, setShowHours] = useState(me.openingHours !== null);
   const [days, setDays] = useState<Day[]>(toDays(me.openingHours));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -82,6 +84,7 @@ function Settings() {
           managerName: form.managerName,
           managerContact: form.managerContact,
           serviceFeeBps: Math.round(pct * 100),
+          guestFeeRefusal: feeRefusal,
           description: form.description,
           logoUrl: form.logoUrl,
           coverUrl: form.coverUrl,
@@ -129,10 +132,14 @@ function Settings() {
           </div>
         </Section>
 
-        <Section title="Horário de funcionamento" hint="Mostra no cardápio se o restaurante está aberto agora.">
+        <Section title="Horário de funcionamento" hint="Fora do horário, nenhuma mesa nova abre; as mesas já abertas terminam normalmente.">
           <label className="flex items-center gap-3 text-sm font-medium">
-            <Switch label="Mostrar horário no cardápio" checked={showHours} onChange={setShowHours} /> Mostrar horário no cardápio
+            <Switch label="Usar horário de funcionamento" checked={showHours} onChange={setShowHours} /> Usar horário de funcionamento
           </label>
+          {!showHours && <p className="text-sm text-muted">Desligado, o restaurante fica sempre aberto.</p>}
+          <p className="text-sm text-muted">
+            Para imprevistos, férias ou reformas, use <Link href={`/r/${me.slug}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Funcionamento</Link> e agende uma parada.
+          </p>
           {showHours && (
             <ul className="divide-y divide-line/40">
               {days.map((d, i) => (
@@ -143,9 +150,9 @@ function Settings() {
                   </label>
                   {d.open && (
                     <span className="flex w-full flex-wrap items-center gap-2 text-sm sm:ml-auto sm:w-auto">
-                      <Input type="time" value={d.from} onChange={(e) => setDay(i, { from: e.target.value })} aria-label={`${DAYS[i]}: abre`} required className="!w-auto min-w-[9.5rem] tabular-nums" />
+                      <TimeInput value={d.from} onChange={(v) => setDay(i, { from: v })} aria-label={`${DAYS[i]}: abre`} required className="!w-24 text-center" />
                       <span className="text-muted">às</span>
-                      <Input type="time" value={d.to} onChange={(e) => setDay(i, { to: e.target.value })} aria-label={`${DAYS[i]}: fecha`} required className="!w-auto min-w-[9.5rem] tabular-nums" />
+                      <TimeInput value={d.to} onChange={(v) => setDay(i, { to: v })} aria-label={`${DAYS[i]}: fecha`} required className="!w-24 text-center" />
                     </span>
                   )}
                 </li>
@@ -162,14 +169,24 @@ function Settings() {
           </div>
         </Section>
 
-        <Section title="Gestão">
+        <Section title="Responsável pelo contrato" hint="Quem a Elo Digital procura sobre a assinatura. Não aparece para os clientes.">
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Nome do gerente" error={errors.managerName}><Input value={form.managerName} onChange={(e) => set({ managerName: e.target.value })} invalid={!!errors.managerName} maxLength={LIMITS.personName.max} required /></Field>
-            <Field label="Contato do gerente" hint="Telefone com DDD ou e-mail." error={errors.managerContact}><Input value={form.managerContact} onChange={(e) => set({ managerContact: e.target.value })} invalid={!!errors.managerContact} maxLength={120} required /></Field>
+            <Field label="Nome do responsável" error={errors.managerName}><Input value={form.managerName} onChange={(e) => set({ managerName: e.target.value })} invalid={!!errors.managerName} maxLength={LIMITS.personName.max} required /></Field>
+            <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={errors.managerContact}><Input value={form.managerContact} onChange={(e) => set({ managerContact: e.target.value })} invalid={!!errors.managerContact} maxLength={120} required /></Field>
           </div>
-          <Field label="Taxa de serviço (%)" hint={`De 0% a ${LIMITS.serviceFeeBpsMax / 100}%. O cliente pode recusar; o garçom e o caixa podem remover.`} error={errors.fee}>
+        </Section>
+
+        <Section title="Taxa de serviço" hint="Entra na conta de cada mesa. O garçom e o caixa sempre podem remover.">
+          <Field label="Taxa de serviço (%)" hint={`De 0% a ${LIMITS.serviceFeeBpsMax / 100}%. Use 0 para não cobrar.`} error={errors.fee}>
             <Input value={form.fee} onChange={(e) => set({ fee: e.target.value.replace(/[^\d,.]/g, '') })} invalid={!!errors.fee} inputMode="decimal" maxLength={5} required />
           </Field>
+          <label className="flex items-start gap-3 text-sm">
+            <Switch label="O cliente pode recusar a taxa pelo cardápio" checked={feeRefusal} onChange={setFeeRefusal} />
+            <span>
+              <span className="block font-medium">O cliente pode recusar a taxa pelo cardápio</span>
+              <span className="block text-muted">Desligado, a opção some da conta do cliente e só a equipe remove a taxa.</span>
+            </span>
+          </label>
         </Section>
 
         {msg && <p role="alert" className={`text-sm ${msg.ok ? 'text-success' : 'text-danger'}`}>{msg.text}</p>}
@@ -181,8 +198,8 @@ function Settings() {
 
 export default function SettingsPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin']}>
       <Settings />
-    </Shell>
+    </RequireRoles>
   );
 }

@@ -1,13 +1,14 @@
 'use client';
 
-import { Ban, CalendarClock, Pencil, Trash2, CircleCheck, ExternalLink, MessageCircle, Phone, RefreshCw, Table2, UserRound, Wallet } from 'lucide-react';
+import { Ban, CalendarClock, Crown, CalendarCog, CircleCheck, ExternalLink, Layers, Mail, MessageCircle, Pencil, Phone, RefreshCw, Table2, Trash2, UserRound, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
-import { formatBRL, parseCents, type SubscriptionView } from '@elo/core';
-import { Badge, Button, ColumnChart, DataTable, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards } from '@elo/ui';
-import { ActivityList } from '../../../_components/activity-list';
-import { Shell, useAdmin } from '../../_components/shell';
+import { cycleLabel, formatBRL, type Role, type SubscriptionView } from '@elo/core';
+import { Badge, Button, ColumnChart, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, SkeletonCards } from '@elo/ui';
+import { useBilling } from './_components/billing';
+import { ActivityList } from '../../../../_components/activity-list';
+import { useAdmin } from '../../../_components/shell';
 
 interface Detail {
   id: string;
@@ -19,48 +20,52 @@ interface Detail {
   subscription: SubscriptionView;
 }
 
+interface TeamMember {
+  id: string;
+  name: string;
+  username: string;
+  roles: Role[];
+  active: boolean;
+}
+
 interface AdminTables {
   slug: string;
   tables: { id: string; name: string; state: string; token: string; url: string }[];
 }
 
-interface Payment {
-  id: string;
-  amountCents: number;
-  paidAt: string;
-  newDueDate: string;
-  note: string | null;
-  recordedByName: string | null;
-}
-
 const STATE = { active: { label: 'Ativa', tone: 'success' }, grace: { label: 'Em tolerância', tone: 'warning' }, suspended: { label: 'Suspensa', tone: 'danger' } } as const;
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
-/** Texto de cobrança pronto para o WhatsApp. O envio é manual: não há integração. */
-function billingLink(r: Detail): string | null {
-  const digits = r.managerContact.replace(/\D/g, '');
+/**
+ * Ready-made billing message on the manager's own channel: WhatsApp for a phone, e-mail otherwise.
+ * Sending stays manual; there is no integration.
+ */
+function billingLink(r: Detail): { href: string; label: string; Icon: typeof MessageCircle } | null {
+  const overdue = new Date(r.subscription.dueDate).getTime() < Date.now();
+  const text = overdue
+    ? `Olá, ${r.managerName}! Aqui é da Elo Digital. A mensalidade do Elo Cardápio de ${r.name} venceu em ${fmt(r.subscription.dueDate)}. Pode nos confirmar o pagamento? Obrigado!`
+    : `Olá, ${r.managerName}! Aqui é da Elo Digital. O acesso de ${r.name} ao painel do Elo Cardápio está suspenso. Podemos conversar para regularizar? Obrigado!`;
+  const contact = r.managerContact.trim();
+  if (contact.includes('@')) {
+    return { href: `mailto:${contact}?subject=${encodeURIComponent(`Elo Cardápio · ${r.name}`)}&body=${encodeURIComponent(text)}`, label: 'Cobrar por e-mail', Icon: Mail };
+  }
+  const digits = contact.replace(/\D/g, '');
   if (digits.length < 10) return null;
   const phone = digits.length <= 11 ? `55${digits}` : digits;
-  const due = new Date(r.subscription.dueDate).toLocaleDateString('pt-BR');
-  const text = `Olá, ${r.managerName}! Aqui é da Elo Digital. A mensalidade do Elo Cardápio de ${r.name} venceu em ${due}. Pode nos confirmar o pagamento? Obrigado!`;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  return { href: `https://wa.me/${phone}?text=${encodeURIComponent(text)}`, label: 'Cobrar pelo WhatsApp', Icon: MessageCircle };
 }
-
-const EMPTY = { amount: '', paidAt: '', newDueDate: '', note: '' };
 
 const ERRORS: Record<string, string> = {
   not_suspended: 'Suspenda o acesso antes de excluir.',
   slug_mismatch: 'O link digitado não confere.',
   restaurant_deleted: 'Este restaurante foi excluído.',
+  invalid_owner: 'Escolha alguém ativo da equipe.',
 };
 
 function View({ id }: { id: string }) {
   const router = useRouter();
   const { token, can } = useAdmin();
   const [r, setR] = useState<Detail | null>(null);
-  const [payments, setPayments] = useState<Payment[]>([]);
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [tables, setTables] = useState<AdminTables | null>(null);
@@ -69,11 +74,14 @@ function View({ id }: { id: string }) {
   const [editing, setEditing] = useState<{ name: string; managerName: string; managerContact: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmSlug, setConfirmSlug] = useState('');
+  const [access, setAccess] = useState<'suspend' | 'reactivate' | null>(null);
+  const [team, setTeam] = useState<TeamMember[] | null>(null);
+  const [newOwner, setNewOwner] = useState<{ userId: string; reason: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
       setR(await api<Detail>(`/api/admin/restaurants/${id}`, { token }));
-      if (can('payments.view')) setPayments(await api<Payment[]>(`/api/admin/restaurants/${id}/payments`, { token }));
+      setTeam(await api<TeamMember[]>(`/api/admin/restaurants/${id}/staff`, { token }));
       if (can('restaurants.tables')) setTables(await api<AdminTables>(`/api/admin/restaurants/${id}/tables`, { token }));
       setFailed(false);
     } catch {
@@ -84,6 +92,8 @@ function View({ id }: { id: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const billing = useBilling({ id, token, subscription: r?.subscription ?? null, canRecord: can('payments.record'), onChange: load });
 
   const guard = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -97,22 +107,6 @@ function View({ id }: { id: string }) {
       return false;
     } finally {
       setSaving(false);
-    }
-  };
-
-  const pay = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cents = parseCents(form.amount);
-    if (cents === null) return setError('Informe o valor, por exemplo 99,90.');
-    const ok = await guard(() =>
-      api(`/api/admin/restaurants/${id}/payments`, {
-        body: { amountCents: cents, paidAt: new Date(form.paidAt).toISOString(), newDueDate: new Date(form.newDueDate).toISOString(), note: form.note || undefined },
-        token,
-      }),
-    );
-    if (ok) {
-      setForm(EMPTY);
-      setOpen(false);
     }
   };
 
@@ -152,14 +146,25 @@ function View({ id }: { id: string }) {
   };
 
   const st = STATE[r.subscription.state];
-  const chart = [...payments].reverse().slice(-8).map((p) => ({ label: new Date(p.paidAt).toLocaleDateString('pt-BR', { month: 'short' }), value: p.amountCents / 100 }));
+  const charge = can('payments.record') && r.subscription.state !== 'active' ? billingLink(r) : null;
+  const sub = r.subscription;
+  const overdue = sub.reasons.includes('overdue');
+  const overdueDays = Math.floor((Date.now() - new Date(sub.dueDate).getTime()) / 86_400_000);
+  const owner = team?.find((m) => m.roles.includes('restaurant_admin')) ?? null;
+  const candidates = (team ?? []).filter((m) => m.active && m.id !== owner?.id);
+  const paid = billing.entries.filter((p) => p.kind === 'payment' && !p.voidedAt);
+  const chart = [...paid].reverse().slice(-8).map((p) => ({ label: new Date(p.paidAt).toLocaleDateString('pt-BR', { month: 'short' }), value: p.amountCents / 100 }));
 
   return (
     <>
       <PageHeader
         crumbs={[{ label: 'Restaurantes', href: '/admin/restaurants' }, { label: r.name }]}
         title={r.name}
-        description={`Cardápio em /${r.slug}`}
+        description={
+          <a href={`/${r.slug}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-medium text-brand hover:underline">
+            Cardápio em /{r.slug} <ExternalLink size={14} />
+          </a>
+        }
         actions={
           <>
             {can('restaurants.edit') && (
@@ -168,26 +173,63 @@ function View({ id }: { id: string }) {
             {can('restaurants.access') && (
               <Button variant="soft" loading={saving} onClick={openPanel}><ExternalLink size={17} /> Abrir painel</Button>
             )}
-            {can('payments.record') && <Button onClick={() => { setError(null); setOpen(true); }}><Wallet size={17} /> Registrar pagamento</Button>}
+            {can('payments.record') && sub.plan && <Button onClick={() => billing.open('pay')}><Wallet size={17} /> Registrar pagamento</Button>}
             {can('restaurants.suspend') && (
-              <Button variant={r.suspended ? 'soft' : 'danger'} loading={saving} onClick={() => guard(() => api(`/api/admin/restaurants/${id}/${r.suspended ? 'reactivate' : 'suspend'}`, { method: 'POST', body: {}, token }))}>
+              <Button variant={r.suspended ? 'soft' : 'danger'} onClick={() => { setError(null); setAccess(r.suspended ? 'reactivate' : 'suspend'); }}>
                 {r.suspended ? <><CircleCheck size={17} /> Reativar acesso</> : <><Ban size={17} /> Suspender acesso</>}
               </Button>
             )}
           </>
         }
       />
-      {error && !open && !editing && !deleting && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
+      {error && !editing && !deleting && !access && !newOwner && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <GlassCard strong className="space-y-4 p-6">
-          <Badge tone={st.tone} dot>{st.label}</Badge>
-          {can('payments.record') && billingLink(r) && r.subscription.state !== 'active' && (
-            <a href={billingLink(r)!} target="_blank" rel="noreferrer" className="btn-glass inline-flex items-center gap-2 rounded-pill px-4 py-2 text-sm font-semibold"><MessageCircle size={16} /> Cobrar pelo WhatsApp</a>
-          )}
-          <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={20} /><div><div className="text-sm text-muted">Vencimento</div><div className="font-semibold">{fmt(r.subscription.dueDate)}</div></div></div>
-          <div className="flex items-center gap-3"><UserRound className="text-brand" size={20} /><div><div className="text-sm text-muted">Gerente</div><div className="font-semibold">{r.managerName}</div></div></div>
+        <GlassCard strong className="flex flex-col gap-4 p-6">
+          <div className="space-y-2">
+            <Badge tone={st.tone} dot>{st.label}</Badge>
+            {sub.reasons.length > 0 && (
+              <ul className="space-y-1 text-sm">
+                {sub.reasons.includes('manual') && <li>Suspenso manualmente pela Elo Digital.</li>}
+                {overdue && <li>Vencida há {overdueDays} {overdueDays === 1 ? 'dia' : 'dias'}: registre um pagamento ou ajuste o vencimento para liberar.</li>}
+              </ul>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <Layers className="text-brand" size={20} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-muted">Plano</div>
+              <div className="font-semibold">{sub.plan ? `${sub.plan.name} · ${formatBRL(sub.plan.priceCents)} ${cycleLabel(sub.plan.cycleMonths)}` : 'Sem plano'}</div>
+            </div>
+            {can('payments.record') && <Button variant="ghost" onClick={() => billing.open('plan')}>Trocar</Button>}
+          </div>
+          <div className="flex items-center gap-3">
+            <CalendarClock className="text-brand" size={20} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-muted">Vencimento</div>
+              <div className="font-semibold">{fmt(sub.dueDate)}</div>
+            </div>
+            {can('payments.record') && <Button variant="ghost" onClick={() => billing.open('adjust')} aria-label="Ajustar vencimento"><CalendarCog size={16} /> Ajustar</Button>}
+          </div>
+          <div className="flex items-center gap-3">
+            <Crown className="text-brand" size={20} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-muted">Titular do painel</div>
+              <div className="font-semibold">{owner ? `${owner.name} (${owner.username})` : 'Sem titular'}</div>
+            </div>
+            {can('restaurants.owner') && candidates.length > 0 && (
+              <Button variant="ghost" onClick={() => { setError(null); setNewOwner({ userId: candidates[0].id, reason: '' }); }}>Trocar</Button>
+            )}
+          </div>
+          <div className="flex items-center gap-3"><UserRound className="text-brand" size={20} /><div><div className="text-sm text-muted">Responsável pelo contrato</div><div className="font-semibold">{r.managerName}</div></div></div>
           <div className="flex items-center gap-3"><Phone className="text-brand" size={20} /><div><div className="text-sm text-muted">Contato</div><div className="font-semibold">{r.managerContact}</div></div></div>
+          {charge && (
+            <div className="mt-auto border-t border-line/40 pt-4">
+              <a href={charge.href} target="_blank" rel="noreferrer" className="btn-glass flex w-full items-center justify-center gap-2 rounded-pill px-4 py-2.5 text-sm font-semibold">
+                <charge.Icon size={16} /> {charge.label}
+              </a>
+            </div>
+          )}
         </GlassCard>
         {can('payments.view') && (
           <GlassCard className="p-6 lg:col-span-2">
@@ -200,21 +242,7 @@ function View({ id }: { id: string }) {
       {can('payments.view') && (
         <section className="mt-6">
           <h2 className="mb-3 text-xl font-semibold">Histórico de pagamentos</h2>
-          {payments.length === 0 ? (
-            <EmptyState icon={Wallet} title="Nenhum pagamento registrado" action={<Button onClick={() => setOpen(true)}>Registrar pagamento</Button>}>Registre o primeiro pagamento para atualizar o vencimento.</EmptyState>
-          ) : (
-            <DataTable
-              rows={payments}
-              rowKey={(p) => p.id}
-              columns={[
-                { key: 'd', header: 'Pago em', cell: (p) => fmt(p.paidAt) },
-                { key: 'v', header: 'Valor', cell: (p) => <span className="font-semibold tabular-nums">{formatBRL(p.amountCents)}</span> },
-                { key: 'n', header: 'Observação', cell: (p) => <span className="text-muted">{p.note ?? '—'}</span> },
-                { key: 'r', header: 'Registrado por', cell: (p) => <span className="text-muted">{p.recordedByName ?? '—'}</span> },
-                { key: 'u', header: 'Novo vencimento', align: 'right', cell: (p) => fmt(p.newDueDate) },
-              ]}
-            />
-          )}
+          {billing.history}
         </section>
       )}
 
@@ -248,21 +276,70 @@ function View({ id }: { id: string }) {
       {can('restaurants.delete') && (
         <section className="mt-8 rounded-lg border border-danger/40 p-5">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-danger"><Trash2 size={18} /> Excluir restaurante</h2>
-          <p className="mt-1 text-sm text-muted">
-            O cardápio sai do ar e a equipe perde o acesso. Os dados ficam guardados para restauração ou exportação e depois são apagados de vez.
-            {r.subscription.state !== 'suspended' && ' Suspenda o acesso antes de excluir.'}
-          </p>
+          <p className="mt-1 text-sm text-muted">O cardápio sai do ar e a equipe perde o acesso. Os dados ficam guardados para restauração ou exportação e depois são apagados de vez.</p>
+          {r.subscription.state !== 'suspended' && <p className="mt-2 text-sm font-medium text-warning">Para excluir, suspenda o acesso primeiro.</p>}
           <Button className="mt-3" variant="danger" disabled={r.subscription.state !== 'suspended'} onClick={() => { setError(null); setConfirmSlug(''); setDeleting(true); }}>Excluir restaurante</Button>
         </section>
       )}
+
+      <ConfirmModal
+        open={!!access}
+        title={access === 'suspend' ? `Suspender ${r.name}?` : `Reativar ${r.name}?`}
+        confirmLabel={access === 'suspend' ? 'Suspender acesso' : 'Reativar acesso'}
+        danger={access === 'suspend'}
+        loading={saving}
+        error={error}
+        onConfirm={async () => {
+          if (await guard(() => api(`/api/admin/restaurants/${id}/${access}`, { method: 'POST', body: {}, token }))) setAccess(null);
+        }}
+        onClose={() => setAccess(null)}
+      >
+        {access === 'suspend' ? (
+          <p>A equipe do restaurante perde o acesso ao painel na hora, inclusive quem está com ele aberto. O cardápio dos clientes continua no ar.</p>
+        ) : (
+          overdue ? (
+            <p>Isso tira só a suspensão manual. A assinatura está <strong>vencida há {overdueDays} dias</strong>, então a equipe continua bloqueada até você registrar um pagamento ou ajustar o vencimento.</p>
+          ) : (
+            <p>A equipe volta a entrar no painel na hora.</p>
+          )
+        )}
+      </ConfirmModal>
+
+      <ConfirmModal
+        open={!!newOwner}
+        title="Trocar o titular"
+        confirmLabel="Trocar titular"
+        danger
+        loading={saving}
+        disabled={!newOwner || newOwner.reason.trim().length < 3}
+        error={error}
+        onConfirm={async () => {
+          if (newOwner && (await guard(() => api(`/api/admin/restaurants/${id}/owner`, { body: newOwner, token })))) setNewOwner(null);
+        }}
+        onClose={() => setNewOwner(null)}
+      >
+        <p>Use quando o titular saiu ou perdeu o acesso. A pessoa escolhida passa a administrar o restaurante e {owner ? `${owner.name} vira Gerente` : 'o restaurante volta a ter titular'}.</p>
+        {newOwner && (
+          <>
+            <Field label="Novo titular">
+              <select value={newOwner.userId} onChange={(e) => setNewOwner({ ...newOwner, userId: e.target.value })}>
+                {candidates.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.username})</option>)}
+              </select>
+            </Field>
+            <Field label="Motivo" hint="Pelo menos 3 caracteres. Fica nos registros do restaurante.">
+              <textarea value={newOwner.reason} onChange={(e) => setNewOwner({ ...newOwner, reason: e.target.value })} minLength={3} maxLength={300} rows={3} required />
+            </Field>
+          </>
+        )}
+      </ConfirmModal>
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title="Editar restaurante" sheet>
         {editing && (
           <form onSubmit={saveEdit} className="space-y-4">
             <Field label="Nome do restaurante"><input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} minLength={2} maxLength={120} required autoFocus /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Nome do gerente"><input value={editing.managerName} onChange={(e) => setEditing({ ...editing, managerName: e.target.value })} minLength={2} maxLength={120} required /></Field>
-              <Field label="Contato do gerente"><input value={editing.managerContact} onChange={(e) => setEditing({ ...editing, managerContact: e.target.value })} minLength={5} maxLength={120} required /></Field>
+              <Field label="Responsável pelo contrato"><input value={editing.managerName} onChange={(e) => setEditing({ ...editing, managerName: e.target.value })} minLength={2} maxLength={120} required /></Field>
+              <Field label="Contato do responsável"><input value={editing.managerContact} onChange={(e) => setEditing({ ...editing, managerContact: e.target.value })} minLength={5} maxLength={120} required /></Field>
             </div>
             <p className="text-xs text-muted">O link /{r.slug} não muda: ele está impresso nos QR Codes.</p>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}
@@ -298,26 +375,11 @@ function View({ id }: { id: string }) {
         <div className="mt-4 flex justify-end"><Button onClick={() => setNewLink(null)}>Pronto</Button></div>
       </Modal>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Registrar pagamento" sheet>
-        <form onSubmit={pay} className="space-y-4">
-          <Field label="Valor"><input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="99,90" required autoFocus /></Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Pago em"><input type="date" value={form.paidAt} onChange={(e) => setForm({ ...form, paidAt: e.target.value })} required /></Field>
-            <Field label="Novo vencimento"><input type="date" value={form.newDueDate} onChange={(e) => setForm({ ...form, newDueDate: e.target.value })} required /></Field>
-          </div>
-          <Field label="Observação"><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
-          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <div className="flex justify-end"><Button type="submit" loading={saving}>Registrar</Button></div>
-        </form>
-      </Modal>
+      {billing.modals}
     </>
   );
 }
 
 export default function RestaurantPage({ params }: { params: { id: string } }) {
-  return (
-    <Shell>
-      <View id={params.id} />
-    </Shell>
-  );
+  return <View id={params.id} />;
 }

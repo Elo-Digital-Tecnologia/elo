@@ -3,8 +3,8 @@
 import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Timer, Trash2, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { formatBRL, type ProductView, type SessionStateView } from '@elo/core';
-import { AnimatePresence, Button, Sheet } from '@elo/ui';
+import { canRequestBill, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
+import { AlertsProvider, AnimatePresence, Button, Sheet, unlockAlertSound } from '@elo/ui';
 import { BillPanel } from '../../_components/bill-panel';
 import { MenuFooter } from '../../_components/menu-chrome';
 import { CartBar } from '../../_components/menu/cart-bar';
@@ -15,6 +15,7 @@ import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
 import { CartLine, lineUnit, ProductSheet } from '../../_components/product-sheet';
+import { useGuestAlertHandlers, useGuestPush } from '../../_components/menu/guest-alerts';
 
 type Phase = 'loading' | 'ready' | 'invalid' | 'in_use' | 'taken' | 'rejected' | 'expired' | 'ended' | 'error';
 type View = 'menu' | 'orders' | 'bill';
@@ -26,6 +27,14 @@ const HINT: Record<string, string> = {
   pending_close: 'Conta pedida. O garçom vai fechar a mesa.',
 };
 
+const GUEST_ERRORS: Record<string, string> = {
+  orders_in_progress: 'Ainda há pedidos sendo preparados. Peça a conta quando todos estiverem prontos.',
+  table_not_open: 'A mesa ainda não foi aberta pelo garçom.',
+  invalid_table_state: 'A mesa mudou. Atualizamos a tela.',
+  restaurant_closed: 'O restaurante está fechado agora, então a mesa não pode ser aberta.',
+  fee_refusal_disabled: 'Este restaurante não permite retirar a taxa de serviço por aqui. Fale com o garçom.',
+};
+
 /** O servidor diz por que a sessão caiu; cada motivo tem sua mensagem. */
 const phaseFor = (code: string): Phase =>
   code === 'session_taken_over' ? 'taken' : code === 'session_rejected' ? 'rejected' : code === 'session_expired' ? 'expired' : 'ended';
@@ -33,6 +42,14 @@ const phaseFor = (code: string): Phase =>
 const ACTION = 'rounded-[18px] bg-white/95 px-5 py-3 text-sm font-bold text-leaf-700 shadow-sm transition active:scale-95 disabled:opacity-60';
 
 export default function TableMenu({ params }: { params: { slug: string; token: string } }) {
+  return (
+    <AlertsProvider>
+      <TableMenuView params={params} />
+    </AlertsProvider>
+  );
+}
+
+function TableMenuView({ params }: { params: { slug: string; token: string } }) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [state, setState] = useState<SessionStateView | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -70,17 +87,37 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       });
   }, [params.slug, params.token]);
 
+  const tableOpen = state?.table.state === 'open' || state?.table.state === 'pending_close';
+  const guestPush = useGuestPush(params.token, tableOpen);
+  // The "on the way" banner already covers an answered call while the page is in view.
+  const quiet = useCallback((kind: string) => kind === 'call_answered' && document.visibilityState === 'visible', []);
+  const alertOn = useGuestAlertHandlers(guestPush.state, quiet);
+
+  // Sound needs one tap per page load; the first tap anywhere enables it.
+  useEffect(() => {
+    const unlock = () => unlockAlertSound();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
+
   useRealtime(
     {
-      'table.updated': refresh,
+      'table.updated': (p: unknown) => {
+        void refresh();
+        alertOn('table.updated')(p);
+      },
       'order.created': refresh,
-      'order.updated': refresh,
+      'order.updated': (p: unknown) => {
+        void refresh();
+        alertOn('order.updated')(p);
+      },
       'order.cancelled': refresh,
       'bill.updated': () => setBillVersion((v) => v + 1),
       'call.resolved': (p: { handledBy: { name: string | null } | null }) => {
         setCalled(false);
         setComing(p.handledBy?.name ?? 'O garçom');
         setTimeout(() => setComing(null), 8000);
+        alertOn('call.resolved')(p);
       },
     },
     null,
@@ -97,6 +134,16 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
   useEffect(() => {
     if (state?.table.state === 'closed' && phase === 'ready') void refresh();
   }, [state?.table.state, phase, refresh]);
+
+  // Opening hours and closures change on their own: fetch the status again right after the next change.
+  const changesAt = state?.restaurant.availability.changesAt;
+  useEffect(() => {
+    if (!changesAt) return;
+    const wait = new Date(changesAt).getTime() - Date.now() + 1000;
+    if (wait > 2 ** 31 - 1) return;
+    const timer = setTimeout(() => void refresh(), Math.max(wait, 1000));
+    return () => clearTimeout(timer);
+  }, [changesAt, refresh]);
 
   // Conta pedida: leva o cliente para a aba Conta, onde está a avaliação do atendimento.
   const tableStateNow = state?.table.state;
@@ -135,7 +182,10 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       return true;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
-      else setMessage(e instanceof ApiError ? e.code : 'Falha de conexão. Tente de novo.');
+      else if (e instanceof ApiError && e.code === 'restaurant_closed') {
+        setMessage(GUEST_ERRORS.restaurant_closed);
+        void refresh();
+      } else setMessage(e instanceof ApiError ? GUEST_ERRORS[e.code] ?? 'Não foi possível concluir. Tente de novo.' : 'Falha de conexão. Tente de novo.');
       return false;
     } finally {
       setBusy(false);
@@ -169,6 +219,13 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
   if (phase === 'error' || !state) return <Notice title="Algo deu errado" icon={<WifiOff size={30} />}>Não foi possível carregar o cardápio. Tente de novo em instantes.</Notice>;
 
   const tableState = state.table.state;
+  const availability = state.restaurant.availability;
+  // A table already open keeps going; only a new one waits for the restaurant to open.
+  const closedNow = tableState === 'closed' && !availability.open;
+  // Once the bill is asked for, the menu is only for reading: nothing more can be ordered.
+  const billRequested = tableState === 'pending_close';
+  const pick = billRequested ? undefined : setPicked;
+  const billReady = canRequestBill(state.orders.map((o) => o.status));
   const visible = filterMenu(state.menu, query);
   const total = cart.reduce((s, l) => s + lineUnit(l) * l.quantity, 0);
   const cartCount = cart.reduce((s, l) => s + l.quantity, 0);
@@ -208,7 +265,9 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
 
   // Uma ação principal por estado da mesa.
   const primary = (className: string) =>
-    tableState === 'closed' ? (
+    closedNow ? (
+      <span className="px-3 text-sm font-semibold opacity-90">Restaurante fechado</span>
+    ) : tableState === 'closed' ? (
       <button className={className} disabled={busy} onClick={openTable}>Abrir mesa</button>
     ) : tableState === 'open' ? (
       <button className={className} disabled={busy} onClick={sendOrder}>Enviar comanda</button>
@@ -261,9 +320,11 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       {view === 'menu' && (
         <>
           <div className="px-4 pb-1 pt-4"><MenuSearch value={query} onChange={setQuery} /></div>
-          {!query && <Highlights menu={state.menu} onPick={setPicked} />}
+          {guestPush.invite}
+          {billRequested && <p className="mx-4 mt-3 surface px-4 py-3 text-sm">Conta pedida: o cardápio fica só para consulta. Para pedir mais, chame o garçom.</p>}
+          {!query && <Highlights menu={state.menu} onPick={pick} />}
           <CategoryTabs menu={visible} />
-          <MenuList menu={visible} onPick={setPicked} searching={!!query} />
+          <MenuList menu={visible} onPick={pick} searching={!!query} />
           <div className="px-4 pt-6"><MenuFooter name={state.restaurant.name} /></div>
         </>
       )}
@@ -280,18 +341,23 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
       {view === 'bill' && (
         <BillPanel active version={billVersion}>
           {(tableState === 'open' || tableState === 'pending_close') && <ReviewForm />}
-          {tableState === 'open' && <Button className="w-full !py-3.5" disabled={busy} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>}
+          {tableState === 'open' && (
+            <>
+              <Button className="w-full !py-3.5" disabled={busy || !billReady} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>
+              {!billReady && <p className="text-center text-sm text-muted">Você pode pedir a conta quando todos os pedidos estiverem prontos.</p>}
+            </>
+          )}
           {tableState === 'pending_close' && <p className="surface px-4 py-3 text-sm">Conta pedida. O garçom vai fechar a mesa.</p>}
         </BillPanel>
       )}
 
       <AnimatePresence>
-        {view === 'menu' && cartCount > 0 && tableState !== 'pending_close' && (
+        {view === 'menu' && cartCount > 0 && !billRequested && (
           <CartBar key="cart" count={cartCount} totalCents={total} onOpen={() => setCartOpen(true)} action={primary(ACTION)} />
         )}
       </AnimatePresence>
 
-      <ProductSheet product={picked} onClose={() => setPicked(null)} onAdd={(line) => { setCart((c) => [...c, line]); setPicked(null); }} />
+      <ProductSheet product={billRequested ? null : picked} onClose={() => setPicked(null)} onAdd={(line) => { setCart((c) => [...c, line]); setPicked(null); }} />
 
       <Sheet
         open={cartOpen}
@@ -304,9 +370,16 @@ export default function TableMenu({ params }: { params: { slug: string; token: s
               <span className="font-display text-2xl font-extrabold tabular-nums">{formatBRL(total)}</span>
             </div>
             {tableState === 'open' && <Button className="w-full !py-3.5" loading={busy} onClick={sendOrder}>Enviar comanda</Button>}
-            {tableState === 'closed' && <Button className="w-full !py-3.5" loading={busy} onClick={openTable}>Abrir mesa</Button>}
+            {tableState === 'closed' && !closedNow && <Button className="w-full !py-3.5" loading={busy} onClick={openTable}>Abrir mesa</Button>}
+            {closedNow && (
+              <p className="surface px-4 py-3 text-center text-sm">
+                <strong className="block">{availability.label ?? 'Restaurante fechado'}</strong>
+                {availability.pauseReason && <span className="block text-muted">{availability.pauseReason}</span>}
+                <span className="block text-muted">Você pode ver o cardápio, mas a mesa só abre com o restaurante aberto.</span>
+              </p>
+            )}
             {tableState === 'pending_open' && <p className="surface px-4 py-3 text-center text-sm">Aguardando o garçom confirmar a mesa.</p>}
-            {tableState === 'closed' && <p className="text-center text-xs text-muted">O garçom confirma a abertura antes de você enviar a comanda.</p>}
+            {tableState === 'closed' && !closedNow && <p className="text-center text-xs text-muted">O garçom confirma a abertura antes de você enviar a comanda.</p>}
             {state.restaurant.serviceFeeBps > 0 && <p className="text-center text-xs text-muted">Taxa de serviço de {(state.restaurant.serviceFeeBps / 100).toLocaleString('pt-BR')}% na conta. Você pode recusá-la na aba Conta.</p>}
           </div>
         }

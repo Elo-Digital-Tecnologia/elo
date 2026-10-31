@@ -20,7 +20,7 @@ import {
   StaggerItem,
   Stat,
 } from '@elo/ui';
-import { Shell, useStaff } from '../_components/shell';
+import { RequireRoles, useStaff } from '../../_components/shell';
 
 const STATUS: Record<string, { label: string; tone: 'info' | 'brand' | 'warning' | 'success' | 'danger' }> = {
   sent: { label: 'Enviado', tone: 'info' },
@@ -174,8 +174,8 @@ function Overview() {
 
 export default function DashboardPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <Overview />
-    </Shell>
+    </RequireRoles>
   );
 }

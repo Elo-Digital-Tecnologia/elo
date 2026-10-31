@@ -131,19 +131,23 @@ export function useAlertsControl({ token, slug, roles }: { token: string | null;
 
   const prompt =
     relevant && pref === null ? (
-      <GlassCard className="mb-5 flex flex-wrap items-center gap-3 border-brand/40 px-5 py-3 text-sm">
-        <BellRing size={20} className="shrink-0 text-brand" />
-        <span className="min-w-0 flex-1">Ative os avisos para ouvir chamados, mesas e pedidos em qualquer tela do painel.</span>
-        <span className="flex gap-2">
+      <GlassCard className="mb-5 flex flex-col gap-3 border-brand/40 px-4 py-4 text-sm sm:flex-row sm:items-center sm:px-5 sm:py-3">
+        <span className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+          <BellRing size={20} className="shrink-0 text-brand" />
+          <span>Ative os avisos para ouvir chamados, mesas e pedidos em qualquer tela do painel.</span>
+        </span>
+        <span className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
           <Button variant="ghost" onClick={turnOff}>Agora não</Button>
           <Button onClick={turnOn}>Ativar avisos</Button>
         </span>
       </GlassCard>
     ) : note ? (
-      <GlassCard className="mb-5 flex flex-wrap items-center gap-3 border-warning/40 px-5 py-3 text-sm">
-        <Bell size={20} className="shrink-0 text-warning" />
-        <span className="min-w-0 flex-1">{note}</span>
-        <Button variant="ghost" onClick={() => setNote(null)}>Entendi</Button>
+      <GlassCard className="mb-5 flex flex-col gap-3 border-warning/40 px-4 py-4 text-sm sm:flex-row sm:items-center sm:px-5 sm:py-3">
+        <span className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+          <Bell size={20} className="shrink-0 text-warning" />
+          <span>{note}</span>
+        </span>
+        <Button variant="ghost" className="sm:shrink-0" onClick={() => setNote(null)}>Entendi</Button>
       </GlassCard>
     ) : null;
 

@@ -1,4 +1,4 @@
-/* Elo staff alerts: shows Web Push notifications and opens the right panel page on tap. */
+/* Elo alerts for staff and guests: shows Web Push notifications and opens the right page on tap. */
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));

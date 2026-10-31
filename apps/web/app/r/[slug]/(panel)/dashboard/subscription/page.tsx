@@ -1,8 +1,9 @@
 'use client';
 
-import { CalendarClock, CircleCheck, ShieldAlert, TimerReset } from 'lucide-react';
+import { CalendarClock, CircleCheck, Layers, ShieldAlert, TimerReset } from 'lucide-react';
+import { cycleLabel, formatBRL } from '@elo/core';
 import { Badge, GlassCard, PageHeader } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const STATE = {
   active: { label: 'Ativa', tone: 'success', icon: CircleCheck, text: 'Tudo certo. Seu acesso está liberado.' },
@@ -37,6 +38,9 @@ function View() {
           <p className="text-sm text-muted">{daysLeft >= 0 ? 'até o próximo vencimento' : 'desde o vencimento'}</p>
         </GlassCard>
         <GlassCard className="space-y-4 p-7 lg:col-span-2">
+          {s.plan && (
+            <div className="flex items-center gap-3"><Layers className="text-brand" size={22} /><div><div className="text-sm text-muted">Plano</div><div className="font-semibold">{s.plan.name} · {formatBRL(s.plan.priceCents)} {cycleLabel(s.plan.cycleMonths)}</div></div></div>
+          )}
           <div className="flex items-center gap-3"><CalendarClock className="text-brand" size={22} /><div><div className="text-sm text-muted">Vencimento</div><div className="font-semibold">{fmt(s.dueDate)}</div></div></div>
           <div className="flex items-center gap-3"><TimerReset className="text-brand" size={22} /><div><div className="text-sm text-muted">Acesso mantido até</div><div className="font-semibold">{fmt(s.graceEndsAt)}</div></div></div>
           <p className="border-t border-line/40 pt-4 text-sm text-muted">O pagamento é confirmado manualmente pela equipe Elo Digital. O prazo de tolerância após o vencimento é de 7 dias.</p>
@@ -48,8 +52,8 @@ function View() {
 
 export default function SubscriptionPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin']}>
       <View />
-    </Shell>
+    </RequireRoles>
   );
 }

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@elo/client';
 import type { RestaurantListItem, RestaurantListView } from '@elo/core';
 import { Badge, Donut, ErrorState, GlassCard, PageHeader, SkeletonCards, Stagger, StaggerItem, Stat } from '@elo/ui';
-import { Shell, useAdmin } from '../_components/shell';
+import { useAdmin } from '../../_components/shell';
 import Link from 'next/link';
 
 interface Overview {
@@ -78,9 +78,5 @@ function View() {
 }
 
 export default function OverviewPage() {
-  return (
-    <Shell>
-      <View />
-    </Shell>
-  );
+  return <View />;
 }

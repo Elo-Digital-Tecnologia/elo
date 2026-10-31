@@ -3,14 +3,17 @@
 import { BellRing, CheckCheck, DoorOpen, Hand, Receipt, UserRound, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, upsertOrder, useRealtime } from '@elo/client';
-import type { OrderView, TableView, WaiterCallView } from '@elo/core';
-import { AnimatePresence, Badge, Button, EmptyState, GlassCard, Modal, motion, PageHeader } from '@elo/ui';
-import { Shell, useStaff } from '../_components/shell';
+import { ORDER_IN_PROGRESS, type OrderView, type TableView, type WaiterCallView } from '@elo/core';
+import { AnimatePresence, Badge, Button, ConfirmModal, EmptyState, GlassCard, Modal, motion, PageHeader } from '@elo/ui';
+import { RequireRoles, useStaff } from '../../_components/shell';
 
 const ACTIVE = ['sent', 'received', 'preparing', 'ready'];
 
+/** Orders listed per table before the rest is unfolded. */
+const ORDERS_SHOWN = 3;
+
 function Panel() {
-  const { token, roles, sub } = useStaff();
+  const { token, roles, sub, impersonated, me } = useStaff();
   const [tables, setTables] = useState<TableView[]>([]);
   const [calls, setCalls] = useState<WaiterCallView[]>([]);
   const [orders, setOrders] = useState<OrderView[]>([]);
@@ -19,14 +22,18 @@ function Panel() {
   const [notice, setNotice] = useState<string | null>(null);
   const [acting, setActing] = useState<{ order: OrderView; kind: 'cancel' | 'return' } | null>(null);
   const [reason, setReason] = useState('');
+  /** Closing ends the guests' visit for good, so it is confirmed first. */
+  const [closing, setClosing] = useState<TableView | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
+  /** Tables whose full order list is unfolded; the others show only the latest orders. */
+  const [unfolded, setUnfolded] = useState<Set<string>>(new Set());
   const seen = useRef<Set<string> | null>(null);
 
   const load = useCallback(async () => {
     const [t, c, o] = await Promise.all([
       api<TableView[]>('/api/tables', { token }),
       api<WaiterCallView[]>('/api/calls', { token }),
-      api<OrderView[]>('/api/orders?status=sent,received,preparing,ready&limit=200', { token }),
+      api<OrderView[]>('/api/orders?status=sent,received,preparing,ready&open=true&limit=200', { token }),
     ]);
     const keys = new Set([...c.map((x) => x.id), ...t.filter((x) => x.state.startsWith('pending')).map((x) => `${x.id}:${x.state}`)]);
     if (seen.current) {
@@ -68,6 +75,8 @@ function Panel() {
       if (e instanceof ApiError && e.code === 'already_handled' && lostText) {
         setNotice(lostText(typeof e.data.by === 'string' ? e.data.by : 'outro garçom'));
         await load().catch(() => undefined);
+      } else if (e instanceof ApiError && e.code === 'restaurant_closed') {
+        setError('O restaurante está fechado agora: recuse o pedido de abertura e avise o cliente.');
       } else if (e instanceof ApiError && e.code === 'not_your_table') {
         setError('Só quem atende a mesa pode cancelar ou devolver pedidos. Use "Assumir" para ficar com ela.');
       } else if (e instanceof ApiError && e.status === 409) {
@@ -79,6 +88,16 @@ function Panel() {
     }
   };
 
+  /** Orders of the guests now at the table, newest first. */
+  const ordersOf = (tableId: string) => orders.filter((o) => o.tableId === tableId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const toggleOrders = (tableId: string) =>
+    setUnfolded((u) => {
+      const next = new Set(u);
+      if (next.has(tableId)) next.delete(tableId);
+      else next.add(tableId);
+      return next;
+    });
+
   const post = (path: string, body: unknown = {}) => () => api(path, { method: 'POST', body, token });
 
   const confirmAction = async () => {
@@ -89,7 +108,9 @@ function Panel() {
   };
 
   const isWaiter = roles.includes('waiter');
-  const canResolve = isWaiter || roles.includes('restaurant_admin');
+  const closed = !me.availability.open;
+  // Calls are the waiters' job; an administrator or Elo support only watches them.
+  const canResolve = !impersonated && isWaiter;
   const pendingOpen = tables.filter((t) => t.state === 'pending_open');
   const pendingClose = tables.filter((t) => t.state === 'pending_close');
   const open = tables.filter((t) => t.state === 'open');
@@ -118,9 +139,13 @@ function Panel() {
         <Column title="Abertura de mesa" icon={DoorOpen} count={pendingOpen.length}>
           {pendingOpen.map((t) => (
             <Item key={t.id} fresh={fresh.has(`${t.id}:pending_open`)}>
-              <div><strong className="text-lg">{t.name}</strong><div className="text-sm text-muted">quer abrir a mesa</div></div>
+              <div>
+                <strong className="text-lg">{t.name}</strong>
+                <div className="text-sm text-muted">quer abrir a mesa</div>
+                {closed && <div className="mt-1 text-sm font-medium text-warning">Restaurante fechado: só dá para recusar.</div>}
+              </div>
               <div className="flex gap-2">
-                <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/validate-open`), (by) => `${t.name} já foi atendida por ${by}.`)}>Validar</Button>
+                <Button disabled={!isWaiter || closed} onClick={() => run(post(`/api/tables/${t.id}/validate-open`), (by) => `${t.name} já foi atendida por ${by}.`)}>Validar</Button>
                 <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/reject-open`), (by) => `${t.name} já foi atendida por ${by}.`)}>Recusar</Button>
               </div>
             </Item>
@@ -132,7 +157,7 @@ function Panel() {
           {pendingClose.map((t) => (
             <Item key={t.id} fresh={fresh.has(`${t.id}:pending_close`)}>
               <div><strong className="text-lg">{t.name}</strong><div className="text-sm text-muted">pediu a conta</div></div>
-              <Button disabled={!isWaiter} onClick={() => run(post(`/api/tables/${t.id}/close`), (by) => `${t.name} já foi fechada por ${by}.`)}>Fechar mesa</Button>
+              <Button disabled={!isWaiter} onClick={() => setClosing(t)}>Fechar mesa</Button>
             </Item>
           ))}
           {pendingClose.length === 0 && <Quiet text="Nenhuma conta pedida." />}
@@ -150,7 +175,7 @@ function Panel() {
                 <GlassCard lift className="h-full p-5">
                   <div className="mb-1 flex items-center justify-between gap-3">
                     <strong className="min-w-0 truncate font-display text-2xl">{t.name}</strong>
-                    <Button disabled={!isWaiter} variant="ghost" onClick={() => run(post(`/api/tables/${t.id}/close`), (by) => `${t.name} já foi fechada por ${by}.`)}>Fechar mesa</Button>
+                    <Button disabled={!isWaiter} variant="ghost" onClick={() => setClosing(t)}>Fechar mesa</Button>
                   </div>
                   <div className="mb-3 flex min-h-9 items-center justify-between gap-3 text-sm text-muted">
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -164,21 +189,44 @@ function Panel() {
                     )}
                   </div>
                   <ul className="space-y-2 text-sm">
-                    {orders.filter((o) => o.tableId === t.id).map((o) => (
+                    {ordersOf(t.id).slice(0, unfolded.has(t.id) ? undefined : ORDERS_SHOWN).map((o) => (
                       <li key={o.id} className="flex items-start justify-between gap-3 rounded-md bg-leaf-100/40 px-3 py-2.5">
                         <span><Badge tone={o.status === 'ready' ? 'success' : o.status === 'preparing' ? 'warning' : 'info'}>{o.status === 'ready' ? 'Pronto' : o.status === 'preparing' ? 'Em preparo' : o.status === 'received' ? 'Recebido' : 'Enviado'}</Badge>
                           <span className="mt-1.5 block text-muted">{o.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}</span></span>
-                        <button className="shrink-0 text-danger underline-offset-2 hover:underline" onClick={() => setActing({ order: o, kind: o.status === 'ready' ? 'return' : 'cancel' })}>{o.status === 'ready' ? 'Devolver' : 'Cancelar'}</button>
+                        {!impersonated && <button className="shrink-0 text-danger underline-offset-2 hover:underline" onClick={() => setActing({ order: o, kind: o.status === 'ready' ? 'return' : 'cancel' })}>{o.status === 'ready' ? 'Devolver' : 'Cancelar'}</button>}
                       </li>
                     ))}
-                    {orders.every((o) => o.tableId !== t.id) && <li className="text-muted">Sem pedidos ainda.</li>}
+                    {ordersOf(t.id).length === 0 && <li className="text-muted">Sem pedidos ainda.</li>}
                   </ul>
+                  {ordersOf(t.id).length > ORDERS_SHOWN && (
+                    <button className="mt-2 text-sm font-medium text-brand underline-offset-2 hover:underline" onClick={() => toggleOrders(t.id)}>
+                      {unfolded.has(t.id) ? 'Mostrar menos' : `Ver todos os ${ordersOf(t.id).length} pedidos`}
+                    </button>
+                  )}
                 </GlassCard>
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!closing}
+        title={`Fechar ${closing?.name ?? 'a mesa'}?`}
+        confirmLabel="Fechar mesa"
+        danger
+        onConfirm={() => {
+          const t = closing;
+          setClosing(null);
+          if (t) void run(post(`/api/tables/${t.id}/close`), (by) => `${t.name} já foi fechada por ${by}.`);
+        }}
+        onClose={() => setClosing(null)}
+      >
+        <p>A sessão dos clientes termina e a conta da mesa é encerrada. Feche só depois de receber o pagamento.</p>
+        {closing && ordersOf(closing.id).some((o) => ORDER_IN_PROGRESS.includes(o.status)) && (
+          <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2">Esta mesa ainda tem pedidos em preparo na cozinha.</p>
+        )}
+      </ConfirmModal>
 
       <Modal open={!!acting} onClose={() => setActing(null)} title={acting?.kind === 'return' ? 'Devolver pedido' : 'Cancelar pedido'} sheet>
         <p className="mb-3 text-sm text-muted">
@@ -220,8 +268,8 @@ const Quiet = ({ text }: { text: string }) => <p className="rounded-lg border bo
 
 export default function WaiterPage() {
   return (
-    <Shell roles={['waiter', 'restaurant_admin']}>
+    <RequireRoles roles={['waiter', 'restaurant_admin', 'manager']}>
       <Panel />
-    </Shell>
+    </RequireRoles>
   );
 }

@@ -1,17 +1,19 @@
 'use client';
 
-import { ArchiveRestore, Building2, ChevronLeft, ChevronRight, Download, Plus, Search } from 'lucide-react';
+import { ArchiveRestore, Building2, Download, ExternalLink, Plus, Search } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import type { RestaurantListItem, RestaurantListStatus, RestaurantListView } from '@elo/core';
-import { Badge, Button, DataTable, EmptyState, ErrorState, Field, Input, Modal, PageHeader, SkeletonCards } from '@elo/ui';
-import { Shell, useAdmin } from '../_components/shell';
+import { cycleLabel, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DataTable, DateInput, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, SkeletonCards } from '@elo/ui';
+import { useAdmin } from '../../_components/shell';
 import { downloadExport } from './export';
 
 const STATE = { active: { label: 'Ativa', tone: 'success' }, grace: { label: 'Em tolerância', tone: 'warning' }, suspended: { label: 'Suspensa', tone: 'danger' } } as const;
-const EMPTY = { name: '', managerName: '', managerContact: '', dueDate: '', adminUsername: '', adminPassword: '' };
-const PAGE_SIZE = 20;
+const TRIAL_DAYS = 14;
+const EMPTY = { name: '', managerName: '', managerContact: '', planId: '', initialDueDate: '', adminUsername: '', adminPassword: '' };
+const dayFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+const PAGE_SIZE = 10;
 const SORTS = [
   ['name', 'Nome'],
   ['due', 'Vencimento mais próximo'],
@@ -64,6 +66,8 @@ function View() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<RestaurantListItem | null>(null);
+  const [plans, setPlans] = useState<PlanView[] | null>(null);
   const canDelete = can('restaurants.delete');
   const deletedView = filters.status === 'deleted';
 
@@ -92,26 +96,47 @@ function View() {
     return () => clearTimeout(t);
   }, [search, filters.q, setFilters]);
 
+  /** The form starts on the first active plan and a two-week trial. */
+  const openCreate = async () => {
+    setError(null);
+    setOpen(true);
+    try {
+      const list = (await api<PlanView[]>('/api/admin/plans', { token })).filter((p) => p.active);
+      setPlans(list);
+      setForm((f) => ({ ...f, planId: f.planId || list[0]?.id || '', initialDueDate: f.initialDueDate || dayFromNow(TRIAL_DAYS) }));
+    } catch {
+      setPlans([]);
+    }
+  };
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSaving(true);
     try {
-      await api('/api/admin/restaurants', { body: { ...form, dueDate: new Date(form.dueDate).toISOString() }, token });
+      await api('/api/admin/restaurants', { body: form, token });
       setForm(EMPTY);
       setOpen(false);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 409 ? 'Já existe um restaurante ou usuário com esse nome.' : 'Confira os campos e tente de novo.');
+      setError(
+        err instanceof ApiError && err.code === 'plan_inactive'
+          ? 'Este plano foi desativado. Escolha outro.'
+          : err instanceof ApiError && err.status === 409
+            ? 'Já existe um restaurante ou usuário com esse nome.'
+            : 'Confira os campos e tente de novo.',
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const restore = async (r: RestaurantListItem) => {
-    setBusyId(r.id);
+  const restore = async () => {
+    if (!restoring) return;
+    setBusyId(restoring.id);
     try {
-      await api(`/api/admin/restaurants/${r.id}/restore`, { body: {}, token });
+      await api(`/api/admin/restaurants/${restoring.id}/restore`, { body: {}, token });
+      setRestoring(null);
       await load();
     } finally {
       setBusyId(null);
@@ -139,30 +164,33 @@ function View() {
     ['suspended', 'Suspensos', counts?.suspended],
     ...(canDelete ? [['deleted', 'Excluídos', counts?.deleted] as [RestaurantListStatus, string, number | undefined]] : []),
   ];
-  const first = data && data.total ? (data.page - 1) * data.pageSize + 1 : 0;
-  const last = data ? Math.min(data.page * data.pageSize, data.total) : 0;
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const filtered = !!(filters.q || filters.status || filters.dueSoon);
 
   const status = (r: RestaurantListItem) => {
     const s = STATE[r.subscription.state];
     return <Badge tone={s.tone} dot>{s.label}</Badge>;
   };
+  /** Opens the public menu without leaving the list. */
+  const menuLink = (r: RestaurantListItem) => (
+    <a href={`/${r.slug}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Abrir o cardápio de ${r.name}`} title="Abrir cardápio" className="grid h-9 w-9 shrink-0 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand">
+      <ExternalLink size={16} />
+    </a>
+  );
   const deletedActions = (r: RestaurantListItem) => (
     <span className="flex flex-wrap justify-end gap-1">
-      <Button variant="ghost" disabled={busyId === r.id} onClick={() => restore(r)}><ArchiveRestore size={15} /> Restaurar</Button>
+      <Button variant="ghost" disabled={busyId === r.id} onClick={() => setRestoring(r)}><ArchiveRestore size={15} /> Restaurar</Button>
       <Button variant="ghost" disabled={busyId === r.id} onClick={() => exportData(r)}><Download size={15} /> Exportar</Button>
     </span>
   );
 
   return (
     <>
-      <PageHeader title="Restaurantes" actions={can('restaurants.create') && <Button onClick={() => { setError(null); setOpen(true); }}><Plus size={17} /> Novo restaurante</Button>} />
+      <PageHeader title="Restaurantes" actions={can('restaurants.create') && <Button onClick={openCreate}><Plus size={17} /> Novo restaurante</Button>} />
 
       <div className="mb-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
-            <Input icon={<Search size={17} />} type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome, link ou gerente" aria-label="Buscar restaurantes" />
+            <Input icon={<Search size={17} />} type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por nome, link ou responsável" aria-label="Buscar restaurantes" />
           </div>
           <select value={filters.sort} onChange={(e) => setFilters({ sort: e.target.value })} aria-label="Ordenar" className="sm:!w-56">
             {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -192,7 +220,7 @@ function View() {
         filtered ? (
           <EmptyState icon={Search} title="Nada encontrado" action={<Button variant="ghost" onClick={() => { setSearch(''); setFilters({ q: '', status: '', dueSoon: false }); }}>Limpar filtros</Button>}>Nenhum restaurante com esses filtros.</EmptyState>
         ) : (
-          <EmptyState icon={Building2} title="Nenhum restaurante ainda" action={can('restaurants.create') && <Button onClick={() => setOpen(true)}>Cadastrar restaurante</Button>}>O administrador do restaurante é criado junto com o cadastro.</EmptyState>
+          <EmptyState icon={Building2} title="Nenhum restaurante ainda" action={can('restaurants.create') && <Button onClick={openCreate}>Cadastrar restaurante</Button>}>O titular do restaurante é criado junto com o cadastro.</EmptyState>
         )
       )}
 
@@ -214,9 +242,10 @@ function View() {
                     ]
                   : [
                       { key: 'n', header: 'Restaurante', cell: (r) => <span className="block min-w-0"><span className="block truncate font-semibold">{r.name}</span><span className="text-xs text-muted">/{r.slug}</span></span> },
-                      { key: 'g', header: 'Gerente', cell: (r) => <span className="block truncate text-muted">{r.managerName}</span> },
+                      { key: 'g', header: 'Responsável', cell: (r) => <span className="block truncate text-muted">{r.managerName}</span> },
                       { key: 'd', header: 'Vencimento', cell: (r) => <span className="tabular-nums">{day(r.dueDate)}</span> },
                       { key: 'st', header: 'Situação', align: 'right', cell: status },
+                      { key: 'm', header: '', align: 'right', cell: menuLink },
                     ]
               }
             />
@@ -231,41 +260,55 @@ function View() {
                     <div className="mt-2">{deletedActions(r)}</div>
                   </div>
                 ) : (
-                  <button onClick={() => router.push(`/admin/restaurants/${r.id}`)} className="surface flex w-full items-center justify-between gap-3 p-4 text-left">
-                    <span className="min-w-0">
-                      <strong className="block truncate">{r.name}</strong>
-                      <span className="block truncate text-xs text-muted">/{r.slug} · vence {day(r.dueDate)}</span>
-                    </span>
-                    {status(r)}
-                  </button>
+                  <div className="surface flex items-center gap-1 p-2 pl-4">
+                    <button onClick={() => router.push(`/admin/restaurants/${r.id}`)} className="flex min-w-0 flex-1 items-center justify-between gap-3 py-2 text-left">
+                      <span className="min-w-0">
+                        <strong className="block truncate">{r.name}</strong>
+                        <span className="block truncate text-xs text-muted">/{r.slug} · vence {day(r.dueDate)}</span>
+                      </span>
+                      {status(r)}
+                    </button>
+                    {menuLink(r)}
+                  </div>
                 )}
               </li>
             ))}
           </ul>
-          <nav className="mt-4 flex items-center justify-between gap-3 text-sm text-muted" aria-label="Páginas">
-            <span className="tabular-nums">{first}–{last} de {data.total}</span>
-            <span className="flex gap-2">
-              <Button variant="ghost" disabled={data.page <= 1} onClick={() => setFilters({ page: data.page - 1 })} aria-label="Página anterior"><ChevronLeft size={16} /> Anterior</Button>
-              <Button variant="ghost" disabled={data.page >= pages} onClick={() => setFilters({ page: data.page + 1 })} aria-label="Próxima página">Próxima <ChevronRight size={16} /></Button>
-            </span>
-          </nav>
+          <Pagination className="mt-4" page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => setFilters({ page })} />
         </>
       )}
+
+      <ConfirmModal open={!!restoring} title={`Restaurar ${restoring?.name ?? ''}?`} confirmLabel="Restaurar" loading={busyId === restoring?.id} onConfirm={restore} onClose={() => setRestoring(null)}>
+        <p>O restaurante volta para a lista como <strong>suspenso</strong>: o cardápio volta ao ar, mas a equipe continua sem acesso até você reativar.</p>
+      </ConfirmModal>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Novo restaurante" sheet>
         <form onSubmit={create} className="space-y-4">
           {field('name', 'Nome do restaurante')}
           <div className="grid gap-4 sm:grid-cols-2">
-            {field('managerName', 'Nome do gerente')}
-            {field('managerContact', 'Contato do gerente', 'text', 'Telefone com DDD ou e-mail.')}
+            {field('managerName', 'Responsável pelo contrato', 'text', 'Também vira o titular do painel do restaurante.')}
+            {field('managerContact', 'Contato do responsável', 'text', 'Telefone com DDD ou e-mail.')}
           </div>
-          {field('dueDate', 'Primeiro vencimento', 'date')}
+          {plans?.length === 0 ? (
+            <p className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">Nenhum plano ativo. Crie um plano em <a href="/admin/plans" className="font-semibold underline">Planos</a> antes de cadastrar.</p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Plano">
+                <select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>
+                  {(plans ?? []).map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
+                </select>
+              </Field>
+              <Field label="Fim do teste" hint="Primeiro vencimento. O padrão é daqui a 14 dias.">
+                <DateInput value={form.initialDueDate} min={dayFromNow(0)} onChange={(v) => setForm({ ...form, initialDueDate: v })} required />
+              </Field>
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
-            {field('adminUsername', 'Usuário do administrador', 'text', 'Minúsculas, sem espaços.')}
-            {field('adminPassword', 'Senha do administrador', 'password', 'Pelo menos 8 caracteres.')}
+            {field('adminUsername', 'Usuário do titular', 'text', 'Minúsculas, sem espaços.')}
+            {field('adminPassword', 'Senha do titular', 'password', 'Pelo menos 8 caracteres.')}
           </div>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <div className="flex justify-end"><Button type="submit" loading={saving}>Cadastrar</Button></div>
+          <div className="flex justify-end"><Button type="submit" loading={saving} disabled={!form.planId}>Cadastrar</Button></div>
         </form>
       </Modal>
     </>
@@ -274,10 +317,8 @@ function View() {
 
 export default function RestaurantsPage() {
   return (
-    <Shell>
-      <Suspense fallback={<SkeletonCards count={3} />}>
-        <View />
-      </Suspense>
-    </Shell>
+    <Suspense fallback={<SkeletonCards count={3} />}>
+      <View />
+    </Suspense>
   );
 }

@@ -1,11 +1,11 @@
 'use client';
 
-import { KeyRound, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
+import { KeyRound, Power, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { type Permission, PERMISSION_GROUPS, upgradePermissions, withRequired } from '@elo/core';
-import { Badge, Button, DataTable, EmptyState, ErrorState, Field, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
-import { Shell, useAdmin } from '../_components/shell';
+import { ActionMenu, Badge, Button, DataTable, EmptyState, ErrorState, Field, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { useAdmin } from '../../_components/shell';
 
 interface Member {
   id: string;
@@ -164,8 +164,9 @@ function View() {
         <DataTable
           rows={list}
           rowKey={(m) => m.id}
+          mobile="cards"
           columns={[
-            { key: 'u', header: 'Nome', cell: (m) => <span className="block min-w-0"><span className="block truncate font-semibold">{m.name}{m.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span><span className="block truncate text-xs text-muted">{m.username}</span></span> },
+            { key: 'u', header: 'Nome', mobile: 'title', cell: (m) => <span className="block min-w-0"><span className="block truncate font-semibold">{m.name}{m.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span><span className="block truncate text-xs text-muted">{m.username}</span></span> },
             {
               key: 'p',
               header: 'Permissões',
@@ -183,14 +184,23 @@ function View() {
               key: 'a',
               header: '',
               align: 'right',
+              mobile: 'actions',
               cell: (m) => {
                 const self = m.id === sub;
+                const own = self ? 'É a sua conta: peça a outra pessoa da equipe.' : null;
                 return (
-                  <span className="inline-flex flex-wrap justify-end gap-1">
-                    <Button variant="ghost" disabled={self} onClick={() => { setError(null); setEditPerms(upgradePermissions(m.permissions)); setEditing(m); }}><ShieldCheck size={16} /> Permissões</Button>
-                    <Button variant="ghost" onClick={() => { setError(null); setNewPassword(''); setResetting(m); }}><KeyRound size={16} /> Nova senha</Button>
-                    <Button variant="ghost" disabled={self} onClick={() => toggle(m)}>{m.active ? 'Desativar' : 'Ativar'}</Button>
-                    <Button variant="ghost" disabled={self} className="text-danger" aria-label={`Excluir ${m.name}`} onClick={() => { setError(null); setRemoving(m); }}><Trash2 size={15} /></Button>
+                  <span className="inline-flex items-center justify-end gap-1">
+                    <Button variant="ghost" disabled={self} title={own ?? undefined} onClick={() => { setError(null); setEditPerms(upgradePermissions(m.permissions)); setEditing(m); }}>
+                      <ShieldCheck size={16} /> <span className="hidden md:inline">Permissões</span>
+                    </Button>
+                    <ActionMenu
+                      title={m.name}
+                      items={[
+                        { label: 'Nova senha', icon: KeyRound, onSelect: () => { setError(null); setNewPassword(''); setResetting(m); } },
+                        { label: m.active ? 'Desativar acesso' : 'Reativar acesso', icon: Power, disabledReason: own, onSelect: () => void toggle(m) },
+                        { label: 'Excluir', icon: Trash2, danger: true, disabledReason: own, onSelect: () => { setError(null); setRemoving(m); } },
+                      ]}
+                    />
                   </span>
                 );
               },
@@ -241,9 +251,5 @@ function View() {
 }
 
 export default function TeamPage() {
-  return (
-    <Shell>
-      <View />
-    </Shell>
-  );
+  return <View />;
 }

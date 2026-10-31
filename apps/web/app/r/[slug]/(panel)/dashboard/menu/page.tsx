@@ -4,9 +4,9 @@ import { ChevronDown, ChevronUp, Copy, FolderPlus, ImageIcon, PackagePlus, Penci
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { formatBRL, parseCents, PRODUCT_TAG_LABEL, PRODUCT_TAGS, type CategoryView, type ProductTag, type ProductView } from '@elo/core';
-import { Badge, Button, EmptyState, ErrorState, Field, GlassCard, Input, Modal, MoneyInput, PageHeader, SkeletonCards, Stagger, StaggerItem, Switch } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
-import { ImagePicker } from '../../../../_components/image-picker';
+import { ActionMenu, Badge, Button, ConfirmModal, EmptyState, ErrorState, Field, GlassCard, Input, Modal, MoneyInput, PageHeader, SkeletonCards, Stagger, StaggerItem, Switch } from '@elo/ui';
+import { RequireRoles, useStaff } from '../../../_components/shell';
+import { ImagePicker } from '../../../../../_components/image-picker';
 import { fromDraft, OptionsEditor, toDraft, type DraftGroup } from './options-editor';
 
 const STEPS = ['Dados', 'Foto', 'Opções'] as const;
@@ -31,6 +31,7 @@ const ERRORS: Record<string, string> = {
 function View() {
   const { token } = useStaff();
   const [menu, setMenu] = useState<CategoryView[] | null>(null);
+  const [removingProduct, setRemovingProduct] = useState<ProductView | null>(null);
   const [failed, setFailed] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
   const [prodOpen, setProdOpen] = useState(false);
@@ -168,10 +169,15 @@ function View() {
               {c.name}
               <button aria-label={`Subir categoria ${c.name}`} disabled={ci === 0} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, -1)}><ChevronUp size={16} /></button>
               <button aria-label={`Descer categoria ${c.name}`} disabled={ci === (menu?.length ?? 1) - 1} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, 1)}><ChevronDown size={16} /></button>
-              <button aria-label={`Editar categoria ${c.name}`} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand" onClick={() => openCategory(c)}><Pencil size={15} /></button>
-              {c.products.length === 0 && (
-                <button aria-label={`Remover categoria ${c.name}`} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger" onClick={() => removeCategory(c)}><Trash2 size={15} /></button>
-              )}
+              <span className="text-base font-normal">
+                <ActionMenu
+                  title={`Categoria ${c.name}`}
+                  items={[
+                    { label: 'Editar categoria', icon: Pencil, onSelect: () => openCategory(c) },
+                    { label: 'Remover categoria', icon: Trash2, danger: true, disabledReason: c.products.length ? 'Remova ou mova os produtos dela antes.' : null, onSelect: () => removeCategory(c) },
+                  ]}
+                />
+              </span>
             </h2>
             {c.products.length === 0 && <p className="text-sm text-muted">Sem produtos.</p>}
             <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -200,9 +206,14 @@ function View() {
                         <span className="-mr-1.5 flex shrink-0">
                           <button aria-label={`Subir ${p.name}`} disabled={pi === 0} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, -1)}><ChevronUp size={16} /></button>
                           <button aria-label={`Descer ${p.name}`} disabled={pi === c.products.length - 1} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, 1)}><ChevronDown size={16} /></button>
-                          <button aria-label={`Duplicar ${p.name}`} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand" onClick={() => openProduct(p, true)}><Copy size={16} /></button>
-                          <button aria-label={`Editar ${p.name}`} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand" onClick={() => openProduct(p)}><Pencil size={16} /></button>
-                          <button aria-label={`Remover ${p.name}`} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger" onClick={() => guard(() => api(`/api/catalog/products/${p.id}`, { method: 'DELETE', token }))}><Trash2 size={16} /></button>
+                          <ActionMenu
+                            title={p.name}
+                            items={[
+                              { label: 'Editar', icon: Pencil, onSelect: () => openProduct(p) },
+                              { label: 'Duplicar', icon: Copy, onSelect: () => openProduct(p, true) },
+                              { label: 'Remover', icon: Trash2, danger: true, onSelect: () => setRemovingProduct(p) },
+                            ]}
+                          />
                         </span>
                       </div>
                     </div>
@@ -283,14 +294,29 @@ function View() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmModal
+        open={!!removingProduct}
+        title={`Remover ${removingProduct?.name ?? ''}?`}
+        confirmLabel="Remover"
+        danger
+        onConfirm={async () => {
+          const p = removingProduct;
+          setRemovingProduct(null);
+          if (p) await guard(() => api(`/api/catalog/products/${p.id}`, { method: 'DELETE', token }));
+        }}
+        onClose={() => setRemovingProduct(null)}
+      >
+        <p>O produto sai do cardápio dos clientes. Para tirar só por um tempo, use a chave "Disponível".</p>
+      </ConfirmModal>
     </>
   );
 }
 
 export default function MenuPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <View />
-    </Shell>
+    </RequireRoles>
   );
 }

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '@elo/client';
 import type { ReviewSummaryView } from '@elo/core';
 import { Button, EmptyState, ErrorState, GlassCard, PageHeader, SkeletonCards } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 function Stars({ value }: { value: number }) {
   return (
@@ -70,8 +70,8 @@ function Reviews() {
 
 export default function ReviewsPage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <Reviews />
-    </Shell>
+    </RequireRoles>
   );
 }

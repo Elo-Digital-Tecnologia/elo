@@ -45,7 +45,7 @@ export default function Login() {
   if (missing)
     return (
       <AuthLayout brandSub="Equipe">
-        <p className="text-sm text-muted">Este endereço não pertence a nenhum restaurante. Confira o link com o administrador.</p>
+        <p className="text-sm text-muted">Este endereço não pertence a nenhum restaurante. Confira o link com o titular do restaurante.</p>
       </AuthLayout>
     );
 

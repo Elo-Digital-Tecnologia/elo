@@ -2,10 +2,10 @@
 
 import { ChefHat, Clock, OctagonAlert, Undo2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, upsertOrder, useRealtime } from '@elo/client';
+import { api, ApiError, upsertOrder, useRealtime } from '@elo/client';
 import { nextOrderStatus, previousOrderStatus, type OrderStatus, type OrderView } from '@elo/core';
 import { AnimatePresence, Badge, Button, EmptyState, GlassCard, motion, PageHeader } from '@elo/ui';
-import { Shell, useStaff } from '../_components/shell';
+import { RequireRoles, useStaff } from '../../_components/shell';
 
 const NEXT_LABEL: Record<string, string> = {
   received: 'Marcar recebido',
@@ -33,7 +33,9 @@ const minutesSince = (iso: string, now: number) => Math.max(0, Math.floor((now -
 
 /** Tela da cozinha (pensada para TV): cards por ordem de chegada, mesa no canto superior direito. */
 function Board() {
-  const { token } = useStaff();
+  const { token, roles, impersonated } = useStaff();
+  // The order status belongs to the kitchen; anyone else (an administrator, Elo support) only watches.
+  const cooks = roles.includes('kitchen') && !impersonated;
   const now = useNow();
   const [orders, setOrders] = useState<OrderView[]>([]);
   const [alerts, setAlerts] = useState<Map<string, OrderView>>(new Map());
@@ -93,9 +95,15 @@ function Board() {
       const saved = await api<OrderView>(`/api/orders/${o.id}/${path}`, { method: 'PATCH', body, token });
       onOrder({ ...o, ...saved });
       return saved;
-    } catch {
-      // Another screen moved it first: show the current state instead of an error.
-      setError('O pedido mudou em outra tela. A lista foi atualizada.');
+    } catch (e) {
+      // A 409 means another screen moved it first: the list reloads to show where it is now.
+      setError(
+        e instanceof ApiError && e.status === 409
+          ? 'O pedido mudou em outra tela. A lista foi atualizada.'
+          : e instanceof ApiError && e.status === 403
+            ? 'Só quem tem o perfil Cozinha muda o status dos pedidos.'
+            : 'Não foi possível mudar o pedido. Tente de novo.',
+      );
       void load();
       return null;
     }
@@ -133,7 +141,7 @@ function Board() {
     <>
       <PageHeader
         title="Cozinha"
-       
+        description={cooks ? undefined : 'Só visualização: o status dos pedidos é mudado pela equipe com o perfil Cozinha.'}
         actions={
           <Badge tone="brand" dot>
             {visible.length} em andamento
@@ -183,14 +191,16 @@ function Board() {
                       </li>
                     ))}
                   </ul>
-                  <div className="mt-5 flex gap-2">
-                    {previousOrderStatus(o.status as OrderStatus) && (
-                      <Button variant="ghost" className="!px-4 !py-3.5" onClick={() => revert(o)} aria-label="Voltar um passo" title="Voltar um passo">
-                        <Undo2 size={18} /> Voltar
-                      </Button>
-                    )}
-                    {next && <Button className="min-w-0 flex-1 !py-3.5 text-base" onClick={() => advance(o)}>{NEXT_LABEL[next]}</Button>}
-                  </div>
+                  {cooks && (
+                    <div className="mt-5 flex gap-2">
+                      {previousOrderStatus(o.status as OrderStatus) && (
+                        <Button variant="ghost" className="!px-4 !py-3.5" onClick={() => revert(o)} aria-label="Voltar um passo" title="Voltar um passo">
+                          <Undo2 size={18} /> Voltar
+                        </Button>
+                      )}
+                      {next && <Button className="min-w-0 flex-1 !py-3.5 text-base" onClick={() => advance(o)}>{NEXT_LABEL[next]}</Button>}
+                    </div>
+                  )}
                 </GlassCard>
               </motion.div>
             );
@@ -220,8 +230,8 @@ function Board() {
 
 export default function KitchenPage() {
   return (
-    <Shell roles={['kitchen', 'restaurant_admin']}>
+    <RequireRoles roles={['kitchen', 'restaurant_admin', 'manager']}>
       <Board />
-    </Shell>
+    </RequireRoles>
   );
 }

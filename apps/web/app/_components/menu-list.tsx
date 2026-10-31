@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Search, Star, X } from 'lucide-react';
+import { Plus, Search, Star, UtensilsCrossed, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { formatBRL, PRODUCT_TAG_LABEL, type CategoryView, type ProductTag, type ProductView } from '@elo/core';
 import { Input, motion } from '@elo/ui';
@@ -56,7 +56,7 @@ export function Highlights({ menu, onPick }: { menu: CategoryView[]; onPick?: (p
           const body = (
             <>
               <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-brand/10">
-                {p.imageUrl ? <img src={p.imageUrl.startsWith('/api/media/') ? p.imageUrl.replace(/\.webp$/, '-sm.webp') : p.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : <div className="cover-fallback h-full w-full" aria-hidden />}
+                {p.imageUrl ? <img src={p.imageUrl.startsWith('/api/media/') ? p.imageUrl.replace(/\.webp$/, '-sm.webp') : p.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : <ProductPlaceholder className="h-full w-full" size={36} />}
               </div>
               <h3 className="mt-2 line-clamp-2 text-sm font-semibold leading-snug">{p.name}</h3>
               <p className="text-sm font-semibold text-brand">{formatBRL(p.priceCents)}</p>
@@ -114,6 +114,15 @@ export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
   );
 }
 
+/** Stand-in for a product without a photo, so every item keeps the same shape in the list. */
+export function ProductPlaceholder({ className = '', size = 28 }: { className?: string; size?: number }) {
+  return (
+    <div className={`grid place-items-center bg-brand/10 text-brand/60 ${className}`} aria-hidden>
+      <UtensilsCrossed size={size} strokeWidth={1.5} />
+    </div>
+  );
+}
+
 function Photo({ product }: { product: ProductView }) {
   // Banco de imagens: a lista usa a miniatura; links externos seguem como estão.
   const src = product.imageUrl!.startsWith('/api/media/') ? product.imageUrl!.replace(/\.webp$/, '-sm.webp') : product.imageUrl!;
@@ -133,14 +142,10 @@ function Row({ product, onPick }: { product: ProductView; onPick?: (p: ProductVi
           {formatBRL(product.priceCents)}
         </p>
       </div>
-      {product.imageUrl ? (
-        <div className="relative shrink-0">
-          <Photo product={product} />
-          {onPick && <span className="absolute bottom-1.5 right-1.5 grid h-8 w-8 place-items-center rounded-pill bg-brand text-brand-fg shadow-md" aria-hidden><Plus size={18} /></span>}
-        </div>
-      ) : (
-        onPick && <span className="grid h-9 w-9 shrink-0 place-items-center self-center rounded-pill bg-brand/12 text-brand" aria-hidden><Plus size={18} /></span>
-      )}
+      <div className="relative shrink-0">
+        {product.imageUrl ? <Photo product={product} /> : <ProductPlaceholder className="h-24 w-24 rounded-2xl" />}
+        {onPick && <span className="absolute bottom-1.5 right-1.5 grid h-8 w-8 place-items-center rounded-pill bg-brand text-brand-fg shadow-md" aria-hidden><Plus size={18} /></span>}
+      </div>
     </>
   );
   return onPick ? (

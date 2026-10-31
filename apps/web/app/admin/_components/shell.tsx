@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, LayoutDashboard, UsersRound } from 'lucide-react';
+import { BookOpen, Building2, LayoutDashboard, Layers, UsersRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useAuth, useServiceOrigin } from '@elo/client';
@@ -21,11 +21,12 @@ export const useAdmin = () => useContext(Ctx)!;
 const NAV: (NavItem & { perm?: Permission })[] = [
   { href: '/admin/overview', label: 'Visão geral', icon: LayoutDashboard },
   { href: '/admin/restaurants', label: 'Restaurantes', icon: Building2, perm: 'restaurants.view' },
+  { href: '/admin/plans', label: 'Planos', icon: Layers, perm: 'payments.view' },
   { href: '/admin/team', label: 'Equipe', icon: UsersRound, perm: 'team.manage' },
 ];
 
-/** Exige login de equipe Elo Digital; itens do menu seguem as permissões. */
-export function Shell({ children }: { children: ReactNode }) {
+/** Exige login de equipe Elo Digital; itens do menu seguem as permissões. Fica no layout e não remonta entre as abas. */
+export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { token, user, ready, setToken } = useAuth('admin');
   const apiOrigin = useServiceOrigin(3001, process.env.NEXT_PUBLIC_API_URL);
@@ -53,7 +54,7 @@ export function Shell({ children }: { children: ReactNode }) {
         nav={NAV.filter((n) => !n.perm || can(n.perm))}
         user={{ name: user.name ?? (isSuper ? 'Superadmin' : 'Equipe Elo'), role: isSuper ? 'Todas as permissões' : `${permissions.length} permissões` }}
         onLogout={() => setToken(null)}
-        footerLinks={[{ label: 'Documentação da API', href: `${apiOrigin}/docs` }]}
+        links={[{ href: `${apiOrigin}/docs`, label: 'Documentação da API', icon: BookOpen, external: true }]}
       >
         {children}
       </AppShell>

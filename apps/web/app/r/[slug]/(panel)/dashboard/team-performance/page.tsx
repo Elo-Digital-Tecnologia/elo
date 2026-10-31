@@ -3,9 +3,9 @@
 import { BellRing, DoorOpen, Timer, Trophy } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@elo/client';
-import { formatDuration, ROLE_LABEL, type StaffPerformanceRow, type StaffReportView } from '@elo/core';
+import { formatDuration, type StaffPerformanceRow, type StaffReportView } from '@elo/core';
 import { Badge, BarList, Button, DataTable, EmptyState, ErrorState, GlassCard, PageHeader, SkeletonCards, Stagger, StaggerItem, Stat } from '@elo/ui';
-import { Shell, useStaff } from '../../_components/shell';
+import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const ymd = (d: Date) => d.toLocaleDateString('sv-SE');
 const daysAgo = (n: number) => ymd(new Date(Date.now() - n * 86_400_000));
@@ -67,17 +67,16 @@ function Performance() {
     return list;
   }, [data, sort]);
 
-  // Kitchen and cashier have no service numbers: they only show up here with recorded activity.
-  const active = rows.filter((r) => total(r) > 0 || r.roles.includes('waiter'));
-  const calls = active.reduce((n, r) => n + r.callsAnswered, 0);
-  const opened = active.reduce((n, r) => n + r.tablesOpened, 0);
-  const callWait = weighted(active, (r) => r.avgCallSeconds, (r) => r.callsAnswered);
-  const openWait = weighted(active, (r) => r.avgOpenSeconds, (r) => r.tablesOpened);
+  const calls = rows.reduce((n, r) => n + r.callsAnswered, 0);
+  const opened = rows.reduce((n, r) => n + r.tablesOpened, 0);
+  const callWait = weighted(rows, (r) => r.avgCallSeconds, (r) => r.callsAnswered);
+  const openWait = weighted(rows, (r) => r.avgOpenSeconds, (r) => r.tablesOpened);
 
   return (
     <>
       <PageHeader
-        title="Desempenho da equipe"
+        title="Desempenho dos garçons"
+        description="Chamados atendidos e mesas abertas e fechadas por cada garçom."
         actions={
           <div className="surface flex !rounded-pill p-1 text-sm font-semibold" role="tablist" aria-label="Período">
             {PERIODS.map(([label, n]) => (
@@ -99,30 +98,39 @@ function Performance() {
             <StaggerItem><Stat label="Espera pela abertura" value={openWait ?? 0} format={() => formatDuration(openWait)} icon={Timer} hint="Média do pedido do cliente até a validação" /></StaggerItem>
           </Stagger>
 
-          {!active.some((r) => total(r) > 0) ? (
-            <EmptyState icon={Trophy} title="Sem atendimentos no período">Chamados, aberturas e fechamentos de mesa aparecem aqui.</EmptyState>
+          {!rows.some((r) => total(r) > 0) ? (
+            <EmptyState icon={Trophy} title="Sem atendimentos no período">Chamados, aberturas e fechamentos de mesa dos garçons aparecem aqui.</EmptyState>
           ) : (
-            <div className="grid gap-5 xl:grid-cols-[1fr_20rem]">
-              <div className="min-w-0">
-                <div className="mb-3 flex items-center justify-end gap-2 text-sm">
+            <div className="space-y-6">
+              {calls > 0 && (
+                <GlassCard className="p-5">
+                  <h2 className="mb-4 font-semibold">Chamados por pessoa</h2>
+                  <BarList data={rows.filter((r) => r.callsAnswered > 0).map((r) => ({ label: r.name, value: r.callsAnswered }))} />
+                </GlassCard>
+              )}
+              <section className="min-w-0">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                  <h2 className="text-lg font-semibold">Atendimentos por garçom</h2>
+                  <span className="flex items-center gap-2">
                   <label htmlFor="sort" className="text-muted">Ordenar por</label>
                   <select id="sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="!w-auto">
                     {SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                   </select>
+                  </span>
                 </div>
                 <DataTable
                   rows={rows}
                   rowKey={(r) => r.id}
+                  mobile="cards"
                   columns={[
                     {
                       key: 'n',
-                      header: 'Pessoa',
+                      header: 'Garçom',
+                      mobile: 'title',
                       cell: (r) => (
-                        <span className="block min-w-0">
-                          <span className="block truncate font-semibold">{r.name}</span>
-                          <span className="mt-1 flex flex-wrap gap-1">
-                            {r.archived ? <Badge>Excluído</Badge> : r.roles.map((x) => <Badge key={x} tone="brand">{ROLE_LABEL[x] ?? x}</Badge>)}
-                          </span>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-semibold">{r.name}</span>
+                          {r.archived && <Badge>Excluído</Badge>}
                         </span>
                       ),
                     },
@@ -133,12 +141,7 @@ function Performance() {
                     { key: 'f', header: 'Fechadas', align: 'right', cell: (r) => <span className="tabular-nums">{r.tablesClosed}</span> },
                   ]}
                 />
-              </div>
-              <GlassCard className="h-fit p-5">
-                <h2 className="mb-4 font-semibold">Chamados por pessoa</h2>
-                <BarList data={active.filter((r) => r.callsAnswered > 0).map((r) => ({ label: r.name, value: r.callsAnswered }))} />
-                {calls === 0 && <p className="text-sm text-muted">Nenhum chamado atendido no período.</p>}
-              </GlassCard>
+              </section>
             </div>
           )}
         </>
@@ -149,8 +152,8 @@ function Performance() {
 
 export default function TeamPerformancePage() {
   return (
-    <Shell roles={['restaurant_admin']}>
+    <RequireRoles roles={['restaurant_admin', 'manager']}>
       <Performance />
-    </Shell>
+    </RequireRoles>
   );
 }
