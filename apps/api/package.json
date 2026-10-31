@@ -10,7 +10,9 @@
     "test": "jest",
     "migration:run": "typeorm migration:run -d dist/database/data-source.js",
     "migration:generate": "pnpm build && typeorm migration:generate -d dist/database/data-source.js",
-    "vapid:generate": "node scripts/vapid-generate.mjs"
+    "vapid:generate": "node scripts/vapid-generate.mjs",
+    "db:test:prepare": "node scripts/test-db.mjs",
+    "db:seed": "node dist/database/seeds/demo.js"
   },
   "dependencies": {
     "@elo/core": "workspace:*",
