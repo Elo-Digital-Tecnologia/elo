@@ -46,7 +46,7 @@ export function OrderTracker({ order, onCancel }: { order: OrderView; onCancel: 
             const Icon = s.icon;
             return (
               <li key={s.status} className="relative flex flex-col items-center gap-2 text-center" aria-current={now ? 'step' : undefined}>
-                <span className={`relative grid h-10 w-10 place-items-center rounded-pill transition-colors duration-500 ${done || now ? 'btn-glass' : 'bg-leaf-100 text-muted'}`}>
+                <span className={`relative grid shrink-0 h-10 w-10 place-items-center rounded-pill transition-colors duration-500 ${done || now ? 'btn-glass' : 'bg-leaf-100 text-muted'}`}>
                   {done ? <Check size={18} /> : <Icon size={18} />}
                   {now && order.status !== 'ready' && <span className="absolute inset-0 animate-ping rounded-pill bg-brand/40" aria-hidden />}
                 </span>

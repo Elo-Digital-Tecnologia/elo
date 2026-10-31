@@ -97,7 +97,7 @@ export function ImagePicker({ token, value, onChange }: { token: string; value: 
         <div className="flex items-center gap-3 rounded-md border border-line/50 p-2">
           <img src={value} alt="" className="h-16 w-16 rounded-md object-cover" />
           <span className="min-w-0 flex-1 truncate text-sm text-muted">{external ? value : 'Foto escolhida'}</span>
-          <button type="button" aria-label="Tirar a foto do produto" onClick={() => onChange('')} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><X size={17} /></button>
+          <button type="button" aria-label="Tirar a foto do produto" onClick={() => onChange('')} className="grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><X size={17} /></button>
         </div>
       )}
 
@@ -111,7 +111,7 @@ export function ImagePicker({ token, value, onChange }: { token: string; value: 
               <button type="button" onClick={() => onChange(i.url)} aria-label={`Usar ${i.name}`} aria-pressed={value === i.url} className={`block aspect-square w-full overflow-hidden rounded-md border-2 transition ${value === i.url ? 'border-brand' : 'border-transparent hover:border-brand/50'}`}>
                 <img src={i.thumbUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
               </button>
-              <button type="button" aria-label={`Apagar ${i.name}`} onClick={() => remove(i)} className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-pill bg-black/55 text-white opacity-0 transition focus:opacity-100 group-hover:opacity-100"><Trash2 size={14} /></button>
+              <button type="button" aria-label={`Apagar ${i.name}`} onClick={() => remove(i)} className="absolute right-1 top-1 grid shrink-0 h-7 w-7 place-items-center rounded-pill bg-black/55 text-white opacity-0 transition focus:opacity-100 group-hover:opacity-100"><Trash2 size={14} /></button>
             </li>
           ))}
         </ul>

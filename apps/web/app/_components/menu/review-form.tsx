@@ -54,7 +54,7 @@ export function ReviewForm() {
               setStars(n);
               setSent(false);
             }}
-            className="grid h-11 w-11 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10"
+            className="grid shrink-0 h-11 w-11 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10"
           >
             <Star size={28} className={n <= stars ? 'fill-accent text-accent' : 'text-line'} />
           </button>

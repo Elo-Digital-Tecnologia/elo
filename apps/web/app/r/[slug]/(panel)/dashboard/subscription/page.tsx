@@ -26,7 +26,7 @@ function View() {
       <div className="grid gap-5 lg:grid-cols-5">
         <GlassCard strong className="flex flex-col gap-4 p-7 lg:col-span-3">
           <div className="flex items-center gap-4">
-            <span className={`grid h-14 w-14 place-items-center rounded-pill ${s.state === 'active' ? 'bg-success/15 text-success' : s.state === 'grace' ? 'bg-warning/20 text-warning' : 'bg-danger/15 text-danger'}`}><Icon size={28} /></span>
+            <span className={`grid shrink-0 h-14 w-14 place-items-center rounded-pill ${s.state === 'active' ? 'bg-success/15 text-success' : s.state === 'grace' ? 'bg-warning/20 text-warning' : 'bg-danger/15 text-danger'}`}><Icon size={28} /></span>
             <div>
               <Badge tone={st.tone} dot>{st.label}</Badge>
               <p className="mt-2 text-muted">{st.text}</p>

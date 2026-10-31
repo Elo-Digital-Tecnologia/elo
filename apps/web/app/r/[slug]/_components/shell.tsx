@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Clock,
   ChefHat,
+  ClipboardList,
   CreditCard,
   KeyRound,
   Star,
@@ -49,6 +50,10 @@ interface StaffCtx {
   me: Me;
   /** Atualiza os dados do restaurante após editar as configurações. */
   setMe: (me: Me) => void;
+  /** Signed-in member's name and profile photo, shown in the header. */
+  name: string;
+  avatarUrl: string | null;
+  setAvatarUrl: (url: string | null) => void;
 }
 
 const Ctx = createContext<StaffCtx | null>(null);
@@ -84,6 +89,7 @@ function navFor(base: string, roles: string[], impersonated: boolean): NavItem[]
     item('/waiter', 'Salão', ConciergeBell, [...leads, 'waiter']),
     item('/cashier', 'Caixa', Receipt, [...leads, 'waiter', 'cashier']),
     item('/kitchen', 'Cozinha', ChefHat, [...leads, 'kitchen']),
+    item('/orders', 'Pedidos', ClipboardList, [...leads, 'waiter', 'cashier', 'kitchen']),
     item('/dashboard/staff', 'Equipe', Users, leads),
     item('/dashboard/hours', 'Funcionamento', CalendarClock, leads),
     item('/dashboard/settings', 'Configurações', Settings, admin),
@@ -110,6 +116,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
   const leavingTo = useRef<string | null>(null);
   const { token, user, ready, setToken } = useAuth(slug);
   const [me, setMe] = useState<Me | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [suspended, setSuspended] = useState(false);
   const [failed, setFailed] = useState(false);
   const live = useRealtimeStatus(token, !!me);
@@ -125,12 +132,18 @@ export function PanelShell({ children }: { children: ReactNode }) {
         api<{ accessToken: string }>('/api/auth/refresh', { method: 'POST', body: {}, token })
           .then((res) => setToken(res.accessToken))
           .catch(() => undefined);
+        api<{ avatarUrl: string | null }>('/api/me', { token }).then((r) => setAvatarUrl(r.avatarUrl)).catch(() => undefined);
       },
       'restaurant.availability': (a: Availability) => setMe((m) => (m ? { ...m, availability: a } : m)),
     },
     token,
     !!me,
   );
+
+  useEffect(() => {
+    if (!token || user?.impersonatedBy) return setAvatarUrl(null);
+    api<{ avatarUrl: string | null }>('/api/me', { token }).then((r) => setAvatarUrl(r.avatarUrl)).catch(() => undefined);
+  }, [token, user?.impersonatedBy]);
 
   // Opening hours change on their own: fetch the status again right after the next change.
   const changesAt = me?.availability.changesAt;
@@ -181,7 +194,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
       <main className="relative grid min-h-dvh place-items-center p-4">
         <Aurora />
         <GlassCard strong className="w-full max-w-md space-y-4 p-8 text-center">
-          <span className="mx-auto grid h-16 w-16 place-items-center rounded-pill bg-warning/20 text-warning">
+          <span className="mx-auto grid shrink-0 h-16 w-16 place-items-center rounded-pill bg-warning/20 text-warning">
             <ShieldAlert size={30} />
           </span>
           <h1 className="text-2xl font-bold">Acesso suspenso</h1>
@@ -217,11 +230,11 @@ export function PanelShell({ children }: { children: ReactNode }) {
 
   const warn = me.subscription.warning;
   return (
-    <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe }}>
+    <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe, name: user.name ?? me.name, avatarUrl, setAvatarUrl }}>
       <AppShell
         brandSub={me.name}
         nav={navFor(base, user.roles, !!user.impersonatedBy)}
-        user={{ name: user.name ?? me.name, role: user.impersonatedBy ? 'Suporte Elo Digital' : rolesLabel(user.roles) }}
+        user={{ name: user.name ?? me.name, role: user.impersonatedBy ? 'Suporte Elo Digital' : rolesLabel(user.roles), avatarUrl }}
         onLogout={() => {
           // This device stops getting the team's alerts before the next person signs in.
           void alerts.leave();

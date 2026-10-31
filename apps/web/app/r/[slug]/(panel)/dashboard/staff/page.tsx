@@ -4,7 +4,8 @@ import { Crown, KeyRound, Pencil, Power, Trash2, UserPlus, Users } from 'lucide-
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { formatDuration, ROLE_LABEL, type Role, RestaurantStaffRoles, type StaffPerformanceRow, type StaffReportView } from '@elo/core';
-import { ActionMenu, Badge, Button, DataTable, EmptyState, Field, Input, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { ActionMenu, Avatar, Badge, Button, DataTable, EmptyState, Field, Input, Modal, PageHeader, PasswordInput, SkeletonCards } from '@elo/ui';
+import { AvatarPicker } from '../../../../../_components/avatar-picker';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 interface Staff {
@@ -14,6 +15,7 @@ interface Staff {
   displayName: string | null;
   roles: Role[];
   active: boolean;
+  avatarUrl: string | null;
 }
 
 interface FormState {
@@ -52,7 +54,7 @@ const leads = (roles: readonly Role[]) => roles.some((r) => LEADS.includes(r));
 const messageOf = (e: unknown, fallback: string) => (e instanceof ApiError ? ERRORS[e.code] ?? fallback : fallback);
 
 function View() {
-  const { token, sub, roles: myRoles, impersonated } = useStaff();
+  const { token, sub, roles: myRoles, impersonated, setAvatarUrl } = useStaff();
   /** The owner (and Elo support) handles managers; a manager only the rest of the team. */
   const isOwner = myRoles.includes('restaurant_admin') && !impersonated;
   const isAdmin = impersonated || isOwner;
@@ -204,9 +206,12 @@ function View() {
               header: 'Nome',
               mobile: 'title',
               cell: (u) => (
-                <button className="min-w-0 text-left" onClick={() => showStats(u)}>
-                  <span className="block truncate font-semibold hover:underline">{u.name}{u.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span>
-                  <span className="block truncate text-xs text-muted">{u.username}</span>
+                <button className="flex min-w-0 items-center gap-3 text-left" onClick={() => showStats(u)}>
+                  <Avatar name={u.name} url={u.avatarUrl} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold hover:underline">{u.name}{u.id === sub && <span className="ml-1.5 font-normal text-muted">(você)</span>}</span>
+                    <span className="block truncate text-xs text-muted">{u.username}</span>
+                  </span>
                 </button>
               ),
             },
@@ -245,6 +250,19 @@ function View() {
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={isNew ? 'Nova pessoa' : `Editar ${target?.name ?? ''}`} sheet>
         <form onSubmit={save} className="space-y-4">
+          {target && (
+            <AvatarPicker
+              name={target.name}
+              url={target.avatarUrl}
+              endpoint={editingSelf ? '/api/me/avatar' : `/api/staff/${target.id}/avatar`}
+              token={token}
+              onChange={(url) => {
+                setEditing({ ...target, avatarUrl: url });
+                setList((l) => l?.map((m) => (m.id === target.id ? { ...m, avatarUrl: url } : m)) ?? l);
+                if (editingSelf) setAvatarUrl(url);
+              }}
+            />
+          )}
           <Field label="Nome completo"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} minLength={2} maxLength={80} required autoFocus /></Field>
           <Field label="Nome para o cliente" hint="Aparece na mesa, como em &quot;Ana vai até a sua mesa&quot;. Vazio usa o primeiro nome.">
             <Input value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} maxLength={30} placeholder={form.name.trim().split(/\s+/)[0] || 'Ana'} />

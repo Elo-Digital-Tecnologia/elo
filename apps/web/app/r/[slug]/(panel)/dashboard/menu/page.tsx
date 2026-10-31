@@ -167,8 +167,8 @@ function View() {
           <section key={c.id}>
             <h2 className="mb-3 flex items-center gap-1 text-2xl font-bold">
               {c.name}
-              <button aria-label={`Subir categoria ${c.name}`} disabled={ci === 0} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, -1)}><ChevronUp size={16} /></button>
-              <button aria-label={`Descer categoria ${c.name}`} disabled={ci === (menu?.length ?? 1) - 1} className="grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, 1)}><ChevronDown size={16} /></button>
+              <button aria-label={`Subir categoria ${c.name}`} disabled={ci === 0} className="grid shrink-0 h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, -1)}><ChevronUp size={16} /></button>
+              <button aria-label={`Descer categoria ${c.name}`} disabled={ci === (menu?.length ?? 1) - 1} className="grid shrink-0 h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveCategory(c.id, 1)}><ChevronDown size={16} /></button>
               <span className="text-base font-normal">
                 <ActionMenu
                   title={`Categoria ${c.name}`}
@@ -204,8 +204,8 @@ function View() {
                           {p.available ? 'Disponível' : 'Esgotado'}
                         </label>
                         <span className="-mr-1.5 flex shrink-0">
-                          <button aria-label={`Subir ${p.name}`} disabled={pi === 0} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, -1)}><ChevronUp size={16} /></button>
-                          <button aria-label={`Descer ${p.name}`} disabled={pi === c.products.length - 1} className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, 1)}><ChevronDown size={16} /></button>
+                          <button aria-label={`Subir ${p.name}`} disabled={pi === 0} className="grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, -1)}><ChevronUp size={16} /></button>
+                          <button aria-label={`Descer ${p.name}`} disabled={pi === c.products.length - 1} className="grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand disabled:opacity-30" onClick={() => moveProduct(c, p.id, 1)}><ChevronDown size={16} /></button>
                           <ActionMenu
                             title={p.name}
                             items={[

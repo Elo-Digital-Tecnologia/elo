@@ -46,9 +46,9 @@ function Body({ product, onAdd, onClose }: { product: ProductView; onAdd: (line:
       footer={
         <div className="flex items-center gap-3">
           <div className="surface flex items-center !rounded-pill p-1">
-            <button aria-label="Menos" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
+            <button aria-label="Menos" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.max(1, q - 1))}><Minus size={17} /></button>
             <span className="w-8 text-center font-bold tabular-nums">{quantity}</span>
-            <button aria-label="Mais" className="grid h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
+            <button aria-label="Mais" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition active:scale-90 hover:bg-brand/10" onClick={() => setQuantity((q) => Math.min(50, q + 1))}><Plus size={17} /></button>
           </div>
           <Button className="flex-1 !py-3.5" disabled={missing.length > 0} onClick={() => onAdd({ product, quantity, notes: notes.trim(), options: chosen })}>
             {missing.length > 0 ? `Escolha: ${missing[0].name}` : `Adicionar · ${formatBRL(unit * quantity)}`}

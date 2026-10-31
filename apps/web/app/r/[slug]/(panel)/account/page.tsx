@@ -5,10 +5,11 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { Button, Field, GlassCard, PageHeader } from '@elo/ui';
+import { AvatarPicker } from '../../../../_components/avatar-picker';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 function Account() {
-  const { token, impersonated } = useStaff();
+  const { token, impersonated, name, avatarUrl, setAvatarUrl } = useStaff();
   const router = useRouter();
   const { slug } = useParams<{ slug: string }>();
   // Elo support enters with a temporary pass: there is no account of its own to change here.
@@ -39,9 +40,15 @@ function Account() {
   };
 
   return (
-    <>
+    <div className="mx-auto max-w-xl">
       <PageHeader title="Minha conta" description="Se esqueceu a senha, peça ao titular ou a um gerente para redefinir." />
-      <GlassCard strong className="max-w-md p-6">
+      <div className="space-y-5">
+      <GlassCard strong className="space-y-4 p-6">
+        <h2 className="font-semibold">Foto de perfil</h2>
+        <AvatarPicker name={name} url={avatarUrl} endpoint="/api/me/avatar" token={token} onChange={setAvatarUrl} />
+      </GlassCard>
+      <GlassCard strong className="p-6">
+        <h2 className="mb-4 font-semibold">Senha</h2>
         <form onSubmit={submit} className="space-y-4">
           <Field label="Senha atual"><input type="password" autoComplete="current-password" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} required /></Field>
           <Field label="Nova senha" hint="Pelo menos 8 caracteres."><input type="password" autoComplete="new-password" minLength={8} value={form.next} onChange={(e) => setForm({ ...form, next: e.target.value })} required /></Field>
@@ -50,7 +57,8 @@ function Account() {
           <Button type="submit" loading={loading}><KeyRound size={16} /> Alterar senha</Button>
         </form>
       </GlassCard>
-    </>
+      </div>
+    </div>
   );
 }
 

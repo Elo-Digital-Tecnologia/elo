@@ -57,7 +57,7 @@ function TableCard({ table, slug, token, onRemove }: { table: TableView; slug: s
       <div className="flex w-full flex-wrap justify-center gap-2">
         <Button variant="soft" onClick={copy}>{copied ? <Check size={16} /> : <Copy size={16} />} {copied ? 'Copiado' : 'Copiar link'}</Button>
         {src && <a href={src} download={`${table.name}.png`} className="glass inline-flex items-center gap-2 !rounded-pill px-5 py-2.5 text-sm font-semibold transition hover:text-brand"><Download size={16} /> Baixar</a>}
-        <button aria-label={`Remover ${table.name}`} onClick={onRemove} className="grid h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><Trash2 size={17} /></button>
+        <button aria-label={`Remover ${table.name}`} onClick={onRemove} className="grid shrink-0 h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><Trash2 size={17} /></button>
       </div>
     </GlassCard>
   );

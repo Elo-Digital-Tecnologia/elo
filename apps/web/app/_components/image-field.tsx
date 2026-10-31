@@ -18,7 +18,7 @@ export function ImageField({ label, token, value, onChange, wide = false }: { la
         </div>
         <Button type="button" variant="soft" onClick={() => setOpen(true)}>{value ? 'Trocar' : 'Escolher imagem'}</Button>
         {value && (
-          <button type="button" aria-label={`Tirar ${label.toLowerCase()}`} onClick={() => onChange('')} className="grid h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><X size={17} /></button>
+          <button type="button" aria-label={`Tirar ${label.toLowerCase()}`} onClick={() => onChange('')} className="grid shrink-0 h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><X size={17} /></button>
         )}
       </div>
       <Sheet open={open} onClose={() => setOpen(false)} title={label}>

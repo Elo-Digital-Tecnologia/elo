@@ -50,7 +50,7 @@ function View() {
         <GlassCard className="p-6 lg:col-span-2">
           <h2 className="mb-4 text-lg font-semibold">Situação das assinaturas</h2>
           {o.total ? (
-            <Donut data={[{ label: 'Ativas', value: o.active }, { label: 'Em tolerância', value: o.grace }, { label: 'Suspensas', value: o.suspended }]} center={{ value: String(o.total), label: 'restaurantes' }} />
+            <Donut data={[{ label: 'Ativas', value: o.active, color: 'hsl(var(--elo-success))' }, { label: 'Em tolerância', value: o.grace, color: 'hsl(var(--elo-warning))' }, { label: 'Suspensas', value: o.suspended, color: 'hsl(var(--elo-danger))' }]} center={{ value: String(o.total), label: 'restaurantes' }} />
           ) : (
             <p className="text-sm text-muted">Nenhum restaurante cadastrado.</p>
           )}

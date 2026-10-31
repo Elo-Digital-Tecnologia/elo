@@ -94,7 +94,7 @@ export default function Home() {
             </motion.p>
             <motion.div className="mt-8 flex flex-wrap items-center gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}>
               <GlassCard className="inline-flex items-center gap-3 !rounded-pill py-2.5 pl-3 pr-6">
-                <span className="btn-glass grid h-10 w-10 place-items-center rounded-pill"><QrCode size={20} /></span>
+                <span className="btn-glass grid shrink-0 h-10 w-10 place-items-center rounded-pill"><QrCode size={20} /></span>
                 <span className="text-sm leading-tight"><b>Está em uma mesa?</b><br /><span className="text-muted">Leia o QR Code ou encoste o celular na tag.</span></span>
               </GlassCard>
             </motion.div>
@@ -109,7 +109,7 @@ export default function Home() {
               <StaggerItem key={s.title}>
                 <GlassCard lift className="relative h-full p-6">
                   <span className="font-display text-6xl font-extrabold text-brand/25">{i + 1}</span>
-                  <span className="btn-glass mb-4 mt-2 grid h-12 w-12 place-items-center rounded-pill"><s.icon size={22} /></span>
+                  <span className="btn-glass mb-4 mt-2 grid shrink-0 h-12 w-12 place-items-center rounded-pill"><s.icon size={22} /></span>
                   <h3 className="text-xl font-bold">{s.title}</h3>
                   <p className="mt-1.5 text-sm text-muted">{s.text}</p>
                 </GlassCard>

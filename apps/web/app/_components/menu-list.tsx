@@ -22,7 +22,7 @@ export function MenuSearch({ value, onChange }: { value: string; onChange: (v: s
     <div className="relative">
       <Input icon={<Search size={18} />} type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder="Buscar no cardápio" aria-label="Buscar no cardápio" className="!rounded-pill" />
       {value && (
-        <button type="button" aria-label="Limpar busca" onClick={() => onChange('')} className="absolute inset-y-0 right-2 my-auto grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg">
+        <button type="button" aria-label="Limpar busca" onClick={() => onChange('')} className="absolute inset-y-0 right-2 my-auto grid shrink-0 h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg">
           <X size={16} />
         </button>
       )}
@@ -144,7 +144,7 @@ function Row({ product, onPick }: { product: ProductView; onPick?: (p: ProductVi
       </div>
       <div className="relative shrink-0">
         {product.imageUrl ? <Photo product={product} /> : <ProductPlaceholder className="h-24 w-24 rounded-2xl" />}
-        {onPick && <span className="absolute bottom-1.5 right-1.5 grid h-8 w-8 place-items-center rounded-pill bg-brand text-brand-fg shadow-md" aria-hidden><Plus size={18} /></span>}
+        {onPick && <span className="absolute bottom-1.5 right-1.5 grid shrink-0 h-8 w-8 place-items-center rounded-pill bg-brand text-brand-fg shadow-md" aria-hidden><Plus size={18} /></span>}
       </div>
     </>
   );

@@ -107,9 +107,9 @@ function Settings() {
   };
 
   return (
-    <>
+    <div className="mx-auto max-w-3xl">
       <PageHeader title="Configurações" />
-      <form onSubmit={submit} className="max-w-2xl space-y-5">
+      <form onSubmit={submit} className="space-y-5">
         <Section title="Identidade" hint="Aparece no topo do cardápio dos clientes.">
           <Field label="Nome do restaurante" error={errors.name}><Input value={form.name} onChange={(e) => set({ name: e.target.value })} invalid={!!errors.name} minLength={2} maxLength={120} required /></Field>
           <Field label="Endereço do cardápio" hint="Não muda: já está nos QR Codes e nas tags. Só a Elo Digital altera.">
@@ -192,7 +192,7 @@ function Settings() {
         {msg && <p role="alert" className={`text-sm ${msg.ok ? 'text-success' : 'text-danger'}`}>{msg.text}</p>}
         <Button type="submit" loading={loading}><Save size={16} /> Salvar alterações</Button>
       </form>
-    </>
+    </div>
   );
 }
 

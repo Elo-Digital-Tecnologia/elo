@@ -52,7 +52,7 @@ export function OptionsEditor({ value, onChange }: { value: DraftGroup[]; onChan
             <div className="flex-1">
               <Field label="Nome do grupo"><Input value={g.name} onChange={(e) => patch(i, { name: e.target.value })} placeholder="Tamanho" maxLength={80} /></Field>
             </div>
-            <button type="button" aria-label="Remover grupo" onClick={() => onChange(value.filter((_, k) => k !== i))} className="mb-1 grid h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><Trash2 size={17} /></button>
+            <button type="button" aria-label="Remover grupo" onClick={() => onChange(value.filter((_, k) => k !== i))} className="mb-1 grid shrink-0 h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"><Trash2 size={17} /></button>
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <label className="flex items-center gap-2.5"><Switch label="Obrigatório" checked={g.required} onChange={(v) => patch(i, { required: v })} /> Obrigatório</label>

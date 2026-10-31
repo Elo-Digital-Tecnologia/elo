@@ -395,11 +395,11 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                 <div className="mt-1 font-semibold tabular-nums text-brand">{formatBRL(lineUnit(l) * l.quantity)}</div>
               </div>
               <div className="surface flex items-center !rounded-pill p-0.5">
-                <button aria-label={l.quantity === 1 ? `Remover ${l.product.name}` : 'Menos'} className="grid h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => (l.quantity === 1 ? c.filter((_, i) => i !== idx) : c.map((x, i) => (i === idx ? { ...x, quantity: x.quantity - 1 } : x))))}>
+                <button aria-label={l.quantity === 1 ? `Remover ${l.product.name}` : 'Menos'} className="grid shrink-0 h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => (l.quantity === 1 ? c.filter((_, i) => i !== idx) : c.map((x, i) => (i === idx ? { ...x, quantity: x.quantity - 1 } : x))))}>
                   {l.quantity === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
                 </button>
                 <span className="w-6 text-center text-sm font-bold tabular-nums">{l.quantity}</span>
-                <button aria-label="Mais" className="grid h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => c.map((x, i) => (i === idx ? { ...x, quantity: Math.min(50, x.quantity + 1) } : x)))}><Plus size={15} /></button>
+                <button aria-label="Mais" className="grid shrink-0 h-8 w-8 place-items-center rounded-pill hover:bg-brand/10" onClick={() => setCart((c) => c.map((x, i) => (i === idx ? { ...x, quantity: Math.min(50, x.quantity + 1) } : x)))}><Plus size={15} /></button>
               </div>
             </li>
           ))}
