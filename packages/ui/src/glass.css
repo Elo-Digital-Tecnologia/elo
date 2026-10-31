@@ -8,6 +8,8 @@ html {
 
 body {
   overflow-x: clip;
+  /* Long words or links typed by people (reasons, notes) wrap instead of pushing the layout sideways. */
+  overflow-wrap: break-word;
   font-family: var(--elo-font-sans);
   background: hsl(var(--elo-bg));
   color: hsl(var(--elo-fg));
@@ -212,16 +214,18 @@ html input, html select, html textarea {
 }
 input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: hsl(var(--elo-brand) / 0.55); }
 input::placeholder, textarea::placeholder { color: hsl(var(--elo-fg-muted) / 0.75); }
+/* Fields mark focus with their own border and a soft halo, never the browser's (or the global) outline. */
+html input:focus-visible, html select:focus-visible, html textarea:focus-visible { outline: none; }
 input:focus, select:focus, textarea:focus {
-  border-color: hsl(var(--elo-brand));
-  box-shadow: 0 0 0 4px hsl(var(--elo-brand) / 0.18);
+  border-color: hsl(var(--elo-brand) / 0.85);
+  box-shadow: 0 0 0 3px hsl(var(--elo-brand) / 0.14);
   background: hsl(var(--elo-glass-hi) / 0.85);
 }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.6; cursor: not-allowed; background: hsl(var(--elo-bg-soft) / 0.6); }
 html textarea { resize: vertical; min-height: 5.5rem; line-height: 1.5; }
 input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] {
-  border-color: hsl(var(--elo-danger));
-  box-shadow: 0 0 0 4px hsl(var(--elo-danger) / 0.14);
+  border-color: hsl(var(--elo-danger) / 0.85);
+  box-shadow: 0 0 0 3px hsl(var(--elo-danger) / 0.12);
 }
 /* Seta própria no select, na cor do tema (currentColor via máscara). */
 html select {

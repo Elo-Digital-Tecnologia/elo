@@ -41,7 +41,7 @@ export function DataTable<T>({
           <li key={rowKey(row)}>
             <GlassCard className="p-4" onClick={onRowClick ? () => onRowClick(row) : undefined}>
               <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">{titled.map((c) => <div key={c.key}>{c.cell(row)}</div>)}</div>
+                <div className="min-w-0 flex-1 [overflow-wrap:anywhere]">{titled.map((c) => <div key={c.key}>{c.cell(row)}</div>)}</div>
                 {actions.map((c) => <div key={c.key} className="-mr-1 -mt-1 flex shrink-0 items-center gap-1">{c.cell(row)}</div>)}
               </div>
               {lines.length > 0 && (
@@ -49,7 +49,7 @@ export function DataTable<T>({
                   {lines.map((c) => (
                     <div key={c.key} className="flex items-center justify-between gap-3">
                       <dt className="shrink-0 text-muted">{c.header}</dt>
-                      <dd className="min-w-0 text-right">{c.cell(row)}</dd>
+                      <dd className="min-w-0 text-right [overflow-wrap:anywhere]">{c.cell(row)}</dd>
                     </div>
                   ))}
                 </dl>
@@ -79,7 +79,7 @@ export function DataTable<T>({
                 className={`border-b border-line/20 transition-colors last:border-0 hover:bg-brand/10 ${onRowClick ? 'cursor-pointer' : ''}`}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={`px-5 py-3.5 ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
+                  <td key={c.key} className={`px-5 py-3.5 [overflow-wrap:anywhere] ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
                     {c.cell(row)}
                   </td>
                 ))}

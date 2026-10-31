@@ -40,20 +40,22 @@ interface Common {
 
 /**
  * Brazilian date field: typed as dd/mm/aaaa whatever the browser language, with the
- * calendar one tap away. The value stays YYYY-MM-DD; it only changes once the date
- * is complete, valid and inside `min`/`max`.
+ * calendar one tap away. Once the text is complete, `onChange` gets YYYY-MM-DD for a
+ * real day (even outside `min`/`max`, so the form can say why it is not allowed) or
+ * the text as typed for an impossible one; clearing it sends "". `min`/`max` limit
+ * the calendar and mark the field.
  */
 export function DateInput({ value, onChange, min, max, required, disabled, invalid, id, name, onBlur, className = '', ...rest }: Common & { value: string; onChange: (iso: string) => void; min?: string; max?: string }) {
   const [text, setText] = useState(toBR(value));
   const picker = useRef<HTMLInputElement>(null);
-  useEffect(() => setText(toBR(value)), [value]);
+  // Follows outside changes (calendar, reset) without rewriting what is being typed.
+  useEffect(() => setText((t) => (t === value || fromBR(t) === value ? t : toBR(value))), [value]);
 
   const type = (raw: string) => {
     const next = maskDate(raw);
     setText(next);
-    if (!next && !required) return onChange('');
-    const iso = fromBR(next);
-    if (iso && (!min || iso >= min) && (!max || iso <= max)) onChange(iso);
+    if (!next) return onChange('');
+    if (next.length === 10) onChange(fromBR(next) ?? next);
   };
 
   const outside = (() => {
@@ -69,7 +71,8 @@ export function DateInput({ value, onChange, min, max, required, disabled, inval
         value={text}
         onChange={(e) => type(e.target.value)}
         onBlur={() => {
-          setText(toBR(value));
+          // An unfinished date goes back to the last complete one; a complete one stays as typed.
+          if (text.length !== 10) setText(toBR(value));
           onBlur?.();
         }}
         inputMode="numeric"
