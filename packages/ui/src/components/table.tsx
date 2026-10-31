@@ -14,6 +14,9 @@ export interface Column<T> {
   mobile?: 'title' | 'actions' | 'hidden';
 }
 
+/** The buttons column keeps its natural width: long text elsewhere in the row wraps instead of squeezing it. */
+const isActions = <T,>(c: Column<T>) => c.mobile === 'actions' || c.header === '';
+
 /** Tabela dentro de vidro; linhas realçam no hover. */
 export function DataTable<T>({
   columns,
@@ -79,7 +82,7 @@ export function DataTable<T>({
                 className={`border-b border-line/20 transition-colors last:border-0 hover:bg-brand/10 ${onRowClick ? 'cursor-pointer' : ''}`}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={`px-5 py-3.5 [overflow-wrap:anywhere] ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
+                  <td key={c.key} className={`px-5 py-3.5 ${isActions(c) ? 'w-px whitespace-nowrap' : '[overflow-wrap:anywhere]'} ${c.align === 'right' ? 'text-right' : ''} ${c.className ?? ''}`}>
                     {c.cell(row)}
                   </td>
                 ))}
