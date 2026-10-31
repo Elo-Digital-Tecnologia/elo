@@ -27,6 +27,9 @@ const maskTime = (raw: string) => {
 const validTime = (t: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
 
 interface Common {
+  /** Lets a form focus the field when it holds the first error. */
+  name?: string;
+  onBlur?: () => void;
   required?: boolean;
   disabled?: boolean;
   invalid?: boolean;
@@ -40,7 +43,7 @@ interface Common {
  * calendar one tap away. The value stays YYYY-MM-DD; it only changes once the date
  * is complete, valid and inside `min`/`max`.
  */
-export function DateInput({ value, onChange, min, max, required, disabled, invalid, id, className = '', ...rest }: Common & { value: string; onChange: (iso: string) => void; min?: string; max?: string }) {
+export function DateInput({ value, onChange, min, max, required, disabled, invalid, id, name, onBlur, className = '', ...rest }: Common & { value: string; onChange: (iso: string) => void; min?: string; max?: string }) {
   const [text, setText] = useState(toBR(value));
   const picker = useRef<HTMLInputElement>(null);
   useEffect(() => setText(toBR(value)), [value]);
@@ -62,9 +65,13 @@ export function DateInput({ value, onChange, min, max, required, disabled, inval
     <span className={`relative flex items-center ${className}`}>
       <input
         id={id}
+        name={name}
         value={text}
         onChange={(e) => type(e.target.value)}
-        onBlur={() => setText(toBR(value))}
+        onBlur={() => {
+          setText(toBR(value));
+          onBlur?.();
+        }}
         inputMode="numeric"
         placeholder="dd/mm/aaaa"
         maxLength={10}
@@ -99,7 +106,7 @@ export function DateInput({ value, onChange, min, max, required, disabled, inval
 }
 
 /** 24-hour time typed as HH:MM; the value only changes once the time is complete and valid. */
-export function TimeInput({ value, onChange, required, disabled, invalid, id, className = '', ...rest }: Common & { value: string; onChange: (hhmm: string) => void }) {
+export function TimeInput({ value, onChange, required, disabled, invalid, id, name, onBlur, className = '', ...rest }: Common & { value: string; onChange: (hhmm: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   const type = (raw: string) => {
@@ -110,9 +117,13 @@ export function TimeInput({ value, onChange, required, disabled, invalid, id, cl
   return (
     <input
       id={id}
+      name={name}
       value={text}
       onChange={(e) => type(e.target.value)}
-      onBlur={() => setText(value)}
+      onBlur={() => {
+        setText(value);
+        onBlur?.();
+      }}
       inputMode="numeric"
       placeholder="hh:mm"
       maxLength={5}
@@ -126,12 +137,12 @@ export function TimeInput({ value, onChange, required, disabled, invalid, id, cl
 }
 
 /** Date and time side by side; the value is the `datetime-local` format, YYYY-MM-DDTHH:MM. */
-export function DateTimeInput({ value, onChange, min, required, disabled, 'aria-label': label }: Common & { value: string; onChange: (v: string) => void; min?: string }) {
+export function DateTimeInput({ value, onChange, min, required, disabled, invalid, name, onBlur, 'aria-label': label }: Common & { value: string; onChange: (v: string) => void; min?: string }) {
   const [date, time] = value ? [value.slice(0, 10), value.slice(11, 16)] : ['', ''];
   return (
     <span className="grid grid-cols-[1fr_7rem] gap-2">
-      <DateInput value={date} min={min?.slice(0, 10)} onChange={(d) => onChange(d ? `${d}T${time || '00:00'}` : '')} required={required} disabled={disabled} aria-label={label ? `${label}: data` : 'Data'} />
-      <TimeInput value={time} onChange={(t) => onChange(`${date || (min ?? '').slice(0, 10)}T${t}`)} required={required} disabled={disabled} aria-label={label ? `${label}: hora` : 'Hora'} />
+      <DateInput name={name} onBlur={onBlur} invalid={invalid} value={date} min={min?.slice(0, 10)} onChange={(d) => onChange(d ? `${d}T${time || '00:00'}` : '')} required={required} disabled={disabled} aria-label={label ? `${label}: data` : 'Data'} />
+      <TimeInput onBlur={onBlur} invalid={invalid} value={time} onChange={(t) => onChange(`${date || (min ?? '').slice(0, 10)}T${t}`)} required={required} disabled={disabled} aria-label={label ? `${label}: hora` : 'Hora'} />
     </span>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
-import { forwardRef, useState, type InputHTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, useState, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> & {
   /** Ícone à esquerda. */
@@ -21,13 +21,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input({ i
 
 /** Senha com botão para mostrar ou ocultar. */
 export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputProps, 'type' | 'icon'>>(function PasswordInput(
-  { className = '', ...rest },
+  { className = '', invalid, ...rest },
   ref,
 ) {
   const [shown, setShown] = useState(false);
   return (
     <span className="field-wrap">
-      <input ref={ref} type={shown ? 'text' : 'password'} className={`!pr-12 ${className}`} {...rest} />
+      <input ref={ref} type={shown ? 'text' : 'password'} aria-invalid={invalid || undefined} className={`!pr-12 ${className}`} {...rest} />
       <span className="field-tail">
         <button
           type="button"
@@ -45,15 +45,25 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputProps, 'type
 
 /** Campo de valor em reais: aceita "12,50" e devolve o texto digitado; use parseCents do core para converter. */
 export const MoneyInput = forwardRef<HTMLInputElement, Omit<InputProps, 'icon' | 'inputMode'>>(function MoneyInput(
-  { className = '', ...rest },
+  { className = '', invalid, ...rest },
   ref,
 ) {
   return (
     <span className="field-wrap">
       <span className="field-lead text-sm font-medium">R$</span>
-      <input ref={ref} inputMode="decimal" placeholder="0,00" className={className} {...rest} />
+      <input ref={ref} inputMode="decimal" placeholder="0,00" aria-invalid={invalid || undefined} className={className} {...rest} />
     </span>
   );
+});
+
+/** Multi-line text with the same invalid state as `Input`. */
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }>(function Textarea({ invalid, ...rest }, ref) {
+  return <textarea ref={ref} aria-invalid={invalid || undefined} {...rest} />;
+});
+
+/** List picker with the same invalid state as `Input`. */
+export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement> & { invalid?: boolean }>(function Select({ invalid, ...rest }, ref) {
+  return <select ref={ref} aria-invalid={invalid || undefined} {...rest} />;
 });
 
 /** Interruptor liga/desliga. */

@@ -43,18 +43,18 @@ export function PageHeader({ title, description, actions, crumbs }: { title: str
   );
 }
 
-export function Field({ label, children, hint, error }: { label: string; children: ReactNode; hint?: string; error?: string | null }) {
+/**
+ * Label, control and one line below it: the error when there is one, the hint
+ * otherwise. The error is announced politely, not on every keystroke.
+ */
+export function Field({ label, children, hint, error }: { label: string; children: ReactNode; hint?: ReactNode; error?: string | null }) {
   return (
     <label className="block space-y-1.5 text-sm">
       <span className="font-medium">{label}</span>
       {children}
-      {error ? (
-        <span role="alert" className="block text-xs text-danger">
-          {error}
-        </span>
-      ) : (
-        hint && <span className="block text-xs text-muted">{hint}</span>
-      )}
+      <span aria-live="polite" className="block text-xs">
+        {error ? <span className="text-danger">{error}</span> : hint && <span className="text-muted">{hint}</span>}
+      </span>
     </label>
   );
 }
