@@ -6,6 +6,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
  * restaurant's due date is the `newDueDate` of its latest entry that was not voided.
  */
 @Entity('payments')
+@Index('UQ_payments_receipt', ['receiptId'], { unique: true, where: '"receipt_id" IS NOT NULL' })
 export class Payment {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Index() @Column({ type: 'uuid' }) restaurantId: string;
@@ -28,5 +29,8 @@ export class Payment {
   @Column({ type: 'varchar', nullable: true }) voidedBy: string | null;
   @Column({ type: 'varchar', nullable: true }) voidedByName: string | null;
   @Column({ type: 'text', nullable: true }) voidReason: string | null;
+  /** Proof of payment (a private document), or the reason there is none. */
+  @Column({ type: 'uuid', nullable: true }) receiptId: string | null;
+  @Column({ type: 'varchar', length: 300, nullable: true }) noReceiptReason: string | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
 }

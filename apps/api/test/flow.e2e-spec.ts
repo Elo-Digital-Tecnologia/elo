@@ -292,7 +292,7 @@ suite('fluxo da mesa (e2e)', () => {
     await http().get('/tables').set(auth(access.body.accessToken)).expect(200);
     await http().patch('/me/password').set(auth(access.body.accessToken)).send({ current: 'senha12345', next: 'outrasenha123' }).expect(403);
     // the superadmin has no user row and can still record a payment
-    await http().post(`/admin/restaurants/${rid}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today() }).expect(201);
+    await http().post(`/admin/restaurants/${rid}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today(), noReceiptReason: 'Pago em dinheiro' }).expect(201);
     const paid = (await http().get(`/admin/restaurants/${rid}/payments`).set(auth(sa)).expect(200)).body;
     expect(paid[0]).toMatchObject({ kind: 'payment', amountCents: 9900, recordedByName: 'Superadmin' });
     // slug reservado não vira restaurante
@@ -619,7 +619,7 @@ suite('fluxo da mesa (e2e)', () => {
     // ações da equipe e da Elo ficam registradas, com nome e origem
     await http().post('/tables').set(auth(owner)).send({ name: 'Mesa 9' }).expect(201);
     await http().post('/staff').set(auth(owner)).send({ username: `rgw${suf}`, password: 'senha12345', name: 'Gabi Garçom', roles: ['waiter'] }).expect(201);
-    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today(), amountCents: 4990, note: 'Desconto de lançamento' }).expect(201);
+    await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today(), amountCents: 4990, note: 'Desconto de lançamento', noReceiptReason: 'Pago em dinheiro' }).expect(201);
     await http().post(`/admin/restaurants/${r.id}/access`).set(auth(sa)).expect(201);
     const log = (await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body as { total: number; items: { action: string; actorName: string; actorKind: string; target: string | null; meta: Record<string, unknown> | null }[] };
     const byAction = (a: string) => log.items.find((i) => i.action === a);
@@ -672,9 +672,9 @@ suite('fluxo da mesa (e2e)', () => {
     expect(preview).toMatchObject({ expectedCents: 9900, restartsFromPayment: true });
     expect(preview.periodStart.slice(0, 10)).toBe(dayFrom(0));
     const bad = await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(0), amountCents: 5000 }).expect(400);
-    expect(bad.body.problems).toEqual(['note_required']);
+    expect(bad.body.problems).toEqual(['note_required', 'receipt_required']);
     await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(2) }).expect(400);
-    const pay = (await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(0) }).expect(201)).body;
+    const pay = (await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: dayFrom(0), noReceiptReason: 'Pago em dinheiro' }).expect(201)).body;
     expect(pay.newDueDate.slice(0, 10)).toBe(addMonth(dayFrom(0)));
     expect((await detail()).subscription).toMatchObject({ state: 'active', reasons: [] });
 
@@ -972,5 +972,50 @@ suite('fluxo da mesa (e2e)', () => {
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: null }).expect(200);
     const taken = (await http().post('/staff').set(auth(admin)).send({ username: `wai${suf}`, password: 'senha12345', name: 'Outra Pessoa', roles: ['waiter'] }).expect(409)).body;
     expect(taken).toMatchObject({ message: 'username_taken', field: 'username' });
+  });
+
+  it('comprovantes: arquivo privado, de um só pagamento e do mesmo restaurante, ou o motivo de não ter', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY })).body.accessToken as string;
+    const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const make = async (name: string, user: string) =>
+      (await http().post('/admin/restaurants').set(auth(sa)).send({ name: `${name} ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, initialDueDate: due, adminUsername: user + suf, adminPassword: 'senha12345' }).expect(201)).body as { id: string };
+    const [a, b] = [await make('Recibo A', 'ra'), await make('Recibo B', 'rb')];
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF');
+    const send = (rid: string, file: Buffer, name: string, kind = 'receipt') =>
+      http().post(`/admin/restaurants/${rid}/documents`).set(auth(sa)).field('kind', kind).attach('file', file, name);
+
+    await send(a.id, Buffer.from('<html>oi</html>'), 'falso.pdf').expect(400);
+    await send(a.id, pdf, 'x.pdf', 'outro').expect(400);
+    const doc = (await send(a.id, pdf, 'comprovante.pdf').expect(201)).body;
+    expect(doc).toMatchObject({ kind: 'receipt', name: 'comprovante.pdf', mime: 'application/pdf' });
+    const jpg = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#2e7d32' } }).jpeg().withMetadata().toBuffer();
+    const photo = (await send(a.id, jpg, 'foto.jpg').expect(201)).body;
+    expect(photo.mime).toBe('image/jpeg');
+
+    // proof or reason, not neither and not both; a proof of another restaurant is refused
+    const pay = (body: Record<string, unknown>, rid = a.id) => http().post(`/admin/restaurants/${rid}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: today(), ...body });
+    expect((await pay({}).expect(400)).body.problems).toEqual(['receipt_required']);
+    expect((await pay({ receiptId: doc.id, noReceiptReason: 'Pago em dinheiro' }).expect(400)).body.problems).toEqual(['receipt_or_reason']);
+    await pay({ receiptId: doc.id }, b.id).expect(400);
+    const paid = (await pay({ receiptId: doc.id }).expect(201)).body;
+    expect(paid.receipt).toMatchObject({ id: doc.id, name: 'comprovante.pdf' });
+    expect((await pay({ receiptId: doc.id }).expect(409)).body).toMatchObject({ message: 'receipt_in_use', field: 'receiptId' });
+
+    // a payment without proof gets one later, and keeps it
+    const cash = (await pay({ noReceiptReason: 'Pago em dinheiro no balcão' }).expect(201)).body;
+    expect(cash).toMatchObject({ receipt: null, noReceiptReason: 'Pago em dinheiro no balcão' });
+    const fixed = (await http().patch(`/admin/restaurants/${a.id}/payments/${cash.id}`).set(auth(sa)).send({ receiptId: photo.id }).expect(200)).body;
+    expect(fixed).toMatchObject({ receipt: { id: photo.id }, noReceiptReason: null });
+
+    // only the team with the right permission opens the file, never cached, never run as a page
+    const file = await http().get(`/admin/documents/${doc.id}`).set(auth(sa)).expect(200);
+    expect(file.headers['content-type']).toBe('application/pdf');
+    expect(file.headers['x-content-type-options']).toBe('nosniff');
+    expect(file.headers['cache-control']).toContain('no-store');
+    await http().post('/admin/staff').set(auth(sa)).send({ username: `rv${suf}`, name: 'Vera Leitura', password: 'senha12345', permissions: ['restaurants.view'] }).expect(201);
+    const viewer = (await http().post('/auth/team/login').send({ username: `rv${suf}`, password: 'senha12345' }).expect(201)).body.accessToken as string;
+    await http().get(`/admin/documents/${doc.id}`).set(auth(viewer)).expect(403);
+    await http().get(`/admin/documents/${doc.id}`).expect(401);
   });
 });

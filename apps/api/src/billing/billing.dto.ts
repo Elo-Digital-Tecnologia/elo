@@ -23,6 +23,9 @@ export class RecordPaymentDto {
   @IsDay() paidAt: string;
   @Field(FIELD_RULES.paymentCents, { optional: true }) amountCents?: number;
   @Field(FIELD_RULES.paymentNote, { optional: true }) note?: string | null;
+  /** A proof uploaded first to /admin/restaurants/:id/documents, or the reason there is none. */
+  @IsOptional() @IsUUID() receiptId?: string;
+  @Field(FIELD_RULES.optionalReason, { optional: true }) noReceiptReason?: string | null;
 }
 
 export class PaymentPreviewQuery {
@@ -34,6 +37,9 @@ export class EditPaymentDto {
   @Field(FIELD_RULES.paymentCents, { optional: true }) amountCents?: number;
   @IsOptional() @IsDay() paidAt?: string;
   @Field(FIELD_RULES.paymentNote, { optional: true }) note?: string | null;
+  /** Attaches a proof to a payment that has none yet. */
+  @IsOptional() @IsUUID() receiptId?: string;
+  @Field(FIELD_RULES.optionalReason, { optional: true }) noReceiptReason?: string | null;
 }
 
 export class VoidEntryDto {

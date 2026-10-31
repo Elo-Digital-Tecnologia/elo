@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Payment, Plan, Restaurant } from '../database/entities';
+import { DocumentsModule } from '../documents/documents.module';
 import { StaffModule } from '../staff/staff.module';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Plan, Payment, Restaurant]), StaffModule],
+  imports: [TypeOrmModule.forFeature([Plan, Payment, Restaurant]), StaffModule, DocumentsModule],
   controllers: [BillingController],
   providers: [BillingService],
   exports: [BillingService],

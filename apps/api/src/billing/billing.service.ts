@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import {
   type BillingEntryView,
+  type DocumentView,
   dateOnly,
   dueDateProblems,
   expectedAmount,
@@ -13,7 +14,8 @@ import {
 } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
-import { Payment, Plan, Restaurant } from '../database/entities';
+import { Document, Payment, Plan, Restaurant } from '../database/entities';
+import { documentView, DocumentsService } from '../documents/documents.service';
 import { StaffService } from '../staff/staff.service';
 
 export interface PlanInput {
@@ -28,6 +30,8 @@ export interface PaymentInput {
   paidAt: string;
   amountCents?: number;
   note?: string | null;
+  receiptId?: string;
+  noReceiptReason?: string | null;
 }
 
 const day = (value: string, field: string) => {
@@ -50,6 +54,7 @@ export class BillingService {
     private readonly data: DataSource,
     private readonly staff: StaffService,
     private readonly audit: AuditService,
+    private readonly documents: DocumentsService,
   ) {}
 
   async listPlans(): Promise<PlanView[]> {
@@ -104,7 +109,18 @@ export class BillingService {
 
   async history(restaurantId: string): Promise<BillingEntryView[]> {
     const rows = await this.entries.find({ where: { restaurantId }, order: { createdAt: 'DESC' } });
-    return rows.map(view);
+    const ids = rows.map((r) => r.receiptId).filter((id): id is string => !!id);
+    const docs = ids.length ? await this.data.getRepository(Document).find({ where: { id: In(ids) } }) : [];
+    const byId = new Map(docs.map((d) => [d.id, documentView(d)]));
+    return rows.map((r) => view(r, r.receiptId ? byId.get(r.receiptId) ?? null : null));
+  }
+
+  /** A proof must be this restaurant's, sent as a receipt, and not already attached to another payment. */
+  private async receipt(restaurantId: string, id: string | undefined): Promise<Document | null> {
+    if (!id) return null;
+    const doc = await this.documents.owned(restaurantId, id, 'receipt');
+    if (await this.entries.exist({ where: { receiptId: id } })) throw new ConflictException({ statusCode: 409, message: 'receipt_in_use', field: 'receiptId' });
+    return doc;
   }
 
   async preview(restaurantId: string, cycles: number, paidAt: string): Promise<PaymentPreview> {
@@ -127,8 +143,18 @@ export class BillingService {
     const expectedCents = expectedAmount(plan.priceCents, input.cycles);
     const amountCents = input.amountCents ?? expectedCents;
     const note = input.note?.trim() || null;
-    const problems = paymentProblems({ paidAt, restaurantCreatedAt: r.createdAt, cycles: input.cycles, amountCents, expectedCents, note });
+    const noReceiptReason = input.noReceiptReason?.trim() || null;
+    const problems = paymentProblems({
+      paidAt,
+      restaurantCreatedAt: r.createdAt,
+      cycles: input.cycles,
+      amountCents,
+      expectedCents,
+      note,
+      receipt: { documentId: input.receiptId, noReceiptReason },
+    });
     if (problems.length) throw new BadRequestException({ message: 'invalid_payment', problems });
+    const receipt = await this.receipt(restaurantId, input.receiptId);
 
     const period = paymentPeriod({ dueDate: r.dueDate, paidAt, cycles: input.cycles, cycleMonths: plan.cycleMonths });
     const entry = await this.data.transaction(async (em) => {
@@ -145,6 +171,8 @@ export class BillingService {
           planName: plan.name,
           cycles: input.cycles,
           note,
+          receiptId: receipt?.id ?? null,
+          noReceiptReason: receipt ? null : noReceiptReason,
           ...(await this.recorder(actor)),
         }),
       );
@@ -155,11 +183,16 @@ export class BillingService {
       target: plan.name,
       meta: { amountCents, newDueDate: period.end.toISOString() },
     });
-    return view(entry);
+    return view(entry, receipt ? documentView(receipt) : null);
   }
 
   /** Fixes what was typed (amount, payment day, note); the period stays as calculated. */
-  async edit(restaurantId: string, entryId: string, input: { amountCents?: number; paidAt?: string; note?: string | null }, actor: JwtUser): Promise<BillingEntryView> {
+  async edit(
+    restaurantId: string,
+    entryId: string,
+    input: { amountCents?: number; paidAt?: string; note?: string | null; receiptId?: string; noReceiptReason?: string | null },
+    actor: JwtUser,
+  ): Promise<BillingEntryView> {
     const r = await this.restaurant(restaurantId);
     const entry = await this.activeEntry(restaurantId, entryId);
     if (entry.kind !== 'payment') throw new ConflictException('not_a_payment');
@@ -170,15 +203,24 @@ export class BillingService {
     const problems = paymentProblems({ paidAt, restaurantCreatedAt: r.createdAt, cycles: entry.cycles ?? 1, amountCents, expectedCents, note });
     if (problems.length) throw new BadRequestException({ message: 'invalid_payment', problems });
 
+    // A proof can be attached later (it replaces the reason); one already attached stays.
+    if (input.receiptId && entry.receiptId) throw new ConflictException({ statusCode: 409, message: 'receipt_already_attached', field: 'receiptId' });
+    const receipt = await this.receipt(restaurantId, input.receiptId);
+    const receiptId = receipt?.id ?? entry.receiptId;
+    const noReceiptReason = receiptId ? null : input.noReceiptReason === undefined ? entry.noReceiptReason : input.noReceiptReason?.trim() || null;
+
     const fields = [
       amountCents !== entry.amountCents && 'amountCents',
       paidAt.getTime() !== entry.paidAt.getTime() && 'paidAt',
       note !== entry.note && 'note',
+      receiptId !== entry.receiptId && 'receipt',
+      noReceiptReason !== entry.noReceiptReason && 'noReceiptReason',
     ].filter((f): f is string => !!f);
-    Object.assign(entry, { amountCents, paidAt, note });
+    Object.assign(entry, { amountCents, paidAt, note, receiptId, noReceiptReason });
     const saved = await this.entries.save(entry);
     if (fields.length) await this.audit.record(actor, 'payment_edited', restaurantId, { meta: { fields, amountCents } });
-    return view(saved);
+    const doc = saved.receiptId ? await this.data.getRepository(Document).findOne({ where: { id: saved.receiptId } }) : null;
+    return view(saved, doc ? documentView(doc) : null);
   }
 
   /** Only the latest entry can be voided, so the history never has a hole in the middle. */
@@ -197,7 +239,7 @@ export class BillingService {
     await this.audit.record(actor, 'payment_voided', restaurantId, {
       meta: { reason: reason.trim(), amountCents: entry.amountCents, newDueDate: r.dueDate.toISOString() },
     });
-    return view(saved);
+    return view(saved, null);
   }
 
   /** Sets the due date by hand, with a reason: fixes a wrong entry or grants extra days. */
@@ -217,7 +259,7 @@ export class BillingService {
     await this.audit.record(actor, 'due_date_adjusted', restaurantId, {
       meta: { reason: reason.trim(), from: from.toISOString(), newDueDate: due.toISOString() },
     });
-    return view(entry);
+    return view(entry, null);
   }
 
   private async restaurant(id: string): Promise<Restaurant> {
@@ -253,7 +295,7 @@ export class BillingService {
   }
 }
 
-function view(p: Payment): BillingEntryView {
+function view(p: Payment, receipt: DocumentView | null): BillingEntryView {
   return {
     id: p.id,
     kind: p.kind,
@@ -269,6 +311,8 @@ function view(p: Payment): BillingEntryView {
     voidedAt: p.voidedAt?.toISOString() ?? null,
     voidedByName: p.voidedByName,
     voidReason: p.voidReason,
+    receipt,
+    noReceiptReason: p.noReceiptReason,
     createdAt: p.createdAt.toISOString(),
   };
 }
