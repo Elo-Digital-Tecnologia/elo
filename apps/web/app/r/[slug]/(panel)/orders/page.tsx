@@ -3,7 +3,7 @@
 import { ChevronDown, ClipboardList } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@elo/client';
-import { formatBRL, ORDER_HISTORY_FLOOR_DAYS, type OrderHistoryItem, type OrderHistoryPage, type OrderStatus, type TableView } from '@elo/core';
+import { dayError, formatBRL, ORDER_HISTORY_FLOOR_DAYS, type OrderHistoryItem, type OrderHistoryPage, type OrderStatus, type TableView } from '@elo/core';
 import { Badge, Button, DateInput, EmptyState, ErrorState, Field, GlassCard, PageHeader, Pagination, SkeletonCards } from '@elo/ui';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
@@ -116,8 +116,8 @@ function History() {
       <GlassCard className="mb-5 grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
         {full && (
           <>
-            <Field label="De"><DateInput value={range.from} max={range.to} onChange={filter((v: string) => v && setRange((r) => ({ ...r, from: v })))} required /></Field>
-            <Field label="Até"><DateInput value={range.to} min={range.from} max={ymd(new Date())} onChange={filter((v: string) => v && setRange((r) => ({ ...r, to: v })))} required /></Field>
+            <Field label="De"><DateInput value={range.from} max={range.to} onChange={filter((v: string) => !dayError(v) && setRange((r) => ({ ...r, from: v })))} required /></Field>
+            <Field label="Até"><DateInput value={range.to} min={range.from} max={ymd(new Date())} onChange={filter((v: string) => !dayError(v) && setRange((r) => ({ ...r, to: v })))} required /></Field>
           </>
         )}
         <Field label="Situação">

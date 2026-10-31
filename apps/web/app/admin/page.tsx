@@ -66,11 +66,11 @@ export default function Login() {
       <form onSubmit={submit} noValidate className="space-y-4">
         {mode === 'team' && (
           <Field label="Usuário" error={form.errors.username}>
-            <Input {...form.bind('username')} autoComplete="username" autoCapitalize="none" />
+            <Input {...form.bind('username')} maxLength={64} autoComplete="username" autoCapitalize="none" />
           </Field>
         )}
         <Field label={mode === 'team' ? 'Senha' : 'Chave de superadmin'} error={form.errors.secret}>
-          <PasswordInput {...form.bind('secret')} autoComplete="current-password" />
+          <PasswordInput {...form.bind('secret')} maxLength={256} autoComplete="current-password" />
         </Field>
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <Button className="w-full !py-3.5" type="submit" loading={loading}>Entrar</Button>

@@ -57,10 +57,10 @@ export default function Login() {
     <AuthLayout brandSub="Equipe" title={name ?? undefined}>
       <form onSubmit={submit} noValidate className="space-y-4">
         <Field label="Usuário" error={form.errors.username}>
-          <Input {...form.bind('username')} autoComplete="username" autoCapitalize="none" autoFocus />
+          <Input {...form.bind('username')} maxLength={64} autoComplete="username" autoCapitalize="none" autoFocus />
         </Field>
         <Field label="Senha" error={form.errors.password}>
-          <PasswordInput {...form.bind('password')} autoComplete="current-password" />
+          <PasswordInput {...form.bind('password')} maxLength={128} autoComplete="current-password" />
         </Field>
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <Button className="w-full !py-3.5" type="submit" loading={loading}>Entrar</Button>

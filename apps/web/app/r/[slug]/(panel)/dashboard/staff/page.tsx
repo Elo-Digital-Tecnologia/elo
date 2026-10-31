@@ -342,7 +342,7 @@ function View() {
           <p className="text-muted">
             {handing?.name} passa a administrar o restaurante, com Configurações e Assinatura. Você vira <strong>Gerente</strong> e só volta a ser titular se essa pessoa transferir de volta.
           </p>
-          <Field label="Sua senha"><PasswordInput autoComplete="current-password" value={ownerPassword} onChange={(e) => setOwnerPassword(e.target.value)} required autoFocus /></Field>
+          <Field label="Sua senha"><PasswordInput autoComplete="current-password" value={ownerPassword} onChange={(e) => setOwnerPassword(e.target.value)} maxLength={128} required autoFocus /></Field>
           {error && <p role="alert" className="text-danger">{error}</p>}
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="ghost" type="button" onClick={() => setHanding(null)}>Voltar</Button>

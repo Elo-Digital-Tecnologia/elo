@@ -4,7 +4,7 @@ import { ArchiveRestore, Building2, Download, ExternalLink, Plus, Search } from 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { cycleLabel, FIELD_RULES, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
+import { cycleLabel, dayError, FIELD_RULES, formatBRL, type PlanView, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DataTable, DateInput, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, PasswordInput, Select, SkeletonCards } from '@elo/ui';
 import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
@@ -24,7 +24,7 @@ const CHECKS = {
   adminUsername: rule(FIELD_RULES.username),
   adminPassword: rule(FIELD_RULES.password),
   planId: (v: string) => (v ? null : REQUIRED),
-  initialDueDate: (v: string) => (v ? null : REQUIRED),
+  initialDueDate: (v: string) => dayError(v, { min: dayFromNow(0) }),
 };
 
 /** The link comes from the name (there is no link field), so link conflicts land under the name. */

@@ -3,7 +3,7 @@
 import { BarChart3, ClipboardList, Receipt, Undo2, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { formatBRL, type ReportView } from '@elo/core';
+import { dayError, formatBRL, type ReportView } from '@elo/core';
 import { AreaChart, BarList, Button, ColumnChart, DateInput, EmptyState, ErrorState, Field, GlassCard, PageHeader, SkeletonCards, Stagger, StaggerItem, Stat } from '@elo/ui';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
@@ -38,8 +38,8 @@ function Reports() {
     <>
       <PageHeader title="Relatórios" description="O faturamento soma os itens dos pedidos válidos, sem a taxa de serviço." />
       <GlassCard className="mb-5 flex flex-wrap items-end gap-3 p-4">
-        <Field label="De"><DateInput value={range.from} max={range.to} onChange={(v) => v && setRange({ ...range, from: v })} required /></Field>
-        <Field label="Até"><DateInput value={range.to} min={range.from} max={ymd(new Date())} onChange={(v) => v && setRange({ ...range, to: v })} required /></Field>
+        <Field label="De"><DateInput value={range.from} max={range.to} onChange={(v) => !dayError(v) && setRange({ ...range, from: v })} required /></Field>
+        <Field label="Até"><DateInput value={range.to} min={range.from} max={ymd(new Date())} onChange={(v) => !dayError(v) && setRange({ ...range, to: v })} required /></Field>
         <div className="flex gap-2">
           <Button variant="soft" onClick={() => preset(1)}>Hoje</Button>
           <Button variant="soft" onClick={() => preset(7)}>7 dias</Button>

@@ -3,20 +3,8 @@
 import { CalendarCog, Pencil, Undo2, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import {
-  BILLING_LIMITS,
-  type BillingEntryView,
-  cycleLabel,
-  FIELD_RULES,
-  fieldError,
-  formatBRL,
-  parseCents,
-  type PaymentPreview,
-  type PaymentProblem,
-  type PlanView,
-  type SubscriptionView,
-} from '@elo/core';
-import { Badge, Button, DataTable, DateInput, EmptyState, Field, Input, Modal, MoneyInput } from '@elo/ui';
+import { BILLING_LIMITS, type BillingEntryView, cycleLabel, dayError, FIELD_RULES, fieldError, formatBRL, parseCents, type PaymentPreview, type PaymentProblem, type PlanView, type SubscriptionView } from '@elo/core';
+import { Badge, Button, DataTable, DateInput, EmptyState, Field, Input, Modal, MoneyInput, Textarea } from '@elo/ui';
 import { money as moneyCheck, rule, unexpected, useForm } from '../../../../../_lib/use-form';
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
@@ -51,15 +39,16 @@ function explain(e: unknown): string {
   return CODE[e.code] ?? unexpected(e);
 }
 
-const REQUIRED = { code: 'required' } as const;
 const NOTE_NEEDED = { code: 'invalid' } as const;
-const required = (v: string) => (v ? null : REQUIRED);
 /** API paths of the payment forms that have another name here. */
 const PAYMENT_PATHS = { amountCents: 'amount' } as const;
 
-const EDIT_CHECKS = { amount: moneyCheck(FIELD_RULES.paymentCents), paidAt: required, note: rule(FIELD_RULES.paymentNote) };
+/** A payment cannot be dated in the future; a new due date cannot be in the past. */
+const paidDay = (v: string) => dayError(v, { max: today() });
+
+const EDIT_CHECKS = { amount: moneyCheck(FIELD_RULES.paymentCents), paidAt: paidDay, note: rule(FIELD_RULES.paymentNote) };
 const VOID_CHECKS = { reason: rule(FIELD_RULES.reason) };
-const ADJUST_CHECKS = { dueDate: required, reason: rule(FIELD_RULES.reason) };
+const ADJUST_CHECKS = { dueDate: (v: string) => dayError(v, { min: today() }), reason: rule(FIELD_RULES.reason) };
 
 type Dialog = 'pay' | 'adjust' | 'plan' | { edit: BillingEntryView } | { void: BillingEntryView } | null;
 
@@ -79,7 +68,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
   const payForm = useForm(
     { cycles: '1', paidAt: today(), amount: '', note: '' },
     {
-      paidAt: required,
+      paidAt: paidDay,
       amount: moneyCheck(FIELD_RULES.paymentCents),
       note: (v: string, all: { amount: string }) => fieldError(FIELD_RULES.paymentNote, v) ?? (preview && parseCents(all.amount) !== preview.expectedCents && !v.trim() ? NOTE_NEEDED : null),
     },
@@ -102,7 +91,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
 
   // The period and the expected amount follow the cycles and the payment day as they are typed.
   useEffect(() => {
-    if (dialog !== 'pay' || !pay.paidAt) return;
+    if (dialog !== 'pay' || paidDay(pay.paidAt)) return;
     let live = true;
     const t = setTimeout(() => {
       api<PaymentPreview>(`/api/admin/restaurants/${id}/payments/preview?cycles=${pay.cycles}&paidAt=${pay.paidAt}`, { token })
@@ -306,7 +295,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
               {dialog.void.kind === 'payment' ? `O pagamento de ${formatBRL(dialog.void.amountCents)} fica no histórico, riscado.` : 'O ajuste fica no histórico, riscado.'} O vencimento volta para o do lançamento anterior
               {entries.filter((e) => !e.voidedAt)[1] ? ` (${fmt(entries.filter((e) => !e.voidedAt)[1].newDueDate)})` : ', o fim do teste'}.
             </p>
-            <Field label="Motivo" error={voidForm.errors.reason}><Input {...voidForm.bind('reason')} maxLength={FIELD_RULES.reason.max} autoFocus /></Field>
+            <Field label="Motivo" error={voidForm.errors.reason}><Textarea {...voidForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={3} autoFocus /></Field>
             {errorLine}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setDialog(null)}>Voltar</Button>
@@ -321,7 +310,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
           <p className="text-sm text-muted">Use para corrigir uma data errada ou conceder dias extras. O ajuste fica no histórico e pode ser estornado.</p>
           {subscription && <p className="text-sm">Vencimento atual: <strong>{fmt(subscription.dueDate)}</strong>.</p>}
           <Field label="Novo vencimento" error={adjustForm.errors.dueDate}><DateInput min={today()} value={adjustForm.values.dueDate} onChange={(v) => adjustForm.set('dueDate', v)} invalid={!!adjustForm.errors.dueDate} required /></Field>
-          <Field label="Motivo" error={adjustForm.errors.reason}><Input {...adjustForm.bind('reason')} maxLength={FIELD_RULES.reason.max} placeholder="Por exemplo: data do pagamento digitada errada" /></Field>
+          <Field label="Motivo" error={adjustForm.errors.reason}><Textarea {...adjustForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={3} placeholder="Por exemplo: data do pagamento digitada errada" /></Field>
           {errorLine}
           <div className="flex justify-end"><Button type="submit" loading={saving}><CalendarCog size={16} /> Ajustar</Button></div>
         </form>
