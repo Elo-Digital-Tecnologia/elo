@@ -52,8 +52,9 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
 }
 
 /** Envio de arquivo (multipart). O navegador define o cabeçalho com o limite do corpo. */
-export async function apiUpload<T>(path: string, file: File, token: string): Promise<T> {
+export async function apiUpload<T>(path: string, file: File, token: string, fields: Record<string, string> = {}): Promise<T> {
   const body = new FormData();
+  for (const [k, v] of Object.entries(fields)) body.append(k, v);
   body.append('file', file);
   const res = await fetch(path, { method: 'POST', credentials: 'include', headers: { authorization: `Bearer ${token}` }, body });
   if (!res.ok) {
@@ -61,4 +62,11 @@ export async function apiUpload<T>(path: string, file: File, token: string): Pro
     throw new ApiError(res.status, (Array.isArray(data.message) ? data.message[0] : data.message) ?? res.statusText, data);
   }
   return (await res.json()) as T;
+}
+
+/** Downloads a private file with the staff token, for showing it on screen or in a new tab. */
+export async function apiBlob(path: string, token: string): Promise<Blob> {
+  const res = await fetch(path, { credentials: 'include', headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  return res.blob();
 }
