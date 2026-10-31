@@ -34,7 +34,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, Omit<InputProps, 'type
           onClick={() => setShown((v) => !v)}
           aria-label={shown ? 'Ocultar senha' : 'Mostrar senha'}
           aria-pressed={shown}
-          className="grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg"
+          className="grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg"
         >
           {shown ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>

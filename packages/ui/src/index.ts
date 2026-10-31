@@ -4,6 +4,7 @@ export * from './components/logo';
 export * from './components/glass-card';
 export * from './components/button';
 export * from './components/badge';
+export * from './components/avatar';
 export * from './components/states';
 export * from './components/motion';
 export * from './components/modal';

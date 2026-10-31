@@ -44,7 +44,7 @@ export function Stat({
       <div className="flex items-center justify-between gap-2 text-sm text-muted">
         <span className="min-w-0">{label}</span>
         {Icon && (
-          <span className="grid h-9 w-9 place-items-center rounded-pill bg-brand/15 text-brand">
+          <span className="grid shrink-0 h-9 w-9 place-items-center rounded-pill bg-brand/15 text-brand">
             <Icon size={18} />
           </span>
         )}

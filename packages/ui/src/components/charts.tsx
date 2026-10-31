@@ -9,6 +9,8 @@ export const CHART_COLORS = [1, 2, 3, 4, 5].map((n) => `hsl(var(--elo-chart-${n}
 export interface Datum {
   label: string;
   value: number;
+  /** Fixed color for data with a meaning of its own (ok, warning, problem); the palette otherwise. */
+  color?: string;
 }
 
 const GRID = 'hsl(var(--elo-chart-grid))';
@@ -154,7 +156,7 @@ export function Donut({ data, format = String, center }: { data: Datum[]; format
               cy="70"
               r={R}
               fill="none"
-              stroke={CHART_COLORS[s.i % 5]}
+              stroke={s.d.color ?? CHART_COLORS[s.i % 5]}
               strokeWidth={hover === s.i ? 20 : 16}
               strokeLinecap="round"
               strokeDasharray={`${s.len} ${C}`}
@@ -175,7 +177,7 @@ export function Donut({ data, format = String, center }: { data: Datum[]; format
           </div>
         </div>
       </div>
-      <Legend items={data.map((d, i) => ({ label: d.label, color: CHART_COLORS[i % 5], value: format(d.value) }))} />
+      <Legend items={data.map((d, i) => ({ label: d.label, color: d.color ?? CHART_COLORS[i % 5], value: format(d.value) }))} />
     </div>
   );
 }

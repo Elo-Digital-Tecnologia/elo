@@ -50,7 +50,7 @@ export function Sheet({
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 380, damping: 38 }}
           >
-            <button onClick={onClose} aria-label="Fechar" className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-pill bg-black/50 text-white transition hover:bg-black/65">
+            <button onClick={onClose} aria-label="Fechar" className="absolute right-3 top-3 z-10 grid shrink-0 h-9 w-9 place-items-center rounded-pill bg-black/50 text-white transition hover:bg-black/65">
               <X size={18} />
             </button>
             <div className="scroll-soft min-h-0 flex-1 overflow-y-auto">

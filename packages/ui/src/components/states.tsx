@@ -47,7 +47,7 @@ export function EmptyState({
 }) {
   return (
     <GlassCard className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-      <span className="grid h-14 w-14 place-items-center rounded-pill bg-brand/15 text-brand">
+      <span className="grid shrink-0 h-14 w-14 place-items-center rounded-pill bg-brand/15 text-brand">
         <Icon size={26} />
       </span>
       <h3 className="text-lg font-semibold">{title}</h3>
@@ -60,7 +60,7 @@ export function EmptyState({
 export function ErrorState({ title = 'Não foi possível carregar', children, action }: { title?: string; children?: React.ReactNode; action?: React.ReactNode }) {
   return (
     <GlassCard className="flex flex-col items-center gap-3 px-6 py-10 text-center" role="alert">
-      <span className="grid h-14 w-14 place-items-center rounded-pill bg-danger/15 text-danger">
+      <span className="grid shrink-0 h-14 w-14 place-items-center rounded-pill bg-danger/15 text-danger">
         <AlertTriangle size={26} />
       </span>
       <h3 className="text-lg font-semibold">{title}</h3>

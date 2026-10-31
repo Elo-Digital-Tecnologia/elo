@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Aurora } from './aurora';
-import { Logo } from './logo';
+import { Avatar } from './avatar';
+import { Logo, LogoMark } from './logo';
 import { PageTransition } from './motion';
 import { ThemeToggle } from './theme';
 
@@ -24,7 +25,7 @@ interface Props {
   brandSub: string;
   nav: NavItem[];
   /** Quem está logado. */
-  user: { name: string; role: string };
+  user: { name: string; role: string; avatarUrl?: string | null };
   onLogout: () => void;
   /** Nó à esquerda do cabeçalho de ações (indicadores, status ao vivo...). */
   headerExtra?: ReactNode;
@@ -38,7 +39,7 @@ interface Props {
 
 const COLLAPSE_KEY = 'elo.sidebar';
 
-function NavList({ nav, collapsed, onNavigate }: { nav: NavItem[]; collapsed: boolean; onNavigate?: () => void }) {
+function NavList({ nav, collapsed, onNavigate, group = 'side' }: { nav: NavItem[]; collapsed: boolean; onNavigate?: () => void; group?: string }) {
   const path = usePathname();
   // Só o item mais específico fica marcado (/dashboard não acende em /dashboard/menu).
   const current = nav
@@ -77,7 +78,7 @@ function NavList({ nav, collapsed, onNavigate }: { nav: NavItem[]; collapsed: bo
           >
             {active && (
               <motion.span
-                layoutId="nav-active"
+                layoutId={`nav-active-${group}`}
                 className="btn-glass absolute inset-0 -z-10 rounded-pill"
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
@@ -175,7 +176,6 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
       return !c;
     });
 
-  const initials = user.name.slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-dvh">
@@ -187,7 +187,7 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
         style={{ width: collapsed ? 88 : 272 }}
       >
         <div className={`flex items-center px-2 py-3 ${collapsed ? 'justify-center' : ''}`}>
-          {collapsed ? <Logo /> : <Logo sub={brandSub} />}
+          {collapsed ? <LogoMark /> : <Logo sub={brandSub} />}
         </div>
         <FadingScroll>
           <NavList nav={nav} collapsed={collapsed} />
@@ -207,42 +207,41 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
         </button>
       </aside>
 
-      {/* Drawer mobile */}
-      <AnimatePresence>
-        {drawer && (
-          <motion.div className="fixed inset-x-0 top-0 z-50 h-dvh lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <div className="modal-backdrop absolute inset-0 bg-leaf-900/40 backdrop-blur-md" onClick={() => setDrawer(false)} aria-hidden />
-            <motion.aside
-              className="glass glass-strong absolute bottom-3 left-3 top-3 flex w-[min(300px,calc(100%-24px))] flex-col overflow-hidden p-3"
-              initial={{ x: -320 }}
-              animate={{ x: 0 }}
-              exit={{ x: -320 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-            >
-              <div className="flex items-center justify-between px-2 py-3">
-                <Logo sub={brandSub} />
-                <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="grid h-9 w-9 place-items-center rounded-pill bg-leaf-100/60">
-                  <X size={18} />
-                </button>
+      {/*
+        Drawer mobile. Always mounted and moved with CSS: an exit animation that never
+        finished (navigation happens while it plays) used to leave an invisible layer
+        over the page, blocking taps and scrolling until a reload.
+      */}
+      <div
+        className={`fixed inset-x-0 top-0 z-50 h-dvh transition-[opacity,visibility] duration-300 lg:hidden ${drawer ? 'visible opacity-100' : 'pointer-events-none invisible opacity-0'}`}
+        aria-hidden={!drawer}
+      >
+        <div className="modal-backdrop absolute inset-0 bg-leaf-900/40 backdrop-blur-md" onClick={() => setDrawer(false)} aria-hidden />
+        <aside
+          className={`glass glass-strong absolute bottom-3 left-3 top-3 flex w-[min(300px,calc(100%-24px))] flex-col overflow-hidden p-3 transition-transform duration-300 ease-elo ${drawer ? 'translate-x-0' : '-translate-x-[calc(100%+24px)]'}`}
+        >
+          <div className="flex items-center justify-between px-2 py-3">
+            <Logo sub={brandSub} />
+            <button onClick={() => setDrawer(false)} aria-label="Fechar menu" className="grid shrink-0 h-9 w-9 place-items-center rounded-pill bg-leaf-100/60">
+              <X size={18} />
+            </button>
+          </div>
+          <FadingScroll>
+            <NavList nav={nav} collapsed={false} onNavigate={() => setDrawer(false)} group="drawer" />
+            {links.length > 0 && (
+              <div className="mt-3 border-t border-line/40 pt-3">
+                <NavList nav={links} collapsed={false} />
               </div>
-              <FadingScroll>
-                <NavList nav={nav} collapsed={false} onNavigate={() => setDrawer(false)} />
-                {links.length > 0 && (
-                  <div className="mt-3 border-t border-line/40 pt-3">
-                    <NavList nav={links} collapsed={false} />
-                  </div>
-                )}
-              </FadingScroll>
-            </motion.aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            )}
+          </FadingScroll>
+        </aside>
+      </div>
 
       {/* Coluna principal */}
       <div className="flex min-h-dvh min-w-0 flex-col transition-[padding] duration-500 ease-elo lg:pl-[var(--shell-pad)]" style={{ ['--shell-pad' as string]: `${(collapsed ? 88 : 272) + 32}px` }}>
         <header className="sticky top-0 z-20 px-3 pt-3 sm:px-4 sm:pt-4 lg:pr-6">
           <div className="glass glass-strong flex items-center gap-2 !rounded-pill py-2 pl-2.5 pr-2 sm:gap-3 sm:pl-3 sm:pr-2.5">
-            <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-pill transition hover:bg-brand/10 lg:hidden">
+            <button onClick={() => setDrawer(true)} aria-label="Abrir menu" className="grid shrink-0 h-10 w-10 place-items-center rounded-pill transition hover:bg-brand/10 lg:hidden">
               <Menu size={20} />
             </button>
             <div className="hidden sm:block lg:hidden">
@@ -254,8 +253,8 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
             </div>
             <div className="flex items-center gap-2.5 rounded-pill py-1 pl-1 sm:bg-leaf-100/50 sm:pr-3.5">
               {/* On phones the avatar opens the account menu; theme and sign out live there. */}
-              <button onClick={() => setAccount((a) => !a)} aria-expanded={account} aria-label="Conta" className="btn-glass grid h-9 w-9 place-items-center rounded-pill text-xs font-bold sm:pointer-events-none">
-                {initials}
+              <button onClick={() => setAccount((a) => !a)} aria-expanded={account} aria-label="Conta" className="rounded-pill sm:pointer-events-none">
+                <Avatar name={user.name} url={user.avatarUrl} />
               </button>
               <span className="hidden text-left leading-tight sm:block">
                 <span className="block max-w-32 truncate text-sm font-semibold">{user.name}</span>
@@ -266,10 +265,10 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
               <LogOut size={19} />
             </button>
           </div>
+          {/* The backdrop leaves at once; only the card fades out, so nothing can stay over the page. */}
+          {account && <div className="fixed inset-0 z-10 sm:hidden" onClick={() => setAccount(false)} aria-hidden />}
           <AnimatePresence>
             {account && (
-              <>
-                <div className="fixed inset-0 z-10 sm:hidden" onClick={() => setAccount(false)} aria-hidden />
                 <motion.div
                   role="dialog"
                   aria-label="Conta"
@@ -290,7 +289,6 @@ export function AppShell({ brandSub, nav, user, onLogout, headerExtra, links = [
                     <LogOut size={17} /> Sair
                   </button>
                 </motion.div>
-              </>
             )}
           </AnimatePresence>
         </header>

@@ -79,7 +79,7 @@ export function DateInput({ value, onChange, min, max, required, disabled, inval
         disabled={disabled}
         aria-label="Abrir calendário"
         onClick={() => picker.current?.showPicker?.()}
-        className="absolute right-1.5 grid h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand"
+        className="absolute right-1.5 grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-brand"
       >
         <CalendarDays size={18} />
       </button>
