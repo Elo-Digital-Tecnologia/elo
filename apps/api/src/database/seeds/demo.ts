@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { type ContractKind, OrderStatus, Role, ROLE_LABEL, TableState, toDay } from '@elo/core';
+import { businessDay, type ContractKind, OrderStatus, Role, ROLE_LABEL, TableState } from '@elo/core';
 import { type ObjectLiteral, Repository } from 'typeorm';
 import { AppModule } from '../../app.module';
 import { BillingService } from '../../billing/billing.service';
@@ -30,7 +30,7 @@ interface DemoRestaurant {
   slug: string;
   managerName: string;
   managerContact: string;
-  /** Days from today to the end of the trial. */
+  /** Days from today to the first billed day: the end of a pilot's trial, or the start of a definitive contract. */
   trialEndsIn: number;
   /** Days ago a one-cycle payment was received, if any. */
   paidDaysAgo?: number;
@@ -137,12 +137,13 @@ async function main() {
         managerName: demo.managerName,
         managerContact: demo.managerContact,
         planId: plan.id,
-        trialDays: 14,
         adminUsername: `${demo.prefix}admin`,
         adminPassword: PASSWORD,
       });
-      // A signed contract (a sample PDF) so the menu and the team are on.
-      const startsOn = toDay(new Date(Date.now() - 45 * DAY));
+      // A signed contract (a sample PDF) so the menu and the team are on. A pilot has run
+      // since the restaurant joined, with a trial up to its first billed day.
+      const pilot = demo.contract === 'pilot';
+      const startsOn = businessDay(new Date(Date.now() + (pilot ? -45 : demo.trialEndsIn) * DAY));
       const file = await documents.upload(r.id, 'contract', { buffer: samplePdf(demo.name), originalname: `contrato-${demo.slug}.pdf` }, SEED_ACTOR);
       await contracts.register(
         r.id,
@@ -151,17 +152,17 @@ async function main() {
           origin: 'initial',
           signedOn: startsOn,
           startsOn,
-          endsOn: toDay(new Date(Date.now() + (demo.contract === 'pilot' ? 45 : 320) * DAY)),
+          endsOn: businessDay(new Date(Date.now() + (pilot ? 45 : 320) * DAY)),
           signatory: { name: demo.managerName, role: 'Sócio-proprietário', contact: demo.managerContact },
           documentId: file.id,
+          trialDays: pilot ? 45 + demo.trialEndsIn : 0,
         },
         SEED_ACTOR,
       );
       // The demo restaurants have been customers for a while; their history goes back further than today.
-      const firstDue = new Date(Date.now() + demo.trialEndsIn * DAY);
-      await restaurantsRepo.update({ id: r.id }, { createdAt: new Date(Date.now() - 45 * DAY), initialDueDate: firstDue, dueDate: firstDue });
+      await restaurantsRepo.update({ id: r.id }, { createdAt: new Date(Date.now() - 45 * DAY) });
       if (demo.paidDaysAgo !== undefined) {
-        await billing.record(r.id, { cycles: 1, paidAt: toDay(new Date(Date.now() - demo.paidDaysAgo * DAY)), noReceiptReason: 'Dados de demonstração' }, SEED_ACTOR);
+        await billing.record(r.id, { cycles: 1, paidAt: businessDay(new Date(Date.now() - demo.paidDaysAgo * DAY)), noReceiptReason: 'Dados de demonstração' }, SEED_ACTOR);
       }
       credentials.push(`/r/${r.slug}/login  ${demo.prefix}admin (${ROLE_LABEL[Role.RestaurantAdmin]})`);
 

@@ -1,8 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import {
   type BillingEntryView,
+  businessDay,
+  contractState,
   type DocumentView,
   dateOnly,
   dueDateProblems,
@@ -14,7 +17,8 @@ import {
 } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
-import { Document, Payment, Plan, Restaurant } from '../database/entities';
+import type { Env } from '../config/env';
+import { Contract, Document, Payment, Plan, Restaurant } from '../database/entities';
 import { documentView, DocumentsService } from '../documents/documents.service';
 import { StaffService } from '../staff/staff.service';
 
@@ -55,6 +59,7 @@ export class BillingService {
     private readonly staff: StaffService,
     private readonly audit: AuditService,
     private readonly documents: DocumentsService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   async listPlans(): Promise<PlanView[]> {
@@ -138,6 +143,7 @@ export class BillingService {
   /** The period and the new due date come from the plan, never from the form. */
   async record(restaurantId: string, input: PaymentInput, actor: JwtUser): Promise<BillingEntryView> {
     const r = await this.restaurant(restaurantId);
+    await this.assertBilling(restaurantId);
     const plan = this.planOf(r);
     const paidAt = day(input.paidAt, 'paidAt');
     const expectedCents = expectedAmount(plan.priceCents, input.cycles);
@@ -245,6 +251,7 @@ export class BillingService {
   /** Sets the due date by hand, with a reason: fixes a wrong entry or grants extra days. */
   async adjustDueDate(restaurantId: string, dueDate: string, reason: string, actor: JwtUser): Promise<BillingEntryView> {
     const r = await this.restaurant(restaurantId);
+    await this.assertBilling(restaurantId);
     const due = day(dueDate, 'dueDate');
     const problems = dueDateProblems({ dueDate: due, reason });
     if (problems.length) throw new BadRequestException({ message: 'invalid_due_date', problems });
@@ -266,24 +273,16 @@ export class BillingService {
    * Ends the free trial today: billing starts now, with the usual grace days. Payments
    * already recorded keep their periods; to cut access at once, suspend instead.
    */
-  async endTrial(restaurantId: string, reason: string, actor: JwtUser): Promise<void> {
-    const r = await this.restaurant(restaurantId);
-    const now = new Date();
-    if (r.initialDueDate.getTime() <= now.getTime()) throw new ConflictException('trial_over');
-    const today = dateOnly(now.toISOString().slice(0, 10))!;
-    const from = r.initialDueDate;
-    await this.data.transaction(async (em) => {
-      r.initialDueDate = today;
-      await em.update(Restaurant, { id: r.id }, { initialDueDate: today });
-      await this.syncDueDate(em, r);
-    });
-    await this.audit.record(actor, 'trial_ended', restaurantId, { meta: { reason: reason.trim(), from: from.toISOString() } });
-  }
-
   private async restaurant(id: string): Promise<Restaurant> {
     const r = await this.restaurants.findOne({ where: { id } });
     if (!r) throw new NotFoundException();
     return r;
+  }
+
+  /** Billing starts with the first contract: before it, its start (and the pilot's trial) is not known yet. */
+  private async assertBilling(restaurantId: string): Promise<void> {
+    const terms = await this.data.getRepository(Contract).find({ where: { restaurantId } });
+    if (contractState(terms, businessDay(new Date(), this.config.get('REPORT_TZ', { infer: true }))) === 'pending') throw new ConflictException('contract_pending');
   }
 
   private planOf(r: Restaurant): Plan {

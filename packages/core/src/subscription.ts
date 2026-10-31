@@ -27,10 +27,21 @@ export function accessState(
   return overdueMs <= GRACE_DAYS * DAY_MS ? AccessState.Grace : AccessState.Suspended;
 }
 
+export type RestaurantStatus = 'pending' | 'active' | 'grace' | 'suspended' | 'ended';
+
+export const RESTAURANT_STATUS_LABEL: Record<RestaurantStatus, string> = {
+  pending: 'Pendente',
+  active: 'Ativo',
+  grace: 'Em tolerância',
+  suspended: 'Suspenso',
+  ended: 'Contrato encerrado',
+};
+
 /**
- * End of the free trial while it still runs, else null. The trial ends at the first
- * due date set when the restaurant was created (or when the Elo team ended it early).
+ * One status per restaurant, each in exactly one bucket: the contract comes first
+ * (no contract yet, or it ended), then payments and the manual suspension.
  */
-export function trialEndsAt(initialDueDate: Date, now: Date = new Date()): Date | null {
-  return initialDueDate.getTime() > now.getTime() ? initialDueDate : null;
+export function restaurantStatus(input: { contract: 'pending' | 'active' | 'ended'; dueDate: Date; suspended: boolean }, now: Date = new Date()): RestaurantStatus {
+  if (input.contract !== 'active') return input.contract;
+  return accessState(input.dueDate, now, input.suspended);
 }

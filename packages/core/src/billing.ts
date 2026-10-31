@@ -235,6 +235,7 @@ export function suspensionReasons(dueDate: Date, manuallySuspended: boolean, now
   if (contract === 'pending') reasons.push('contract_pending');
   if (contract === 'ended') reasons.push('contract_ended');
   if (manuallySuspended) reasons.push('manual');
-  if (accessState(dueDate, now) === AccessState.Suspended) reasons.push('overdue');
+  // Billing only runs under a contract: a pending or ended one is never "overdue".
+  if (contract === 'active' && accessState(dueDate, now) === AccessState.Suspended) reasons.push('overdue');
   return reasons;
 }

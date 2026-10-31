@@ -60,7 +60,7 @@ export class AdminRestaurantsController {
   @Get('restaurants/:id')
   async get(@Param('id', ParseUUIDPipe) id: string) {
     const r = await this.restaurants.get(id);
-    return { ...r, subscription: this.restaurants.subscriptionOf(r) };
+    return { ...r, subscription: await this.restaurants.subscription(r) };
   }
 
   @RequirePermission(Permission.RestaurantsView)
@@ -141,7 +141,7 @@ export class RestaurantSelfController {
   @Roles(Role.RestaurantAdmin)
   @Get('subscription')
   async subscription(@TenantId() restaurantId: string) {
-    return this.restaurants.subscriptionOf(await this.restaurants.get(restaurantId));
+    return this.restaurants.subscription(await this.restaurants.get(restaurantId));
   }
 
   @Roles(...RestaurantStaff())
@@ -171,7 +171,7 @@ export class RestaurantSelfController {
       wifiName: r.wifiName,
       wifiPassword: r.wifiPassword,
       openingHours: r.openingHours,
-      subscription: this.restaurants.subscriptionOf(r),
+      subscription: await this.restaurants.subscription(r),
     };
   }
 }

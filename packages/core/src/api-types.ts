@@ -1,9 +1,9 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
 import type { Availability, OpeningHours } from './open-status';
-import type { ContractState } from './contracts';
+import type { ContractState, TrialStatus } from './contracts';
 import type { Role } from './roles';
-import type { AccessState } from './subscription';
+import type { AccessState, RestaurantStatus } from './subscription';
 import type { SuspensionReason } from './billing';
 
 export interface OptionChoice {
@@ -105,10 +105,12 @@ export interface SubscriptionView {
   /** Why the team is locked out, empty while it is not. */
   reasons: SuspensionReason[];
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
-  /** While the free trial runs: when it ends. */
-  trialEndsAt: string | null;
+  /** The one status shown for the restaurant (pending and ended contracts apart from suspensions). */
+  status: RestaurantStatus;
+  /** Free trial of the first pilot contract. */
+  trial: TrialStatus;
   /** Whether a signed contract is in force, and until when (renewals included). */
-  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null };
+  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null; nextStartsOn: string | null };
 }
 
 export interface WaiterCallView {
@@ -213,7 +215,7 @@ export interface ReviewSummaryView {
 }
 
 /** Filters of the Elo restaurant list. `attention` = in grace or suspended. */
-export const RESTAURANT_LIST_STATUSES = ['active', 'grace', 'suspended', 'pending', 'attention', 'deleted'] as const;
+export const RESTAURANT_LIST_STATUSES = ['active', 'grace', 'suspended', 'pending', 'ended', 'attention', 'deleted'] as const;
 export type RestaurantListStatus = (typeof RESTAURANT_LIST_STATUSES)[number];
 
 export interface RestaurantListItem {
@@ -237,7 +239,7 @@ export interface RestaurantListView {
   page: number;
   pageSize: number;
   /** Totals per status, ignoring the status filter, for the filter chips. `deleted` only for who may see it. */
-  counts: { all: number; active: number; grace: number; suspended: number; pending: number; deleted?: number };
+  counts: { all: number; active: number; grace: number; suspended: number; pending: number; ended: number; deleted?: number };
 }
 
 export interface PauseView {

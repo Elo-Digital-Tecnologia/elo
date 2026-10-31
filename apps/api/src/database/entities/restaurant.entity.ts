@@ -12,16 +12,11 @@ export class Restaurant {
   @Column({ type: 'varchar', length: 120 }) managerContact: string;
   /** Kept in step with the billing history by BillingService; filters and access checks read it. */
   @Column({ type: 'timestamptz' }) dueDate: Date;
-  /** End of the trial: the due date while there is no billing entry. */
-  @Column({ type: 'timestamptz' }) initialDueDate: Date;
-  /** Free days before the first due date, counted from the start of the first contract. */
-  @Column({ type: 'int', default: 0 }) trialDays: number;
   /**
-   * Cache of the contracts' coverage that matters today (YYYY-MM-DD), kept by the
-   * contracts service: null means no contract yet (pending).
+   * First billed day: the start of the first contract, after its pilot's free trial.
+   * The due date while there is no billing entry; meaningless before any contract.
    */
-  @Column({ type: 'date', nullable: true }) contractStartsOn: string | null;
-  @Column({ type: 'date', nullable: true }) contractEndsOn: string | null;
+  @Column({ type: 'timestamptz' }) initialDueDate: Date;
   @Column({ type: 'uuid', nullable: true }) planId: string | null;
   @ManyToOne(() => Plan, { eager: true, nullable: true }) @JoinColumn({ name: 'plan_id' }) plan: Plan | null;
   @Column({ default: false }) suspended: boolean;

@@ -1,5 +1,5 @@
-import type { ContractKind, ContractOrigin } from '@elo/core';
-import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import type { ContractKind, ContractOrigin, TrialEndReason } from '@elo/core';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from 'typeorm';
 import { Document } from './document.entity';
 import { Restaurant } from './restaurant.entity';
 
@@ -8,6 +8,8 @@ import { Restaurant } from './restaurant.entity';
  * its own signed file), so the history of contracts is never rewritten.
  */
 @Entity('contracts')
+@Unique('UQ_contracts_document', ['documentId'])
+@Index('IDX_contracts_coverage', ['restaurantId', 'startsOn', 'effectiveEndsOn'], { where: '"voided_at" IS NULL' })
 export class Contract {
   @PrimaryGeneratedColumn('uuid') id: string;
   @Index() @Column({ type: 'uuid' }) restaurantId: string;
@@ -19,6 +21,12 @@ export class Contract {
   @Column({ type: 'date' }) signedOn: string;
   @Column({ type: 'date' }) startsOn: string;
   @Column({ type: 'date' }) endsOn: string;
+  /** Last day really covered: a later conversion cuts the pilot short. Kept by ContractsService for SQL filters. */
+  @Column({ type: 'date' }) effectiveEndsOn: string;
+  /** Free days of a first pilot contract. */
+  @Column({ type: 'int', default: 0 }) trialDays: number;
+  @Column({ type: 'date', nullable: true }) trialEndedOn: string | null;
+  @Column({ type: 'varchar', length: 20, nullable: true }) trialEndReason: TrialEndReason | null;
   @Column({ type: 'varchar', length: 80 }) signatoryName: string;
   @Column({ type: 'varchar', length: 80 }) signatoryRole: string;
   @Column({ type: 'varchar', length: 120 }) signatoryContact: string;
@@ -27,4 +35,8 @@ export class Contract {
   @Column({ type: 'varchar', length: 80 }) createdBy: string;
   @Column({ type: 'varchar', length: 120 }) createdByName: string;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
+  @Column({ type: 'timestamptz', nullable: true }) voidedAt: Date | null;
+  @Column({ type: 'varchar', length: 80, nullable: true }) voidedBy: string | null;
+  @Column({ type: 'varchar', length: 120, nullable: true }) voidedByName: string | null;
+  @Column({ type: 'varchar', length: 300, nullable: true }) voidReason: string | null;
 }

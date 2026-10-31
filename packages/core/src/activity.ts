@@ -34,6 +34,7 @@ export const ACTIVITY_ACTIONS = {
   contract_registered: { category: 'restaurant', label: 'Contrato registrado' },
   contract_converted: { category: 'restaurant', label: 'Piloto convertido em definitivo' },
   contract_renewed: { category: 'restaurant', label: 'Contrato renovado' },
+  contract_voided: { category: 'restaurant', label: 'Contrato anulado' },
   settings_updated: { category: 'settings', label: 'Configurações alteradas' },
   pause_created: { category: 'settings', label: 'Parada agendada' },
   pause_ended: { category: 'settings', label: 'Parada encerrada' },

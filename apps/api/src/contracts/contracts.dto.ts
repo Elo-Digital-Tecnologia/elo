@@ -18,4 +18,10 @@ export class ContractDto {
   @ValidateNested() @Type(() => SignatoryDto) signatory: SignatoryDto;
   /** The signed file, uploaded first to /admin/restaurants/:id/documents as a contract. */
   @IsUUID() documentId: string;
+  /** Free days of a first pilot contract, counted from its start. */
+  @Field(FIELD_RULES.trialDays, { optional: true }) trialDays?: number;
+}
+
+export class ReasonDto {
+  @Field(FIELD_RULES.reason) reason: string;
 }

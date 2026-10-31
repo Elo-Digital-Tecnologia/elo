@@ -57,7 +57,7 @@ export class PublicController {
   @Get(':slug/menu')
   async menu(@Param() { slug }: SlugParams) {
     const r = await this.restaurants.getBySlug(slug);
-    this.restaurants.assertPublished(r);
+    await this.restaurants.assertPublished(r);
     return {
       readOnly: true,
       restaurant: { name: r.name, slug: r.slug, ...(await this.restaurants.publicProfile(r)) },
@@ -74,7 +74,7 @@ export class PublicController {
     @Res({ passthrough: true }) res: Response,
   ) {
     // No contract in force, no menu: a new visit is refused before any session is made.
-    this.restaurants.assertPublished(await this.restaurants.getBySlug(slug));
+    await this.restaurants.assertPublished(await this.restaurants.getBySlug(slug));
     const { session, table, restaurant } = await this.tables.startSession(
       slug,
       token,
@@ -99,6 +99,7 @@ export class PublicController {
   @UseGuards(TableSessionGuard)
   @Post('session/open')
   async open(@Session() ctx: SessionContext) {
+    await this.published(ctx);
     await this.tables.requestOpen(ctx);
     return this.buildState(ctx);
   }
@@ -114,7 +115,8 @@ export class PublicController {
 
   @UseGuards(TableSessionGuard)
   @Post('session/orders')
-  submit(@Session() ctx: SessionContext, @Body() dto: CreateOrderDto) {
+  async submit(@Session() ctx: SessionContext, @Body() dto: CreateOrderDto) {
+    await this.published(ctx);
     return this.orders.submit(ctx, dto);
   }
 
@@ -149,7 +151,8 @@ export class PublicController {
 
   @UseGuards(TableSessionGuard)
   @Post('session/call')
-  call(@Session() ctx: SessionContext) {
+  async call(@Session() ctx: SessionContext) {
+    await this.published(ctx);
     return this.calls.create(ctx);
   }
 
@@ -199,5 +202,13 @@ export class PublicController {
       orders,
       menu: await this.catalog.publicMenu(ctx.restaurantId),
     };
+  }
+
+  /**
+   * A table already open when the contract ends can still see and close its bill, but
+   * opens, orders and calls nothing new.
+   */
+  private async published(ctx: SessionContext): Promise<void> {
+    await this.restaurants.assertPublished(await this.restaurants.get(ctx.restaurantId));
   }
 }
