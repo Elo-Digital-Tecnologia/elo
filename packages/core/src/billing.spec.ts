@@ -32,6 +32,10 @@ describe('paymentPeriod', () => {
     const p = paymentPeriod({ dueDate: day('2026-01-11'), paidAt: day('2026-10-30'), cycles: 1, cycleMonths: 1, now: day('2026-10-30') });
     expect([toDay(p.start), toDay(p.end), p.restartsFromPayment]).toEqual(['2026-10-30', '2026-11-30', true]);
   });
+  it('after the contract ended, a late payment settles the covered days instead of restarting', () => {
+    const p = paymentPeriod({ dueDate: day('2026-01-11'), paidAt: day('2026-10-30'), cycles: 1, cycleMonths: 1, now: day('2026-10-30'), contractEnded: true });
+    expect(p).toMatchObject({ start: day('2026-01-11'), end: day('2026-02-11'), restartsFromPayment: false });
+  });
 });
 
 describe('paymentProblems', () => {

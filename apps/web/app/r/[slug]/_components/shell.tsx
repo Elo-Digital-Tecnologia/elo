@@ -196,7 +196,11 @@ export function PanelShell({ children }: { children: ReactNode }) {
       api<Me>('/api/restaurant/me', { token })
         .then((data) => {
           // O token precisa ser do restaurante deste endereço.
-          if (data.slug !== slug) return setToken(null);
+          if (data.slug !== slug) {
+            // The restaurant's link changed: same panel under the current link; a token of another restaurant signs out.
+            if (data.id === user.restaurantId) return router.replace(`/r/${data.slug}${window.location.pathname.slice(base.length)}`);
+            return setToken(null);
+          }
           // Elo support whose pass runs out goes back to the restaurant in the Elo panel.
           if (user.impersonatedBy) leavingTo.current = `/admin/restaurants/${data.id}`;
           setMe(data);

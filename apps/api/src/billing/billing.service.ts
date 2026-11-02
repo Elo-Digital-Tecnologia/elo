@@ -143,7 +143,7 @@ export class BillingService {
   async preview(restaurantId: string, cycles: number, paidAt: string): Promise<PaymentPreview> {
     const r = await this.restaurant(restaurantId);
     const plan = await this.planOf(r);
-    const period = paymentPeriod({ dueDate: r.dueDate, paidAt: day(paidAt, 'paidAt'), cycles, cycleMonths: plan.cycleMonths });
+    const period = paymentPeriod({ dueDate: r.dueDate, paidAt: day(paidAt, 'paidAt'), cycles, cycleMonths: plan.cycleMonths, contractEnded: await this.contractEnded(r) });
     return {
       periodStart: period.start.toISOString(),
       newDueDate: period.end.toISOString(),
@@ -174,7 +174,7 @@ export class BillingService {
     if (problems.length) throw new BadRequestException({ message: 'invalid_payment', problems });
     const receipt = await this.receipt(restaurantId, input.receiptId);
 
-    const period = paymentPeriod({ dueDate: r.dueDate, paidAt, cycles: input.cycles, cycleMonths: plan.cycleMonths });
+    const period = paymentPeriod({ dueDate: r.dueDate, paidAt, cycles: input.cycles, cycleMonths: plan.cycleMonths, contractEnded: await this.contractEnded(r) });
     const entry = await this.data.transaction(async (em) => {
       const saved = await em.save(
         em.create(Payment, {
@@ -304,6 +304,11 @@ export class BillingService {
     const summary = contractSummary(terms, this.today());
     const problem = billingProblem(summary, toDay(r.dueDate));
     if (problem === 'contract_pending' || (payment && problem)) throw new ConflictException(problem);
+  }
+
+  private async contractEnded(r: Restaurant): Promise<boolean> {
+    const terms = await this.data.getRepository(Contract).find({ where: { restaurantId: r.id } });
+    return contractSummary(terms, this.today()).state === 'ended';
   }
 
   /** What the restaurant pays now: the contract in force, or a later amendment. */

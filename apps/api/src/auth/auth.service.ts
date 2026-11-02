@@ -83,13 +83,16 @@ export class AuthService {
     return { accessToken: await this.sign(this.payloadOf(user, session.id)), session: { scope, token: token!, expiresAt: session.expiresAt } };
   }
 
-  /** Scopes of the restaurant's old links: a device signed in before the link changed still has its cookie under one of them. */
-  async aliasScopes(scope: SessionScope): Promise<SessionScope[]> {
-    if (scope === 'admin') return [];
+  /**
+   * The scope under the restaurant's current link, and the ones of its old links: a
+   * device signed in before the link changed still has its cookie under an old name.
+   */
+  async scopesOf(scope: SessionScope): Promise<{ current: SessionScope; old: SessionScope[] }> {
+    if (scope === 'admin') return { current: scope, old: [] };
     const r = await restaurantBySlug(this.restaurants.manager, scope.slice(2));
-    if (!r) return [];
+    if (!r) return { current: scope, old: [] };
     const rows = await this.restaurants.manager.find(RestaurantSlugAlias, { where: { restaurantId: r.id } });
-    return rows.map((a) => restaurantScope(a.slug));
+    return { current: restaurantScope(r.slug), old: rows.map((a) => restaurantScope(a.slug)) };
   }
 
   async logout(scope: SessionScope, token: string | undefined): Promise<void> {

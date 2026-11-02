@@ -59,13 +59,11 @@ export class AuthController {
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @Post('session')
   async session(@Body() dto: SessionScopeDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const scope = scopeOf(dto);
-    let token: string | undefined = req.cookies?.[sessionCookie(scope)];
-    // The restaurant's link changed since this device signed in: its cookie still has the old name.
-    const old = token ? null : (await this.auth.aliasScopes(scope)).find((s) => req.cookies?.[sessionCookie(s)]);
-    if (old) token = req.cookies[sessionCookie(old)];
-    const out = signedIn(res, this.secure, await this.auth.renew(scope, token));
-    if (old) res.clearCookie(sessionCookie(old), { path: '/' });
+    // A panel opened on an old link, or a cookie saved under one, renews under the current link.
+    const { current, old } = await this.auth.scopesOf(scopeOf(dto));
+    const found = [current, ...old].find((s) => req.cookies?.[sessionCookie(s)]);
+    const out = signedIn(res, this.secure, await this.auth.renew(current, found ? req.cookies[sessionCookie(found)] : undefined));
+    if (found && found !== current) res.clearCookie(sessionCookie(found), { path: '/' });
     return out;
   }
 

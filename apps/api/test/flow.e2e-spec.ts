@@ -835,6 +835,8 @@ suite('fluxo da mesa (e2e)', () => {
     // the team stays signed in: the old cookie renews under the new link
     const renewed = await http().post('/auth/session').set('Cookie', cookieOf(signIn)).send({ scope: `r:${next}` }).expect(201);
     expect(String(renewed.headers['set-cookie'])).toContain(`elo_session_r_${next}=`);
+    // a panel still open on the old link renews too
+    await http().post('/auth/session').set('Cookie', cookieOf(signIn)).send({ scope: `r:${r.slug}` }).expect(201);
     await http().post(`/auth/restaurants/${r.slug}/login`).send({ username: `ed${suf}`, password: 'senha12345' }).expect(201);
     // nobody else can take the old link, and the restaurant can go back to it
     await restaurant(sa, { name: 'Outro', slug: r.slug, managerName: 'Rita', managerContact: '11977777777', planId, adminUsername: `eo${suf}`, adminPassword: 'senha12345' }, 409);
@@ -1249,7 +1251,9 @@ suite('fluxo da mesa (e2e)', () => {
     // after the last contract ended, a payment only settles the days it covered
     const owing = await create('Devendo', 'dv');
     await contract(owing.id, { kind: 'definitive', origin: 'initial', signedOn: day(-100), startsOn: day(-90), endsOn: day(-10), documentId: await upload(owing.id) }).expect(201);
-    await http().post(`/admin/restaurants/${owing.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Quitou a dívida' }).expect(201);
+    const settled = (await http().post(`/admin/restaurants/${owing.id}/payments`).set(auth(sa)).send({ cycles: 3, paidAt: day(0), noReceiptReason: 'Quitou a dívida' }).expect(201)).body;
+    // it pays the covered days from the old due date on, not a month from today
+    expect(settled.periodStart.slice(0, 10)).toBe(day(-90));
     expect((await http().post(`/admin/restaurants/${owing.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'De novo' }).expect(409)).body.message).toBe('nothing_owed');
 
     // a contract that ended locks the team, takes the menu down and stops orders from a table already open

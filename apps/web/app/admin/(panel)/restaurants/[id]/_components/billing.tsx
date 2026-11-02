@@ -26,7 +26,7 @@ const PROBLEM: Record<PaymentProblem | 'due_in_past' | 'reason_required', string
 };
 
 const CODE: Record<string, string> = {
-  no_plan: 'Este restaurante não tem plano. Escolha um plano antes de registrar o pagamento.',
+  no_plan: 'Nenhum contrato com plano está valendo. O plano vem com o contrato: registre ou renove o contrato.',
   contract_pending: 'A cobrança começa com o contrato. Registre o contrato antes do pagamento.',
   nothing_owed: 'O contrato terminou e não há dias cobertos em aberto. Registre a renovação para receber de novo.',
   not_latest_entry: 'Só o lançamento mais recente pode ser estornado.',
@@ -217,7 +217,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
   const history =
     entries.length === 0 ? (
       <EmptyState icon={Wallet} title="Nenhum pagamento registrado" action={canRecord && subscription?.plan && <Button onClick={() => open('pay')}>Registrar pagamento</Button>}>
-        {subscription?.plan ? 'O vencimento segue o fim do teste até o primeiro pagamento.' : 'Escolha um plano para registrar pagamentos.'}
+        {subscription?.plan ? 'O vencimento segue o fim do teste até o primeiro pagamento.' : 'O plano vem com o contrato: registre o contrato para receber pagamentos.'}
       </EmptyState>
     ) : (
       <DataTable

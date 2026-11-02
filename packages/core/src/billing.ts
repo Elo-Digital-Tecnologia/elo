@@ -101,10 +101,12 @@ export const expectedAmount = (priceCents: number, cycles: number) => priceCents
 /**
  * Period a payment covers. While the restaurant is active or in grace, it continues from
  * the current due date, keeping the billing day. Once suspended for being overdue, it
- * starts on the payment date, so the suspended time is not charged.
+ * starts on the payment date, so the suspended time is not charged; except after the
+ * contract ended, when it settles the covered days still owed.
  */
-export function paymentPeriod(input: { dueDate: Date; paidAt: Date; cycles: number; cycleMonths: number; now?: Date }) {
-  const overdue = accessState(input.dueDate, input.now ?? new Date()) === AccessState.Suspended;
+export function paymentPeriod(input: { dueDate: Date; paidAt: Date; cycles: number; cycleMonths: number; now?: Date; contractEnded?: boolean }) {
+  // After the contract ended, a payment settles the covered days it owes: no restart, or the gap would be billed and the debt dropped.
+  const overdue = !input.contractEnded && accessState(input.dueDate, input.now ?? new Date()) === AccessState.Suspended;
   const start = overdue ? dateOnly(toDay(input.paidAt))! : input.dueDate;
   return { start, end: addMonths(start, input.cycles * input.cycleMonths), restartsFromPayment: overdue };
 }
