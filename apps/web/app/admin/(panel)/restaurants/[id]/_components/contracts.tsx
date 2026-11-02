@@ -427,6 +427,7 @@ export function useContracts({
       >
         <p>
           O teste termina hoje e a cobrança começa: o vencimento passa a ser hoje e, sem pagamento, a equipe ainda tem os {GRACE_DAYS} dias de tolerância antes de perder o acesso.
+          Os pagamentos já registrados passam a contar a partir de hoje: os dias de teste que sobravam deixam de ser dias pagos.
           Para cortar o acesso agora, use <strong>Suspender acesso</strong>.
         </p>
         {endingTrial && (

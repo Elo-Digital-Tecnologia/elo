@@ -1,12 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, Repository } from 'typeorm';
-import { businessDay, contractProblems, type ContractView, dateOnly, effectiveEnds, latestContract, trialStatus } from '@elo/core';
+import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
+import { businessDay, contractProblems, type ContractView, dateOnly, effectiveEnds, latestContract, rebasedPayments, toDay, trialStatus } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
-import { Contract, Plan, Restaurant } from '../database/entities';
+import { Contract, Payment, Plan, Restaurant } from '../database/entities';
 import { syncDueDate } from '../billing/due-date';
 import { documentView, DocumentsService } from '../documents/documents.service';
 import type { ContractDto } from './contracts.dto';
@@ -73,11 +73,13 @@ export class ContractsService {
       if (await em.exists(Contract, { where: { documentId: doc.id } })) throw new ConflictException({ statusCode: 409, message: 'document_in_use', field: 'documentId' });
       const previous = latestContract(existing);
 
+      let cutsTrial = false;
       if (dto.origin === 'conversion' && previous) {
         // Converting during the free trial ends it: billing starts with the definitive contract.
         const trial = trialStatus(existing, today);
         if (previous.origin === 'initial' && trial.billingStartsOn && dto.startsOn < trial.billingStartsOn && !previous.trialEndedOn) {
           await em.update(Contract, { id: previous.id }, { trialEndedOn: dto.startsOn, trialEndReason: 'conversion' });
+          cutsTrial = true;
         }
       }
       const row = await em.save(
@@ -105,7 +107,7 @@ export class ContractsService {
       );
       // The plan signed last is the restaurant's reference plan (the price in force comes from the contracts).
       await em.update(Restaurant, { id: restaurantId }, { planId: plan!.id });
-      await this.refresh(em, restaurantId);
+      await this.refresh(em, restaurantId, cutsTrial);
       return row;
     });
     await this.audit.record(actor, ACTION[dto.origin], restaurantId, {
@@ -129,10 +131,9 @@ export class ContractsService {
       if (latestContract(existing)?.id !== target.id) throw new ConflictException('not_latest_contract');
       await em.update(Contract, { id: target.id }, { voidedAt: new Date(), voidedBy: who.id, voidedByName: who.name, voidReason: reason.trim() });
       const previous = existing.find((c) => c.id === target.previousId);
-      if (target.origin === 'conversion' && previous?.trialEndReason === 'conversion') {
-        await em.update(Contract, { id: previous.id }, { trialEndedOn: null, trialEndReason: null });
-      }
-      await this.refresh(em, restaurantId);
+      const restoresTrial = target.origin === 'conversion' && previous?.trialEndReason === 'conversion';
+      if (restoresTrial) await em.update(Contract, { id: previous!.id }, { trialEndedOn: null, trialEndReason: null });
+      await this.refresh(em, restaurantId, restoresTrial);
       return target;
     });
     await this.audit.record(actor, 'contract_voided', restaurantId, {
@@ -141,7 +142,10 @@ export class ContractsService {
     return (await this.list(restaurantId)).find((c) => c.id === contractId)!;
   }
 
-  /** Ends the pilot's free trial today: billing starts now, with the usual grace days. */
+  /**
+   * Ends the pilot's free trial today: billing starts now, with the usual grace days.
+   * Payments already recorded move up with it, so the trial days left are not kept for free.
+   */
   async endTrial(restaurantId: string, reason: string, actor: JwtUser): Promise<void> {
     const today = this.today();
     const ended = await this.data.transaction(async (em) => {
@@ -151,10 +155,12 @@ export class ContractsService {
       if (trial.state !== 'running') throw new ConflictException('trial_over');
       const first = existing.find((c) => !c.voidedAt && c.origin === 'initial')!;
       await em.update(Contract, { id: first.id }, { trialEndedOn: today, trialEndReason: 'early' });
-      await this.refresh(em, restaurantId);
-      return trial;
+      const moved = await this.refresh(em, restaurantId, true);
+      return { trial, moved };
     });
-    await this.audit.record(actor, 'trial_ended', restaurantId, { meta: { reason: reason.trim(), from: ended.billingStartsOn } });
+    await this.audit.record(actor, 'trial_ended', restaurantId, {
+      meta: { reason: reason.trim(), from: ended.trial.billingStartsOn, ...(ended.moved ? { paymentsMoved: ended.moved } : {}) },
+    });
   }
 
   /** The plan a new contract signs: an active one, or the restaurant's own even if it was retired since. */
@@ -172,8 +178,12 @@ export class ContractsService {
     return r;
   }
 
-  /** Brings derived data in line with the contracts: each one's last covered day (for the SQL filters) and the due date. */
-  private async refresh(em: EntityManager, restaurantId: string): Promise<void> {
+  /**
+   * Brings derived data in line with the contracts: each one's last covered day (for the SQL filters) and the due date.
+   * With `rebase`, the first billed day moved because of the trial, and the payments that followed it move with it
+   * (the number moved is returned).
+   */
+  private async refresh(em: EntityManager, restaurantId: string, rebase = false): Promise<number> {
     const rows = await em.find(Contract, { where: { restaurantId } });
     const ends = effectiveEnds(rows);
     for (const c of rows) {
@@ -182,8 +192,22 @@ export class ContractsService {
     }
     // The first billed day follows the pilot's trial.
     const billing = trialStatus(rows, this.today()).billingStartsOn;
-    if (!billing) return;
+    if (!billing) return 0;
+    const { initialDueDate } = await em.findOneOrFail(Restaurant, { where: { id: restaurantId }, loadEagerRelations: false });
+    let moved = 0;
+    if (rebase) {
+      const entries = await em.find(Payment, { where: { restaurantId, voidedAt: IsNull() }, order: { createdAt: 'ASC' } });
+      const periods = rebasedPayments(
+        entries.map((e) => ({ id: e.id, kind: e.kind, periodStart: e.periodStart && toDay(e.periodStart), newDueDate: toDay(e.newDueDate) })),
+        toDay(initialDueDate),
+        billing,
+        rows,
+      );
+      for (const [id, p] of periods) await em.update(Payment, { id }, { periodStart: dateOnly(p.periodStart)!, newDueDate: dateOnly(p.newDueDate)! });
+      moved = periods.size;
+    }
     await em.update(Restaurant, { id: restaurantId }, { initialDueDate: dateOnly(billing)! });
     await syncDueDate(em, restaurantId);
+    return moved;
   }
 }

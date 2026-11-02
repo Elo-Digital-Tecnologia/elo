@@ -281,10 +281,6 @@ export class BillingService {
     return view(entry, null);
   }
 
-  /**
-   * Ends the free trial today: billing starts now, with the usual grace days. Payments
-   * already recorded keep their periods; to cut access at once, suspend instead.
-   */
   private async restaurant(id: string): Promise<Restaurant> {
     const r = await this.restaurants.findOne({ where: { id } });
     if (!r) throw new NotFoundException();

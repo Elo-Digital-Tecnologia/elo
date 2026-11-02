@@ -1,6 +1,6 @@
 import { accessState, restaurantStatus } from './subscription';
 import { suspensionReasons } from './billing';
-import { billedDueDate, billingProblem, planInForce, businessDay, contractProblems, contractState, contractStatus, type ContractView, coverage, effectiveEnds, latestContract, trialStatus } from './contracts';
+import { billedDueDate, rebasedPayments, billingProblem, planInForce, businessDay, contractProblems, contractState, contractStatus, type ContractView, coverage, effectiveEnds, latestContract, trialStatus } from './contracts';
 
 const doc = { id: 'd', kind: 'contract' as const, name: 'c.pdf', mime: 'application/pdf', bytes: 1, createdAt: '' };
 let n = 0;
@@ -146,5 +146,22 @@ describe('contracts', () => {
   it('reads the business day in Brasília, not in UTC', () => {
     expect(businessDay(new Date('2026-11-01T01:30:00Z'))).toBe('2026-10-31');
     expect(businessDay(new Date('2026-11-01T03:30:00Z'))).toBe('2026-11-01');
+  });
+
+  it('payments follow the first billed day when the trial moves, up to the first entry that does not continue them', () => {
+    const terms = [c('definitive', 'initial', '2026-01-01', '2028-12-31')];
+    const pay = (id: string, periodStart: string, newDueDate: string) => ({ id, kind: 'payment' as const, periodStart, newDueDate });
+    const entries = [pay('a', '2026-12-01', '2027-01-01'), pay('b', '2027-01-01', '2027-03-01'), { id: 'adj', kind: 'adjustment' as const, periodStart: null, newDueDate: '2027-06-01' }, pay('c', '2027-06-01', '2027-07-01')];
+    expect(rebasedPayments(entries, '2026-12-01', '2026-11-02', terms)).toEqual(
+      new Map([
+        ['a', { periodStart: '2026-11-02', newDueDate: '2026-12-02' }],
+        ['b', { periodStart: '2026-12-02', newDueDate: '2027-02-02' }],
+      ]),
+    );
+    expect(rebasedPayments(entries, '2026-12-01', '2026-12-01', terms).size).toBe(0);
+    // a restart after a suspension is not a continuation: nothing moves
+    expect(rebasedPayments([pay('r', '2027-02-10', '2027-03-10')], '2026-12-01', '2026-11-02', terms).size).toBe(0);
+    // a month-end start keeps the length in months
+    expect(rebasedPayments([pay('m', '2026-12-31', '2027-01-31')], '2026-12-31', '2026-01-31', terms).get('m')).toEqual({ periodStart: '2026-01-31', newDueDate: '2026-02-28' });
   });
 });

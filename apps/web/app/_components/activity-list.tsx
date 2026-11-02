@@ -65,7 +65,8 @@ function detail(a: ActivityView): string | null {
   }
   if (a.action === 'trial_ended') {
     const from = typeof m.from === 'string' ? `Cobrança começaria em ${m.from.length === 10 ? calendarDay(m.from) : day(m.from)}` : null;
-    return [from, reason].filter(Boolean).join(' · ') || null;
+    const moved = typeof m.paymentsMoved === 'number' ? `${m.paymentsMoved} ${m.paymentsMoved === 1 ? 'pagamento recomeçou' : 'pagamentos recomeçaram'} de hoje` : null;
+    return [from, moved, reason].filter(Boolean).join(' · ') || null;
   }
   if (a.action === 'contract_registered' || a.action === 'contract_converted' || a.action === 'contract_renewed' || a.action === 'contract_voided') {
     const kind = typeof m.kind === 'string' ? CONTRACT_KIND_LABEL[m.kind as ContractKind] : null;

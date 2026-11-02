@@ -1,4 +1,4 @@
-import type { DocumentView } from './billing';
+import { addMonths, dateOnly, type DocumentView, toDay } from './billing';
 
 export const ContractKind = { Pilot: 'pilot', Definitive: 'definitive' } as const;
 export type ContractKind = (typeof ContractKind)[keyof typeof ContractKind];
@@ -287,6 +287,45 @@ export function billedDueDate(entry: { due: string; base: string }, terms: Contr
     due = shiftDay(due, daysBetween(gapStart, merged[i + 1].startsOn));
   }
   return due;
+}
+
+/** A payment or adjustment of the billing history, in the order it was recorded (voided ones left out). */
+export interface PeriodEntry {
+  id: string;
+  kind: 'payment' | 'adjustment';
+  periodStart: string | null;
+  newDueDate: string;
+}
+
+const monthsBetween = (from: string, to: string) =>
+  (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7));
+
+const plusMonths = (day: string, months: number) => toDay(addMonths(dateOnly(day)!, months));
+
+/**
+ * New periods for the payments that followed the first billed day when it moves (the
+ * free trial ended early, or came back): each keeps its length in months and starts
+ * where the one before ends. The chain stops at the first entry that does not continue
+ * the previous one, such as a manual adjustment or a restart after a suspension, and
+ * everything from there on keeps its dates.
+ */
+export function rebasedPayments(entries: PeriodEntry[], from: string, to: string, terms: ContractTerm[]): Map<string, { periodStart: string; newDueDate: string }> {
+  const out = new Map<string, { periodStart: string; newDueDate: string }>();
+  if (from === to) return out;
+  let oldDue = from;
+  let oldRaw = from;
+  let newDue = to;
+  for (const e of entries) {
+    if (e.kind !== 'payment' || !e.periodStart) break;
+    if (e.periodStart !== oldDue && e.periodStart !== oldRaw) break;
+    const months = monthsBetween(e.periodStart, e.newDueDate);
+    const end = plusMonths(newDue, months);
+    out.set(e.id, { periodStart: newDue, newDueDate: end });
+    oldRaw = e.newDueDate;
+    oldDue = billedDueDate({ due: e.newDueDate, base: e.periodStart }, terms);
+    newDue = billedDueDate({ due: end, base: newDue }, terms);
+  }
+  return out;
 }
 
 export type BillingProblem = 'contract_pending' | 'nothing_owed';
