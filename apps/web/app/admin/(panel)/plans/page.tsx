@@ -82,7 +82,7 @@ function View() {
     <>
       <PageHeader
         title="Planos"
-        description="O valor e o ciclo de cada plano definem quanto cobrar e até quando cada pagamento vale."
+        description="O plano escolhido no contrato fica gravado nele com o valor e o ciclo daquele momento."
         actions={manage && <Button onClick={() => open('new')}><Plus size={17} /> Novo plano</Button>}
       />
       {failed && <ErrorState action={<Button onClick={load}>Tentar de novo</Button>}>Não foi possível carregar os planos.</ErrorState>}
@@ -140,7 +140,7 @@ function View() {
               Disponível para novos restaurantes
             </label>
           )}
-          {editing !== 'new' && <p className="text-xs text-muted">Mudar o valor vale para os próximos pagamentos. Os já registrados continuam como foram cobrados.</p>}
+          {editing !== 'new' && <p className="text-xs text-muted">Mudar o valor vale para contratos e aditivos novos. Os contratos vigentes mantêm o valor assinado.</p>}
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end"><Button type="submit" loading={saving}>Salvar</Button></div>
         </form>

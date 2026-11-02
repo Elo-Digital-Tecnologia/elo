@@ -5,12 +5,12 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { availability, FIELD_RULES, type FieldError, overnightLabel, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
+import { availability, FIELD_RULES, type FieldError, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DateTimeInput, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, Pagination, SkeletonCards, Textarea } from '@elo/ui';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
+import { WeekPreview } from '../../../_components/week-preview';
 
-const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
 const PROBLEM: Record<PauseProblem, string> = {
   ends_before_start: 'O fim precisa ser depois do início.',
@@ -307,18 +307,7 @@ function View() {
               {owner && <Link href={`/r/${me.slug}/dashboard/settings`} className="text-sm font-semibold text-brand underline-offset-2 hover:underline">Editar em Configurações</Link>}
             </div>
             {me.openingHours ? (
-              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                {DAYS.map((d, i) => {
-                  const h = me.openingHours?.[i];
-                  return (
-                    <li key={d} className={`surface px-3 py-2 text-sm ${i === new Date().getDay() ? 'ring-1 ring-brand/50' : ''}`}>
-                      <span className="block text-xs text-muted">{d}</span>
-                      <span className={`block font-semibold tabular-nums ${h ? '' : 'text-muted'}`}>{h ? `${h.open}–${h.close}` : 'Fechado'}</span>
-                      {overnightLabel(i, h) && <span className="block text-xs text-info">{overnightLabel(i, h)}</span>}
-                    </li>
-                  );
-                })}
-              </ul>
+              <WeekPreview hours={me.openingHours} today={new Date().getDay()} />
             ) : (
               <p className="text-sm text-muted">Nenhum horário cadastrado: o restaurante fica sempre aberto.</p>
             )}

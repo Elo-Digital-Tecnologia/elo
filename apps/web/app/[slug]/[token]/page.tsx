@@ -101,6 +101,8 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
   useEffect(() => {
     api<SessionStateView>(`/api/public/${params.slug}/${params.token}/session`, { method: 'POST' })
       .then((s) => {
+        // A QR code printed with the old link: show the current one in the address bar.
+        if (s.restaurant.slug !== params.slug) window.history.replaceState(null, '', `/${s.restaurant.slug}/${params.token}`);
         setState(s);
         setPhase('ready');
       })

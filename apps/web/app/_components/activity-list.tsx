@@ -71,9 +71,13 @@ function detail(a: ActivityView): string | null {
     const kind = typeof m.kind === 'string' ? CONTRACT_KIND_LABEL[m.kind as ContractKind] : null;
     const term = typeof m.startsOn === 'string' && typeof m.endsOn === 'string' ? `de ${calendarDay(m.startsOn)} a ${calendarDay(m.endsOn)}` : null;
     const trial = typeof m.trialDays === 'number' && m.trialDays > 0 ? `teste de ${m.trialDays} ${m.trialDays === 1 ? 'dia' : 'dias'}` : null;
-    return [kind, term, trial, a.action === 'contract_voided' ? reason : null].filter(Boolean).join(' · ') || null;
+    const plan = typeof m.plan === 'string' && typeof m.priceCents === 'number' ? `${m.plan} ${formatBRL(m.priceCents)}` : null;
+    return [kind, term, plan, trial, a.action === 'contract_voided' ? reason : null].filter(Boolean).join(' · ') || null;
   }
-  if (a.action === 'plan_changed') return typeof m.from === 'string' ? `Antes: ${m.from}.` : null;
+  if (a.action === 'plan_changed') {
+    const price = (v: unknown) => (typeof v === 'number' ? ` (${formatBRL(v)})` : '');
+    return [typeof m.from === 'string' ? `Antes: ${m.from}${price(m.fromCents)}` : null, typeof m.toCents === 'number' ? `Agora: ${formatBRL(m.toCents)}` : null, reason].filter(Boolean).join(' · ') || null;
+  }
   if (a.action === 'payment_voided') {
     const amount = typeof m.amountCents === 'number' && m.amountCents > 0 ? formatBRL(m.amountCents) : null;
     const due = typeof m.newDueDate === 'string' ? `vencimento volta para ${day(m.newDueDate)}` : null;

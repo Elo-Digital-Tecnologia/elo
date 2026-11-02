@@ -18,7 +18,11 @@ export default function FixedMenu({ params }: { params: { slug: string } }) {
 
   useEffect(() => {
     api<PublicMenuView>(`/api/public/${params.slug}/menu`)
-      .then(setData)
+      .then((d) => {
+        // Opened from an old link: show the current one in the address bar.
+        if (d.restaurant.slug !== params.slug) window.history.replaceState(null, '', `/${d.restaurant.slug}`);
+        setData(d);
+      })
       .catch((e) => e instanceof ApiError && setMissing(e.code === 'menu_unavailable' ? 'unavailable' : 'not_found'));
   }, [params.slug]);
 

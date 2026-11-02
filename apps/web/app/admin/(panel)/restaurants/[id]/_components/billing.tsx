@@ -28,6 +28,7 @@ const PROBLEM: Record<PaymentProblem | 'due_in_past' | 'reason_required', string
 const CODE: Record<string, string> = {
   no_plan: 'Este restaurante não tem plano. Escolha um plano antes de registrar o pagamento.',
   contract_pending: 'A cobrança começa com o contrato. Registre o contrato antes do pagamento.',
+  nothing_owed: 'O contrato terminou e não há dias cobertos em aberto. Registre a renovação para receber de novo.',
   not_latest_entry: 'Só o lançamento mais recente pode ser estornado.',
   already_voided: 'Este lançamento já foi estornado.',
   plan_inactive: 'Este plano foi desativado. Escolha outro.',
@@ -105,6 +106,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
   const adjustForm = useForm({ dueDate: '', reason: '' }, ADJUST_CHECKS);
   const [plans, setPlans] = useState<PlanView[]>([]);
   const [planId, setPlanId] = useState('');
+  const amendForm = useForm({ reason: '' }, VOID_CHECKS);
 
   const load = useCallback(async () => {
     setEntries(await api<BillingEntryView[]>(`/api/admin/restaurants/${id}/payments`, { token }));
@@ -163,6 +165,7 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
     if (d === 'adjust') adjustForm.reset({ dueDate: '', reason: '' });
     if (d === 'plan') {
       setPlanId(subscription?.plan?.id ?? '');
+      amendForm.reset({ reason: '' });
       void api<PlanView[]>('/api/admin/plans', { token }).then((list) => setPlans(list.filter((p) => p.active || p.id === subscription?.plan?.id)));
     }
     if (typeof d === 'object' && 'detail' in d) setAttaching(null);
@@ -424,15 +427,26 @@ export function useBilling({ id, token, subscription, canRecord, onChange }: { i
         </form>
       </Modal>
 
-      <Modal open={dialog === 'plan'} onClose={() => setDialog(null)} title="Trocar plano" sheet>
-        <form onSubmit={(e) => { e.preventDefault(); void run(() => api(`/api/admin/restaurants/${id}/plan`, { method: 'PATCH', body: { planId }, token })); }} className="space-y-4">
+      <Modal open={dialog === 'plan'} onClose={() => setDialog(null)} title="Trocar plano (aditivo)" sheet>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (amendForm.validate()) void run(() => api(`/api/admin/restaurants/${id}/plan`, { method: 'PATCH', body: { planId, reason: amendForm.values.reason }, token }));
+          }}
+          noValidate
+          className="space-y-4"
+        >
+          <p className="text-sm text-muted">O plano e o preço vêm do contrato. Trocar durante o contrato é um aditivo: o preço escolhido fica guardado e vale a partir do próximo pagamento.</p>
           <Field label="Plano">
             <select value={planId} onChange={(e) => setPlanId(e.target.value)} required>
               <option value="" disabled>Escolha</option>
               {plans.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
             </select>
           </Field>
-          <p className="text-xs text-muted">Vale a partir do próximo pagamento. O vencimento atual não muda.</p>
+          <Field label="Motivo do aditivo" hint="Fica nos registros do restaurante." error={amendForm.errors.reason}>
+            <Textarea {...amendForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={2} placeholder="Por exemplo: aditivo assinado em 02/11 para o plano anual" />
+          </Field>
+          <p className="text-xs text-muted">O vencimento atual não muda.</p>
           {errorLine}
           <div className="flex justify-end"><Button type="submit" loading={saving} disabled={!planId || planId === plan?.id}>Trocar</Button></div>
         </form>

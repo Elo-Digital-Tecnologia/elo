@@ -15,7 +15,10 @@ import {
   contractStatus,
   type ContractView,
   dayError,
+  cycleLabel,
   type DocumentView,
+  formatBRL,
+  type PlanView,
   fieldError,
   FIELD_RULES,
   GRACE_DAYS,
@@ -43,6 +46,7 @@ export const CONTRACT_PROBLEM: Record<ContractProblem, string> = {
   nothing_to_convert: 'A conversão vale para o piloto atual e começa durante a vigência dele (ou no dia seguinte ao fim).',
   conversion_is_definitive: 'A conversão gera um contrato definitivo.',
   trial_only_initial_pilot: 'Período de teste só no primeiro contrato, e só se for piloto.',
+  plan_required: 'Escolha o plano do contrato.',
 };
 
 const CODES: Record<string, string> = {
@@ -51,6 +55,8 @@ const CODES: Record<string, string> = {
   not_latest_contract: 'Só o contrato mais recente pode ser anulado.',
   contract_already_voided: 'Este contrato já foi anulado.',
   trial_over: 'O período de teste já terminou.',
+  plan_inactive: 'Este plano foi desativado. Escolha outro.',
+  plan_not_found: 'Este plano não existe mais. Escolha outro.',
 };
 
 /** Message for a failed contract request: the rules broken, a known code, or the generic one. */
@@ -66,6 +72,8 @@ export interface ContractFormState {
   endsOn: string;
   /** Typed as text; only a first pilot sends it. */
   trialDays: string;
+  /** Plan signed in the contract: its price is kept with it. */
+  planId: string;
   name: string;
   role: string;
   contact: string;
@@ -73,8 +81,8 @@ export interface ContractFormState {
 }
 
 /** A form prefilled for a contract starting on `start`, signed by `signatory`. */
-export function contractDraft(start: string, signatory: { name: string; role?: string; contact: string }, kind: ContractKind = 'pilot'): ContractFormState {
-  return { kind, signedOn: businessDay(), startsOn: start, endsOn: start ? yearFrom(start) : '', trialDays: kind === 'pilot' ? '14' : '0', name: signatory.name, role: signatory.role ?? '', contact: signatory.contact, document: null };
+export function contractDraft(start: string, signatory: { name: string; role?: string; contact: string }, kind: ContractKind = 'pilot', planId = ''): ContractFormState {
+  return { kind, signedOn: businessDay(), startsOn: start, endsOn: start ? yearFrom(start) : '', trialDays: kind === 'pilot' ? '14' : '0', planId, name: signatory.name, role: signatory.role ?? '', contact: signatory.contact, document: null };
 }
 
 /** Checks shared by the contract modal and the contract section of the new-restaurant form. */
@@ -83,6 +91,7 @@ export const contractChecks = {
   startsOn: (v: string) => dayError(v),
   endsOn: (v: string, all: ContractFormState) => dayError(v, { min: all.startsOn || undefined }),
   trialDays: (v: string, all: ContractFormState) => (all.kind === 'pilot' ? fieldError(FIELD_RULES.trialDays, v.trim() === '' ? undefined : Number(v)) : null),
+  planId: (v: string) => (v ? null : { code: 'required' as const }),
   name: rule(FIELD_RULES.personName),
   role: rule(FIELD_RULES.signatoryRole),
   contact: rule(FIELD_RULES.contact),
@@ -98,19 +107,32 @@ export function contractBody(v: ContractFormState, origin: ContractOrigin, docum
     endsOn: v.endsOn,
     signatory: { name: v.name, role: v.role, contact: v.contact },
     documentId,
+    planId: v.planId,
     ...(origin === 'initial' && v.kind === 'pilot' ? { trialDays: Number(v.trialDays) } : {}),
   };
 }
 
+/** Plans a contract can sign: the active ones, plus `keep` (the one in force) even if it was retired. */
+export async function contractPlans(token: string, keep?: string | null): Promise<PlanView[]> {
+  const list = await api<PlanView[]>('/api/admin/plans', { token });
+  return list.filter((p) => p.active || p.id === keep);
+}
+
 /**
- * Kind, dates, trial and signatory of a contract; the file picker is placed by the caller.
+ * Plan, kind, dates, trial and signatory of a contract; the file picker is placed by the caller.
  * `withTrial` is for a first contract: a pilot then gets its free days.
  */
-export function ContractFields({ form, fixedKind, withTrial }: { form: ReturnType<typeof useForm<ContractFormState>>; fixedKind?: boolean; withTrial?: boolean }) {
+export function ContractFields({ form, plans, fixedKind, withTrial }: { form: ReturnType<typeof useForm<ContractFormState>>; plans: PlanView[]; fixedKind?: boolean; withTrial?: boolean }) {
   const v = form.values;
   const today = businessDay();
   return (
     <>
+      <Field label="Plano" hint="O preço fica guardado com o contrato: mudanças futuras no plano não o alteram." error={form.errors.planId}>
+        <Select name="planId" value={v.planId} onChange={(e) => form.set('planId', e.target.value)} onBlur={() => form.touch('planId')} invalid={!!form.errors.planId}>
+          <option value="" disabled>Escolha o plano</option>
+          {plans.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
+        </Select>
+      </Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Tipo">
           <Select value={v.kind} disabled={fixedKind} onChange={(e) => form.set('kind', e.target.value as ContractKind)}>
@@ -170,6 +192,7 @@ export function useContracts({
   canEndTrial,
   signatory,
   trial,
+  planId,
   onChange,
 }: {
   id: string;
@@ -178,8 +201,11 @@ export function useContracts({
   canEndTrial: boolean;
   signatory: { name: string; contact: string };
   trial: TrialStatus | null;
+  /** Plan in force, offered first in a new contract. */
+  planId: string | null;
   onChange: () => Promise<void>;
 }) {
+  const [plans, setPlans] = useState<PlanView[]>([]);
   const [list, setList] = useState<ContractView[] | null>(null);
   const [op, setOp] = useState<Operation | null>(null);
   const [viewing, setViewing] = useState<ContractView | null>(null);
@@ -203,7 +229,8 @@ export function useContracts({
     setError(null);
     const start = origin === 'renewal' && latest ? (shiftDay(latest.effectiveEndsOn, 1) > today ? shiftDay(latest.effectiveEndsOn, 1) : today) : today;
     const last = latest?.signatory;
-    form.reset(contractDraft(start, last ?? signatory, origin === 'conversion' ? 'definitive' : latest?.kind ?? 'pilot'));
+    form.reset(contractDraft(start, last ?? signatory, origin === 'conversion' ? 'definitive' : latest?.kind ?? 'pilot', planId ?? ''));
+    void contractPlans(token, planId).then(setPlans).catch(() => setPlans([]));
     setOp({ origin, title: TITLE[origin] });
   };
 
@@ -315,6 +342,7 @@ export function useContracts({
                 {c.voided && <Badge tone="danger">Anulado</Badge>}
                 <span className="font-medium">{CONTRACT_ORIGIN_LABEL[c.origin]}</span>
                 <span className={`text-muted ${c.voided ? 'line-through' : ''}`}>{dayBR(c.startsOn)} a {dayBR(c.effectiveEndsOn)}{c.effectiveEndsOn !== c.endsOn && ' (convertido)'}</span>
+                {c.plan && <span className="text-muted">· {c.plan.name} {formatBRL(c.plan.priceCents)} {cycleLabel(c.plan.cycleMonths)}</span>}
                 {c.trialDays > 0 && <span className="text-muted">· teste de {plural(c.trialDays, 'dia', 'dias')}</span>}
               </span>
               <span className="shrink-0 text-muted">por {c.createdByName} · {new Date(c.createdAt).toLocaleDateString('pt-BR')}</span>
@@ -330,7 +358,7 @@ export function useContracts({
         <form onSubmit={submit} noValidate className="space-y-4">
           {op?.origin === 'conversion' && <p className="text-sm text-muted">O piloto vale até a véspera do início do definitivo; se ainda estiver em teste, o teste acaba ali e a cobrança começa. O histórico guarda os dois.</p>}
           {op?.origin === 'renewal' && <p className="text-sm text-muted">A renovação começa depois do fim do contrato atual. O contrato atual continua no histórico.</p>}
-          <ContractFields form={form} fixedKind={op?.origin === 'conversion'} withTrial={op?.origin === 'initial'} />
+          <ContractFields form={form} plans={plans} fixedKind={op?.origin === 'conversion'} withTrial={op?.origin === 'initial'} />
           <Field label="Contrato assinado" error={form.errors.document}>
             <DocumentPicker restaurantId={id} kind="contract" token={token} value={form.values.document} onChange={(d) => { form.set('document', d); form.touch('document'); }} invalid={!!form.errors.document} />
           </Field>
@@ -354,6 +382,7 @@ export function useContracts({
               Vigência de {dayBR(viewing.startsOn)} a {dayBR(viewing.effectiveEndsOn)}
               {viewing.effectiveEndsOn !== viewing.endsOn && ` (previsto até ${dayBR(viewing.endsOn)}, convertido antes)`}. Assinado em {dayBR(viewing.signedOn)} por {viewing.signatory.name} ({viewing.signatory.role}, {viewing.signatory.contact}).
               {viewing.trialDays > 0 && ` Período de teste de ${plural(viewing.trialDays, 'dia', 'dias')}.`}
+              {viewing.plan && ` Plano ${viewing.plan.name}: ${formatBRL(viewing.plan.priceCents)} ${cycleLabel(viewing.plan.cycleMonths)}.`}
             </p>
             <DocumentPreview doc={viewing.document} token={token} />
             {canManage && latest?.id === viewing.id && (

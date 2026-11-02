@@ -4,19 +4,18 @@ import { ArchiveRestore, Building2, Download, ExternalLink, Paperclip, Plus, Sea
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, apiUpload } from '@elo/client';
-import { businessDay, cycleLabel, DOCUMENT_LIMITS, type DocumentView, FIELD_RULES, formatBRL, type PlanView, RESTAURANT_STATUS_LABEL, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
-import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, PasswordInput, Select, SkeletonCards } from '@elo/ui';
+import { businessDay, DOCUMENT_LIMITS, type DocumentView, FIELD_RULES, type PlanView, RESTAURANT_STATUS_LABEL, type RestaurantListItem, type RestaurantListStatus, type RestaurantListView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, Input, Modal, PageHeader, Pagination, PasswordInput, SkeletonCards } from '@elo/ui';
 import { STATUS_TONE } from '../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
-import { contractBody, contractChecks, contractDraft, contractError, ContractFields, type ContractFormState } from './[id]/_components/contracts';
+import { contractBody, contractChecks, contractDraft, contractError, ContractFields, contractPlans, type ContractFormState } from './[id]/_components/contracts';
 import { fileSize } from './[id]/_components/documents';
 import { downloadExport } from './export';
 
-const EMPTY = { name: '', managerName: '', managerContact: '', planId: '', adminUsername: '', adminPassword: '' };
+const EMPTY = { name: '', managerName: '', managerContact: '', adminUsername: '', adminPassword: '' };
 const EMPTY_CONTRACT: ContractFormState = contractDraft('', { name: '', contact: '' });
 const PAGE_SIZE = 10;
-const REQUIRED = { code: 'required' } as const;
 
 const CHECKS = {
   name: rule(FIELD_RULES.restaurantName),
@@ -24,7 +23,6 @@ const CHECKS = {
   managerContact: rule(FIELD_RULES.contact),
   adminUsername: rule(FIELD_RULES.username),
   adminPassword: rule(FIELD_RULES.password),
-  planId: (v: string) => (v ? null : REQUIRED),
 };
 
 /** The link comes from the name (there is no link field), so link conflicts land under the name. */
@@ -133,14 +131,12 @@ function View() {
     return () => clearTimeout(t);
   }, [search, filters.q, setFilters]);
 
-  /** The form starts on the first active plan and a two-week trial. */
+  /** The plans come with the contract section, which starts on the first active plan and a two-week trial. */
   const openCreate = async () => {
     setError(null);
     setOpen(true);
     try {
-      const list = (await api<PlanView[]>('/api/admin/plans', { token })).filter((p) => p.active);
-      setPlans(list);
-      form.setValues((f) => ({ ...f, planId: f.planId || list[0]?.id || '' }));
+      setPlans(await contractPlans(token));
     } catch {
       setPlans([]);
     }
@@ -150,7 +146,7 @@ function View() {
   const toggleContract = (on: boolean) => {
     setWithContract(on);
     if (!on) return;
-    contract.reset(contractDraft(businessDay(), { name: form.values.managerName, contact: form.values.managerContact }));
+    contract.reset(contractDraft(businessDay(), { name: form.values.managerName, contact: form.values.managerContact }, 'pilot', plans?.[0]?.id ?? ''));
     setContractFile(null);
     setFileError(null);
   };
@@ -178,7 +174,7 @@ function View() {
     setSaving(true);
     let restaurant: { id: string; name: string } | null = null;
     try {
-      restaurant = await api<{ id: string; name: string }>('/api/admin/restaurants', { body: form.values, token });
+      restaurant = await api<{ id: string; name: string }>('/api/admin/restaurants', { body: { ...form.values, ...(withContract ? { planId: contract.values.planId } : {}) }, token });
       if (withContract) await registerContract(restaurant.id);
       form.reset(EMPTY);
       setWithContract(false);
@@ -359,17 +355,6 @@ function View() {
             <Field label="Nome do titular" hint="Também vira a conta de titular no painel do restaurante." error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
             <Field label="Contato do titular" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
           </div>
-          {plans?.length === 0 ? (
-            <p className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">Nenhum plano ativo. Crie um plano em <a href="/admin/plans" className="font-semibold underline">Planos</a> antes de cadastrar.</p>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Plano" error={form.errors.planId}>
-                <Select name="planId" value={form.values.planId} onChange={(e) => form.set('planId', e.target.value)} onBlur={() => form.touch('planId')} invalid={!!form.errors.planId}>
-                  {(plans ?? []).map((p) => <option key={p.id} value={p.id}>{p.name} · {formatBRL(p.priceCents)} {cycleLabel(p.cycleMonths)}</option>)}
-                </Select>
-              </Field>
-            </div>
-          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Usuário do titular" hint="Minúsculas, números, ponto, hífen ou sublinhado." error={form.errors.adminUsername}>
               <Input {...form.bind('adminUsername')} onChange={(e) => form.set('adminUsername', e.target.value.toLowerCase())} maxLength={FIELD_RULES.username.max} autoCapitalize="none" autoComplete="off" />
@@ -388,7 +373,10 @@ function View() {
             </label>
             {withContract && (
               <>
-                <ContractFields form={contract} withTrial />
+                {plans?.length === 0 && (
+                  <p className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">Nenhum plano ativo. Crie um plano em <a href="/admin/plans" className="font-semibold underline">Planos</a> antes de registrar o contrato.</p>
+                )}
+                <ContractFields form={contract} plans={plans ?? []} withTrial />
                 <Field label="Contrato assinado" error={fileError ?? undefined}>
                   <div className="space-y-1.5">
                     {contractFile ? (
@@ -421,7 +409,7 @@ function View() {
             )}
           </fieldset>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-          <div className="flex justify-end"><Button type="submit" loading={saving} disabled={!form.values.planId}>Cadastrar</Button></div>
+          <div className="flex justify-end"><Button type="submit" loading={saving}>Cadastrar</Button></div>
         </form>
       </Modal>
 

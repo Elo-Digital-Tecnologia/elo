@@ -4,7 +4,7 @@ import { Ban, CalendarClock, CircleCheck, Crown, ExternalLink, FilePlus2, FileSi
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
-import { CONTRACT_KIND_LABEL, CONTRACT_LIMITS, type ContractView, cycleLabel, FIELD_RULES, formatBRL, RESTAURANT_STATUS_LABEL, type Role, type SubscriptionView } from '@elo/core';
+import { billingProblem, CONTRACT_KIND_LABEL, CONTRACT_LIMITS, type ContractView, cycleLabel, FIELD_RULES, formatBRL, RESTAURANT_STATUS_LABEL, type Role, type SubscriptionView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, type TabItem, TabPanel, Tabs, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
 import { useContracts } from './_components/contracts';
@@ -23,6 +23,8 @@ interface Detail {
   suspended: boolean;
   createdAt: string;
   initialDueDate: string;
+  /** The plan last signed (or suggested at sign-up), offered first in a new contract. */
+  planId: string | null;
   subscription: SubscriptionView;
 }
 
@@ -73,6 +75,11 @@ const EDIT_CHECKS = {
 };
 
 const OWNER_CHECKS = { reason: rule(FIELD_RULES.reason) };
+const SLUG_CHECKS = { slug: rule(FIELD_RULES.slug), reason: rule(FIELD_RULES.reason) };
+const SLUG_MESSAGES = {
+  slug_taken: 'Este endereço já é (ou já foi) de outro restaurante.',
+  slug_reserved: 'Este endereço é reservado pelo sistema. Escolha outro.',
+};
 
 type Tab = 'general' | 'contracts' | 'payments' | 'tables' | 'activity';
 
@@ -91,6 +98,8 @@ function View({ id }: { id: string }) {
   const [rotating, setRotating] = useState<AdminTables['tables'][number] | null>(null);
   const [newLink, setNewLink] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [changingSlug, setChangingSlug] = useState(false);
+  const slugForm = useForm({ slug: '', reason: '' }, SLUG_CHECKS, SLUG_MESSAGES);
   const editForm = useForm({ name: '', managerName: '', managerContact: '' }, EDIT_CHECKS);
   const [deleting, setDeleting] = useState(false);
   const [confirmSlug, setConfirmSlug] = useState('');
@@ -122,6 +131,7 @@ function View({ id }: { id: string }) {
     canEndTrial: can('payments.record'),
     signatory: { name: r?.managerName ?? '', contact: r?.managerContact ?? '' },
     trial: r?.subscription.trial ?? null,
+    planId: r?.subscription.plan?.id ?? r?.planId ?? null,
     onChange: load,
   });
 
@@ -183,6 +193,8 @@ function View({ id }: { id: string }) {
   const overdue = sub.reasons.includes('overdue');
   const overdueDays = Math.floor((Date.now() - new Date(sub.dueDate).getTime()) / 86_400_000);
   const billingOn = sub.contract.state !== 'pending';
+  // After the last contract ended, a payment only settles days it covered (or comes ahead of a renewal).
+  const nothingOwed = billingProblem(sub.contract, sub.dueDate.slice(0, 10)) === 'nothing_owed';
   const owner = team?.find((m) => m.roles.includes('restaurant_admin')) ?? null;
   const candidates = (team ?? []).filter((m) => m.active && m.id !== owner?.id);
   // Manual suspension only takes away an access the team still has.
@@ -215,7 +227,15 @@ function View({ id }: { id: string }) {
             {can('restaurants.access') && (
               <Button variant="soft" loading={saving} onClick={openPanel}><ExternalLink size={17} /> Abrir painel</Button>
             )}
-            {can('payments.record') && sub.plan && billingOn && <Button onClick={() => billing.open('pay')}><Wallet size={17} /> Registrar pagamento</Button>}
+            {can('payments.record') && sub.plan && billingOn && (
+              <Button
+                disabled={nothingOwed}
+                title={nothingOwed ? 'O contrato terminou e não há nada em aberto: registre a renovação para receber de novo.' : undefined}
+                onClick={() => billing.open('pay')}
+              >
+                <Wallet size={17} /> Registrar pagamento
+              </Button>
+            )}
             {canSuspend && <Button variant="danger" onClick={() => { setError(null); setAccess('suspend'); }}><Ban size={17} /> Suspender acesso</Button>}
             {canReactivate && <Button variant="soft" onClick={() => { setError(null); setAccess('reactivate'); }}><CircleCheck size={17} /> Reativar acesso</Button>}
           </>
@@ -231,7 +251,7 @@ function View({ id }: { id: string }) {
             sub={sub}
             contract={contracts.current}
             overdueDays={overdueDays}
-            onPlan={can('payments.record') ? () => billing.open('plan') : null}
+            onPlan={can('payments.record') && billingOn ? () => billing.open('plan') : null}
             onAdjust={can('payments.record') && billingOn ? () => billing.open('adjust') : null}
             action={
               sub.status === 'pending' && can('contracts.manage') && contracts.loaded && !contracts.latest ? (
@@ -393,9 +413,45 @@ function View({ id }: { id: string }) {
               <Field label="Nome do titular" error={editForm.errors.managerName}><Input {...editForm.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
               <Field label="Contato do titular" hint="Telefone com DDD ou e-mail." error={editForm.errors.managerContact}><Input {...editForm.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
             </div>
-            <p className="text-xs text-muted">O link /{r.slug} não muda: ele está impresso nos QR Codes.</p>
+            <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+              Endereço do cardápio: <span className="font-mono">/{r.slug}</span>
+              <button type="button" className="font-semibold text-brand underline-offset-2 hover:underline" onClick={() => { setError(null); slugForm.reset({ slug: r.slug, reason: '' }); setEditing(false); setChangingSlug(true); }}>
+                Alterar endereço
+              </button>
+            </p>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}
             <div className="flex justify-end"><Button type="submit" loading={saving}>Salvar</Button></div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={changingSlug} onClose={() => setChangingSlug(false)} title="Alterar endereço do cardápio" sheet>
+        {changingSlug && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setError(null);
+              if (!slugForm.validate()) return;
+              const ok = await guard(() => api(`/api/admin/restaurants/${id}/slug`, { body: slugForm.values, token }), slugForm.fromServer);
+              if (ok) setChangingSlug(false);
+            }}
+            noValidate
+            className="space-y-4"
+          >
+            <p className="text-sm text-muted">
+              O endereço atual, <span className="font-mono">/{r.slug}</span>, continua levando ao restaurante: os QR Codes e as tags já impressos seguem funcionando e a equipe não precisa entrar de novo. Nenhum outro restaurante poderá usá-lo.
+            </p>
+            <Field label="Novo endereço" hint="Letras minúsculas, números e hífen." error={slugForm.errors.slug}>
+              <Input {...slugForm.bind('slug')} onChange={(e) => slugForm.set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} maxLength={FIELD_RULES.slug.max} autoCapitalize="none" spellCheck={false} autoFocus />
+            </Field>
+            <Field label="Motivo" hint="Fica nos registros do restaurante." error={slugForm.errors.reason}>
+              <Textarea {...slugForm.bind('reason')} maxLength={FIELD_RULES.reason.max} rows={2} placeholder="Por exemplo: o restaurante mudou de nome" />
+            </Field>
+            {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setChangingSlug(false)}>Voltar</Button>
+              <Button type="submit" loading={saving} disabled={slugForm.values.slug === r.slug}>Alterar endereço</Button>
+            </div>
           </form>
         )}
       </Modal>
