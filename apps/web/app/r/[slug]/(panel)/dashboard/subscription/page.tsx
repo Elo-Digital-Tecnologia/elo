@@ -60,7 +60,7 @@ function View() {
             <p className="flex items-start gap-2 border-t border-line/40 pt-4 text-sm">
               <Ban size={16} className="mt-0.5 shrink-0 text-danger" />
               O contrato{voided.kind ? ` ${CONTRACT_KIND_LABEL[voided.kind].toLowerCase()}` : ''} registrado por último foi anulado pela Elo Digital em {new Date(voided.at).toLocaleDateString('pt-BR')}
-              {s.status === 'pending' ? '. Ele não vale mais.' : ', e o contrato anterior voltou a valer.'}
+              {s.contract.state === 'active' ? ', e o contrato anterior voltou a valer.' : '. Ele não vale mais.'}
             </p>
           )}
           {trial && <p className="flex items-start gap-2 border-t border-line/40 pt-4 text-sm"><Hourglass size={16} className="mt-0.5 shrink-0 text-info" /> {trial}</p>}

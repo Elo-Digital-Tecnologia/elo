@@ -443,7 +443,7 @@ function View() {
                 </button>
               ))}
             </div>
-            <Field label="Motivo (opcional)" hint="Fica nos registros do restaurante." error={openForm.errors.reason}>
+            <Field label="Motivo (opcional)" hint="Fica só nos registros do restaurante; os clientes não veem." error={openForm.errors.reason}>
               <Textarea {...openForm.bind('reason')} maxLength={FIELD_RULES.pauseReason.max} rows={2} placeholder="Ex.: Evento fechado" />
             </Field>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}

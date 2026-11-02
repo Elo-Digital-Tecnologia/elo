@@ -970,6 +970,10 @@ suite('fluxo da mesa (e2e)', () => {
     await http().post(`/tables/${t2.id}/validate-open`).set(auth(waiterP)).expect(201);
     await http().post(`/restaurant/pauses/${extra.id}/end`).set(auth(owner)).expect(204);
     expect((await http().get('/restaurant/me').set(auth(owner)).expect(200)).body.availability).toMatchObject({ open: false, reason: 'hours' });
+    // closed again: a new request is refused
+    const t3 = (await http().post('/tables').set(auth(owner)).send({ name: 'Mesa C' }).expect(201)).body;
+    const c = await seat(t3);
+    expect((await http().post('/public/session/open').set('Cookie', c).expect(409)).body.message).toBe('restaurant_closed');
     const log = (await http().get('/restaurant/activity?category=settings').set(auth(owner)).expect(200)).body.items as { action: string }[];
     expect(log.filter((l) => l.action === 'pause_created')).toHaveLength(2);
     expect(log.filter((l) => l.action === 'opening_created' || l.action === 'opening_ended')).toHaveLength(2);

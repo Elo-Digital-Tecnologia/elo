@@ -185,7 +185,7 @@ describe('availability', () => {
       reason: null,
       extra: true,
       label: 'Aberto fora do horário · até 02:00',
-      pauseReason: 'Festa',
+      pauseReason: null,
       changesAt: '2026-11-11T05:00:00.000Z',
     });
     expect(availability({ hours: week, pauses: [opening], now: new Date('2026-11-11T05:00:00Z'), timeZone: TZ })).toMatchObject({ open: false, reason: 'hours' });

@@ -100,7 +100,7 @@ export interface Availability {
   open: boolean;
   /** Why it is closed: outside opening hours or a temporary closure. */
   reason: 'hours' | 'pause' | null;
-  /** Open only thanks to an extra opening outside the hours. */
+  /** Open only thanks to an extra opening outside the hours (its reason stays in the records, guests never see it). */
   extra: boolean;
   /** Ready-made text for guests and staff; null when there are no hours and no closure (always open). */
   label: string | null;
@@ -160,7 +160,7 @@ export function availability(input: { hours: OpeningHours | null | undefined; pa
   };
   if (opening && state && !state.open) {
     const end = pauseEnd(opening)!;
-    return { open: true, reason: null, extra: true, label: `Aberto fora do horário · até ${whenLabel(end, now, timeZone).replace(/^hoje às /, '').replace(/^em /, '')}`, pauseReason: opening.reason?.trim() || null, changesAt: next([end]) };
+    return { open: true, reason: null, extra: true, label: `Aberto fora do horário · até ${whenLabel(end, now, timeZone).replace(/^hoje às /, '').replace(/^em /, '')}`, pauseReason: null, changesAt: next([end]) };
   }
   // An extra opening that runs past the closing time takes over when the hours close.
   const openingEnd = opening ? pauseEnd(opening) : null;

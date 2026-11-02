@@ -21,11 +21,11 @@ export interface TokenPayload {
   exp: number;
 }
 
-export function decodeToken(token: string): TokenPayload | null {
+/** The token's claims, expired or not. */
+function readClaims(token: string): TokenPayload | null {
   try {
     const json = atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'));
     const payload = JSON.parse(json) as Omit<TokenPayload, 'roles'> & { roles?: string[]; role?: string };
-    if (payload.exp * 1000 <= Date.now()) return null;
     // Tokens issued before multiple roles carry a single `role`.
     const roles = payload.roles ?? (payload.role ? [payload.role] : []);
     return { ...payload, roles };
@@ -33,6 +33,15 @@ export function decodeToken(token: string): TokenPayload | null {
     return null;
   }
 }
+
+/** The claims of a token still in force; null once it expired. */
+export function decodeToken(token: string): TokenPayload | null {
+  const payload = readClaims(token);
+  return payload && payload.exp * 1000 > Date.now() ? payload : null;
+}
+
+/** Elo support's pass into a restaurant: it never trades the restaurant's own session cookie, even after it expired. */
+const isSupport = (token: string | null) => !!(token && readClaims(token)?.impersonatedBy);
 
 function readStored(scope: string): string | null {
   try {
@@ -96,8 +105,8 @@ export function useAuth(scope: string) {
   /** A fresh token from the session; null once the session is over. Elo support tokens are never renewed this way. */
   const renew = useCallback(async (): Promise<string | null> => {
     const current = tokenRef.current;
-    if (current && decodeToken(current)?.impersonatedBy) {
-      if (!decodeToken(current)) setToken(null);
+    if (isSupport(current)) {
+      if (!decodeToken(current!)) setToken(null);
       return tokenRef.current;
     }
     const result = await requestToken(scope);
@@ -110,7 +119,15 @@ export function useAuth(scope: string) {
     let cancelled = false;
     const saved = readStored(scope);
     const payload = saved ? decodeToken(saved) : null;
-    if (saved && payload && (payload.impersonatedBy || payload.exp * 1000 - Date.now() > AHEAD_MS)) {
+    if (isSupport(saved)) {
+      if (payload) {
+        tokenRef.current = saved;
+        setTokenState(saved);
+      } else writeStored(scope, null);
+      setReady(true);
+      return;
+    }
+    if (saved && payload && payload.exp * 1000 - Date.now() > AHEAD_MS) {
       tokenRef.current = saved;
       setTokenState(saved);
       setReady(true);
@@ -153,7 +170,6 @@ export function useAuth(scope: string) {
     const check = () => {
       if (document.visibilityState === 'hidden') return;
       const payload = tokenRef.current ? decodeToken(tokenRef.current) : null;
-      if (payload?.impersonatedBy) return;
       if (!payload || payload.exp * 1000 - Date.now() < AHEAD_MS) void renew();
     };
     const onUnauthorized = (e: Event) => {
@@ -173,10 +189,9 @@ export function useAuth(scope: string) {
 
   /** Signs out of this area on this browser: the session ends on the server too (Elo support only leaves). */
   const logout = useCallback(async () => {
-    const current = tokenRef.current;
+    // The session ends on the server first, or the sign-in page could trade the cookie back for a token.
+    if (!isSupport(tokenRef.current)) await api('/api/auth/logout', { body: { scope: sessionScopeOf(scope) } }).catch(() => undefined);
     setToken(null);
-    if (current && decodeToken(current)?.impersonatedBy) return;
-    await api('/api/auth/logout', { body: { scope: sessionScopeOf(scope) } }).catch(() => undefined);
   }, [scope, setToken]);
 
   // Referência estável: efeitos que dependem de `user` não podem rodar a cada render.

@@ -250,7 +250,7 @@ export function useContracts({
   const trialText = trial ? trialLine(trial) : null;
   const voided = status?.voided;
   const voidedNote = voided
-    ? `${voided.kind ? `O contrato ${CONTRACT_KIND_LABEL[voided.kind].toLowerCase()}` : 'O contrato'} registrado por último foi anulado em ${new Date(voided.at).toLocaleDateString('pt-BR')}${status?.current ? '; vale o contrato anterior.' : '; não há outro contrato.'}`
+    ? `${voided.kind ? `O contrato ${CONTRACT_KIND_LABEL[voided.kind].toLowerCase()}` : 'O contrato'} registrado por último foi anulado em ${new Date(voided.at).toLocaleDateString('pt-BR')}${status?.state === 'active' ? '; vale o contrato anterior.' : status?.current ? '; o contrato anterior já terminou.' : '; não há outro contrato.'}`
     : null;
 
   /** Buttons that add a contract: the first one, the pilot's conversion or a renewal. */
