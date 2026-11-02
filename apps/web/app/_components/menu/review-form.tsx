@@ -6,7 +6,6 @@ import { api, ApiError } from '@elo/client';
 import { FIELD_RULES, type ReviewView } from '@elo/core';
 import { Button, Textarea } from '@elo/ui';
 import { rule, unexpected, useForm } from '../../_lib/use-form';
-import { GoogleReviewLink } from './google-review-link';
 
 const CHECKS = { comment: rule(FIELD_RULES.reviewComment) };
 
@@ -15,13 +14,15 @@ const ERRORS: Record<string, string> = {
 };
 
 /** Avaliação do atendimento: de 1 a 5 estrelas e um comentário opcional. Pode ser corrigida enquanto a mesa estiver aberta. */
-export function ReviewForm({ googleUrl, slug, waiting }: { googleUrl: string | null; slug: string; waiting: boolean }) {
+export function ReviewForm({ onSent }: { onSent?: (sent: boolean) => void }) {
   const [stars, setStars] = useState(0);
   const form = useForm({ comment: '' }, CHECKS);
   const { set } = form;
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => onSent?.(sent), [sent, onSent]);
 
   useEffect(() => {
     api<ReviewView | null>('/api/public/session/review')
@@ -81,14 +82,6 @@ export function ReviewForm({ googleUrl, slug, waiting }: { googleUrl: string | n
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
           <Button className="w-full" loading={busy} onClick={send}>Enviar avaliação</Button>
         </>
-      )}
-      {sent && (
-        <GoogleReviewLink url={googleUrl} slug={slug}>Avaliar também no Google</GoogleReviewLink>
-      )}
-      {!sent && waiting && (
-        <p className="text-center">
-          <GoogleReviewLink url={googleUrl} slug={slug} variant="link">Gostou? Avalie no Google</GoogleReviewLink>
-        </p>
       )}
     </section>
   );

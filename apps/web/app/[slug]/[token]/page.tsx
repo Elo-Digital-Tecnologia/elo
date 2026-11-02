@@ -11,7 +11,7 @@ import { CartBar } from '../../_components/menu/cart-bar';
 import { MenuHeader } from '../../_components/menu/header';
 import { CategoryTabs, filterMenu, Highlights, MenuList, MenuSearch } from '../../_components/menu-list';
 import { RestaurantInfo } from '../../_components/menu/info';
-import { GoogleReviewLink } from '../../_components/menu/google-review-link';
+import { GoogleReviewCard } from '../../_components/menu/google-review-card';
 import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
@@ -78,6 +78,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
   const [phase, setPhase] = useState<Phase>('loading');
   const [state, setState] = useState<SessionStateView | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [reviewed, setReviewed] = useState(false);
   const [picked, setPicked] = useState<ProductView | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -247,13 +248,12 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
   if (phase === 'expired') return <Notice title="Sessão expirada" icon={<Timer size={30} />}>Escaneie o QR Code da mesa de novo para continuar.</Notice>;
   if (phase === 'ended') {
     return (
-      <Notice title="Atendimento encerrado" icon={<Check size={30} />}>
+      <Notice
+        title="Atendimento encerrado"
+        icon={<Check size={30} />}
+        action={state && <GoogleReviewCard url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} name={state.restaurant.name} thanks />}
+      >
         Obrigado pela visita! Para pedir de novo, escaneie o QR Code da mesa.
-        {state?.restaurant.googleReviewUrl && (
-          <span className="mt-4 block">
-            <GoogleReviewLink url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug}>Avaliar no Google</GoogleReviewLink>
-          </span>
-        )}
       </Notice>
     );
   }
@@ -368,6 +368,9 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
           {!query && <Highlights menu={state.menu} onPick={pick} />}
           <CategoryTabs menu={visible} />
           <MenuList menu={visible} onPick={pick} searching={!!query} />
+          {tableState === 'open' && state.orders.length > 0 && (
+            <div className="px-4 pt-6"><GoogleReviewCard url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} name={state.restaurant.name} dismissible /></div>
+          )}
           <div className="px-4 pt-6"><MenuFooter name={state.restaurant.name} /></div>
         </>
       )}
@@ -383,7 +386,12 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
       {view === 'bill' && (
         <BillPanel active version={billVersion}>
-          {(tableState === 'open' || tableState === 'pending_close') && <ReviewForm googleUrl={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} waiting={tableState === 'pending_close'} />}
+          {(tableState === 'open' || tableState === 'pending_close') && (
+            <>
+              <ReviewForm onSent={setReviewed} />
+              <GoogleReviewCard url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} name={state.restaurant.name} thanks={reviewed} />
+            </>
+          )}
           {tableState === 'open' && (
             <>
               <Button className="w-full !py-3.5" disabled={busy || !billReady} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>

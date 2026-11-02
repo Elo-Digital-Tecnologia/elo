@@ -92,6 +92,13 @@ function Settings() {
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
+  // A saved notice goes away on its own; an error stays until the next try.
+  useEffect(() => {
+    if (!msg?.ok) return;
+    const timer = setTimeout(() => setMsg(null), 4000);
+    return () => clearTimeout(timer);
+  }, [msg]);
+
   const discard = () => {
     form.reset({ ...saved.values, fee: saved.feeOn ? saved.values.fee : DEFAULT_FEE });
     setFeeOn(saved.feeOn);
