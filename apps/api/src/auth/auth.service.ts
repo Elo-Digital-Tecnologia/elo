@@ -1,17 +1,24 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { IsNull, Repository } from 'typeorm';
-import { ALL_PERMISSIONS, EloStaffRoles, hasAnyRole, Role } from '@elo/core';
+import { ALL_PERMISSIONS, EloStaffRoles, hasAnyRole, restaurantScope, Role, SESSION_RULES, type SessionScope } from '@elo/core';
 import { Restaurant, StaffUser } from '../database/entities';
 import type { JwtUser } from '../common/auth-types';
 import type { Env } from '../config/env';
+import { SessionsService } from '../sessions/sessions.service';
 
 /** Dummy para igualar tempo de resposta quando o usuário não existe. */
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
+
+/** A short access token plus the long session behind it, kept by the browser in a cookie. */
+export interface SignedIn {
+  accessToken: string;
+  session: { scope: SessionScope; token: string; expiresAt: Date };
+}
 
 @Injectable()
 export class AuthService {
@@ -20,64 +27,80 @@ export class AuthService {
     @InjectRepository(Restaurant) private readonly restaurants: Repository<Restaurant>,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<Env, true>,
+    private readonly sessions: SessionsService,
   ) {}
 
   /** Login da equipe de um restaurante: o usuário só vale dentro do restaurante do endereço. */
-  async restaurantLogin(slug: string, username: string, password: string): Promise<{ accessToken: string }> {
+  async restaurantLogin(slug: string, username: string, password: string, userAgent?: string): Promise<SignedIn> {
     const restaurant = await this.restaurants.findOne({ where: { slug } });
     const user = restaurant ? await this.users.findOne({ where: { username, restaurantId: restaurant.id, deletedAt: IsNull() } }) : null;
-    return this.check(user, password, (u) => !hasAnyRole(u.roles, EloStaffRoles));
+    return this.check(user, password, (u) => !hasAnyRole(u.roles, EloStaffRoles), restaurantScope(slug), userAgent);
   }
 
   /** Login da equipe Elo Digital (sem restaurante). */
-  async teamLogin(username: string, password: string): Promise<{ accessToken: string }> {
+  async teamLogin(username: string, password: string, userAgent?: string): Promise<SignedIn> {
     const user = await this.users.findOne({ where: { username, restaurantId: IsNull(), deletedAt: IsNull() } });
-    return this.check(user, password, (u) => hasAnyRole(u.roles, EloStaffRoles));
+    return this.check(user, password, (u) => hasAnyRole(u.roles, EloStaffRoles), 'admin', userAgent);
   }
 
   /** Mesma resposta e mesmo custo de hash para usuário ou restaurante inexistente, senha errada e conta inativa. */
-  private async check(user: StaffUser | null, password: string, roleOk: (u: StaffUser) => boolean) {
+  private async check(user: StaffUser | null, password: string, roleOk: (u: StaffUser) => boolean, scope: SessionScope, userAgent?: string): Promise<SignedIn> {
     const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
     if (!user || !ok || !user.active || !roleOk(user)) throw new UnauthorizedException('invalid_credentials');
-    return this.sign({
-      sub: user.id,
-      roles: user.roles,
-      name: user.name,
-      restaurantId: user.restaurantId,
-      permissions: user.permissions,
-    });
+    const session = await this.sessions.open(user, scope, userAgent);
+    return { accessToken: await this.sign(this.payloadOf(user, session.id)), session: { scope, token: session.token, expiresAt: session.expiresAt } };
   }
 
   /** Superadmin entra com a chave gerada, guardada só em variável de ambiente. */
-  superadminLogin(key: string): Promise<{ accessToken: string }> {
+  async superadminLogin(key: string, userAgent?: string): Promise<SignedIn> {
     const expected = Buffer.from(this.config.get('SUPERADMIN_KEY', { infer: true }));
     const given = Buffer.from(key);
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
       throw new UnauthorizedException('invalid_credentials');
     }
-    return this.sign({
-      sub: 'superadmin',
-      roles: [Role.Superadmin],
-      name: 'Superadmin',
-      restaurantId: null,
-      permissions: ALL_PERMISSIONS,
-    });
+    const session = await this.sessions.open(null, 'admin', userAgent);
+    return { accessToken: await this.sign(this.superadmin(session.id)), session: { scope: 'admin', token: session.token, expiresAt: session.expiresAt } };
   }
 
   /**
-   * New token with the account's current roles, permissions and name, for screens open
-   * when an administrator changed them. It ends when the original one would have.
+   * A fresh access token from the session cookie, with the account's current roles,
+   * permissions and name. Refused when the session ended, the account was turned off
+   * or the account does not belong to the panel asking.
    */
-  async refresh(user: JwtUser & { exp?: number }): Promise<{ accessToken: string }> {
-    if (user.impersonatedBy || user.sub === 'superadmin') throw new ForbiddenException();
-    const row = await this.users.findOne({ where: { id: user.sub, deletedAt: IsNull() } });
-    const left = (user.exp ?? 0) - Math.floor(Date.now() / 1000);
-    if (!row || !row.active || left <= 0) throw new UnauthorizedException();
-    const payload: JwtUser = { sub: row.id, roles: row.roles, name: row.name, restaurantId: row.restaurantId, permissions: row.permissions };
-    return { accessToken: await this.jwt.signAsync(payload, { expiresIn: left }) };
+  async renew(scope: SessionScope, token: string | undefined): Promise<SignedIn> {
+    const session = token ? await this.sessions.renew(scope, token) : null;
+    if (!session) throw new UnauthorizedException('session_ended');
+    const user = session.user;
+    if (!user) {
+      if (scope !== 'admin') throw new UnauthorizedException('session_ended');
+      return { accessToken: await this.sign(this.superadmin(session.id)), session: { scope, token: token!, expiresAt: session.expiresAt } };
+    }
+    if (!user.active || user.deletedAt || !(await this.belongs(user, scope))) {
+      await this.sessions.revoke(scope, token!);
+      throw new UnauthorizedException('session_ended');
+    }
+    return { accessToken: await this.sign(this.payloadOf(user, session.id)), session: { scope, token: token!, expiresAt: session.expiresAt } };
   }
 
-  private async sign(payload: JwtUser) {
-    return { accessToken: await this.jwt.signAsync(payload) };
+  async logout(scope: SessionScope, token: string | undefined): Promise<void> {
+    if (token) await this.sessions.revoke(scope, token);
+  }
+
+  private async belongs(user: StaffUser, scope: SessionScope): Promise<boolean> {
+    if (scope === 'admin') return !user.restaurantId && hasAnyRole(user.roles, EloStaffRoles);
+    if (!user.restaurantId || hasAnyRole(user.roles, EloStaffRoles)) return false;
+    return this.restaurants.exists({ where: { id: user.restaurantId, slug: scope.slice(2) } });
+  }
+
+  private payloadOf(user: StaffUser, sid: string): JwtUser {
+    return { sub: user.id, roles: user.roles, name: user.name, restaurantId: user.restaurantId, permissions: user.permissions, sid };
+  }
+
+  private superadmin(sid: string): JwtUser {
+    return { sub: 'superadmin', roles: [Role.Superadmin], name: 'Superadmin', restaurantId: null, permissions: ALL_PERMISSIONS, sid };
+  }
+
+  private sign(payload: JwtUser) {
+    return this.jwt.signAsync(payload, { expiresIn: SESSION_RULES.accessTokenMinutes * 60 });
   }
 }

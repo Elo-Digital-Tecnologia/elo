@@ -62,6 +62,16 @@ describe('contracts', () => {
     expect(contractProblems({ kind: 'definitive', origin: 'conversion', signedOn: '2026-10-20', startsOn: '2026-10-20', endsOn: '2027-10-19' }, [pilot, def], '2026-10-31')).toEqual([]);
   });
 
+  it('a voided contract as the API lists it (with `voided`) is not the current one', () => {
+    const pilot = c('pilot', 'initial', '2026-10-31', '2026-11-06');
+    const def = { ...c('definitive', 'conversion', '2026-10-31', '2027-10-30', pilot.id), voided: { at: '2026-10-31T19:33:00Z', byName: 'Elo', reason: 'datas erradas' } };
+    const status = contractStatus([def, pilot], '2026-11-02');
+    expect(status.current?.id).toBe(pilot.id);
+    expect(status).toMatchObject({ state: 'active', endsOn: '2026-11-06', daysLeft: 4 });
+    expect(latestContract([def, pilot])?.id).toBe(pilot.id);
+    expect(contractStatus([{ ...pilot, voided: def.voided }], '2026-11-02')).toMatchObject({ state: 'pending', current: null });
+  });
+
   it('only a first pilot carries a trial, and the signature cannot come after the end', () => {
     const base = { signedOn: '2026-10-01', startsOn: '2026-10-01', endsOn: '2027-09-30' };
     expect(contractProblems({ ...base, kind: 'definitive', origin: 'initial', trialDays: 7 }, [], '2026-10-31')).toEqual(['trial_only_initial_pilot']);

@@ -14,6 +14,7 @@ const PAST_PAGE_SIZE = 5;
 
 const view = (p: RestaurantPause): PauseView => ({
   id: p.id,
+  kind: p.kind,
   startsAt: p.startsAt.toISOString(),
   endsAt: p.endsAt?.toISOString() ?? null,
   endedAt: p.endedAt?.toISOString() ?? null,
@@ -94,20 +95,21 @@ export class PausesService {
     const now = new Date();
     const startsAt = dto.startsAt ? new Date(dto.startsAt) : now;
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
-    const problems = pauseProblems({ startsAt, endsAt }, await this.pending(restaurantId), now);
+    const kind = dto.kind ?? 'closure';
+    const problems = pauseProblems({ kind, startsAt, endsAt }, await this.pending(restaurantId), now);
     if (problems.length) throw new BadRequestException({ statusCode: 400, message: 'invalid_pause', problems });
     const who = await this.audit.who(actor);
     const pause = await this.pauses.save(
-      this.pauses.create({ restaurantId, startsAt, endsAt, endedAt: null, reason: dto.reason || null, createdBy: who.id, createdByName: who.name }),
+      this.pauses.create({ restaurantId, kind, startsAt, endsAt, endedAt: null, reason: dto.reason || null, createdBy: who.id, createdByName: who.name }),
     );
-    await this.audit.record(actor, 'pause_created', restaurantId, {
+    await this.audit.record(actor, kind === 'opening' ? 'opening_created' : 'pause_created', restaurantId, {
       meta: { startsAt: startsAt.toISOString(), endsAt: endsAt?.toISOString() ?? null, reason: pause.reason },
     });
     await this.announce(restaurantId);
     return view(pause);
   }
 
-  /** Ends a running closure now, or drops one that has not started yet. */
+  /** Ends a running closure or extra opening now, or drops one that has not started yet. */
   async end(restaurantId: string, id: string, actor: JwtUser): Promise<void> {
     const now = new Date();
     const pause = await this.pauses.findOne({ where: { id, restaurantId, endedAt: IsNull() } });
@@ -116,7 +118,7 @@ export class PausesService {
     const running = isPauseActive(pause, now);
     pause.endedAt = now;
     await this.pauses.save(pause);
-    await this.audit.record(actor, 'pause_ended', restaurantId, { meta: { running, startsAt: pause.startsAt.toISOString(), reason: pause.reason } });
+    await this.audit.record(actor, pause.kind === 'opening' ? 'opening_ended' : 'pause_ended', restaurantId, { meta: { running, startsAt: pause.startsAt.toISOString(), reason: pause.reason } });
     await this.announce(restaurantId);
   }
 

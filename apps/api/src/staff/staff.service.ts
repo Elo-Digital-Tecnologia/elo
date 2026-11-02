@@ -14,6 +14,7 @@ import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
 import { DiningTable, StaffUser } from '../database/entities';
 import { RealtimeService } from '../realtime/realtime.service';
+import { SessionsService } from '../sessions/sessions.service';
 
 /** What an account may do right now, read from the database rather than from its token. */
 export interface CurrentAccess {
@@ -57,6 +58,7 @@ export class StaffService {
     @InjectRepository(DiningTable) private readonly tables: Repository<DiningTable>,
     private readonly audit: AuditService,
     private readonly realtime: RealtimeService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async create(data: NewStaff, actor?: JwtUser): Promise<PublicStaff> {
@@ -139,6 +141,9 @@ export class StaffService {
     await this.authorize(actor, user, 'reset_password');
     user.passwordHash = await bcrypt.hash(next, 10);
     await this.users.save(user);
+    // Every session of the member ended with the old password.
+    await this.sessions.keepAfterPasswordChange(undefined, user.passwordHash);
+    this.realtime.disconnectMember(id);
     await this.audit.record(actor, 'staff_password_reset', user.restaurantId, { target: user.name });
   }
 
@@ -255,7 +260,8 @@ export class StaffService {
     return previous;
   }
 
-  async changePassword(id: string, current: string, next: string): Promise<void> {
+  /** Own password change: the other signed-in devices are signed out, this one stays. */
+  async changePassword(id: string, current: string, next: string, sessionId?: string): Promise<void> {
     const user = await this.users.findOne({ where: { id } });
     if (!user || !(await bcrypt.compare(current, user.passwordHash))) {
       throw new UnauthorizedException('invalid_credentials');
@@ -263,6 +269,9 @@ export class StaffService {
     if (current === next) throw new BadRequestException('same_password');
     user.passwordHash = await bcrypt.hash(next, 10);
     await this.users.save(user);
+    await this.sessions.keepAfterPasswordChange(sessionId, user.passwordHash);
+    // Live feeds of the other devices drop now; this one reconnects with its still valid token.
+    this.realtime.disconnectMember(id);
   }
 
   private async find(id: string, restaurantId: string | null): Promise<StaffUser> {

@@ -38,6 +38,8 @@ export const ACTIVITY_ACTIONS = {
   settings_updated: { category: 'settings', label: 'Configurações alteradas' },
   pause_created: { category: 'settings', label: 'Parada agendada' },
   pause_ended: { category: 'settings', label: 'Parada encerrada' },
+  opening_created: { category: 'settings', label: 'Aberto fora do horário' },
+  opening_ended: { category: 'settings', label: 'Abertura extra encerrada' },
   restaurant_edited: { category: 'restaurant', label: 'Dados alterados pela Elo' },
   restaurant_suspended: { category: 'restaurant', label: 'Acesso suspenso' },
   restaurant_reactivated: { category: 'restaurant', label: 'Acesso reativado' },

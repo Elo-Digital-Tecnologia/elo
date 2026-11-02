@@ -11,6 +11,7 @@ import {
   ThrottlerStorage,
 } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SESSION_RULES } from '@elo/core';
 import { Injectable } from '@nestjs/common';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -32,6 +33,7 @@ import { BillingModule } from './billing/billing.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { PausesModule } from './pauses/pauses.module';
+import { SessionsModule } from './sessions/sessions.module';
 import { StaffModule } from './staff/staff.module';
 import { TablesModule } from './tables/tables.module';
 import { TABLE_COOKIE } from './realtime/realtime.gateway';
@@ -87,7 +89,7 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
         secret: config.get('JWT_SECRET', { infer: true }),
-        signOptions: { expiresIn: '12h' },
+        signOptions: { expiresIn: `${SESSION_RULES.accessTokenMinutes}m` },
       }),
     }),
     TypeOrmModule.forRootAsync({
@@ -104,6 +106,7 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
     }),
     AuditModule,
     AuthModule,
+    SessionsModule,
     StaffModule,
     RestaurantsModule,
     BillingModule,

@@ -10,4 +10,6 @@ export interface JwtUser {
   permissions: string[];
   /** Set when the Elo team enters a restaurant panel: id of who entered ('superadmin' or a user id). */
   impersonatedBy?: string;
+  /** Session the token was issued from; it stops working when that session ends. Missing on tokens issued before sessions. */
+  sid?: string;
 }

@@ -152,7 +152,7 @@ describe('availability', () => {
   const week = [null, ...Array(6).fill({ open: '18:00', close: '23:00' })];
   const now = new Date('2026-11-10T22:30:00Z'); // terça 19:30 local
   it('is always open without hours or closures', () => {
-    expect(availability({ hours: null, pauses: [], now, timeZone: TZ })).toEqual({ open: true, reason: null, label: null, pauseReason: null, changesAt: null });
+    expect(availability({ hours: null, pauses: [], now, timeZone: TZ })).toEqual({ open: true, reason: null, extra: false, label: null, pauseReason: null, changesAt: null });
   });
   it('follows the hours and says when they change', () => {
     expect(availability({ hours: week, pauses: [], now, timeZone: TZ })).toMatchObject({ open: true, reason: null, changesAt: '2026-11-11T02:00:00.000Z' });
@@ -164,6 +164,7 @@ describe('availability', () => {
     expect(availability({ hours: week, pauses: [pause], now, timeZone: TZ })).toEqual({
       open: false,
       reason: 'pause',
+      extra: false,
       label: 'Fechado temporariamente · volta em 12/11 às 18:00',
       pauseReason: 'Reforma',
       changesAt: '2026-11-12T21:00:00.000Z',
@@ -175,6 +176,31 @@ describe('availability', () => {
   it('a scheduled closure is the next change', () => {
     const pause = { startsAt: '2026-11-10T23:00:00Z', endsAt: null };
     expect(availability({ hours: null, pauses: [pause], now, timeZone: TZ })).toMatchObject({ open: true, changesAt: '2026-11-10T23:00:00.000Z' });
+  });
+  it('an extra opening opens outside the hours, until its end; a closure still wins', () => {
+    const late = new Date('2026-11-11T03:30:00Z'); // quarta 00:30 local, depois do fechamento das 23:00
+    const opening = { kind: 'opening' as const, startsAt: '2026-11-11T01:30:00Z', endsAt: '2026-11-11T05:00:00Z', reason: 'Festa' };
+    expect(availability({ hours: week, pauses: [opening], now: late, timeZone: TZ })).toEqual({
+      open: true,
+      reason: null,
+      extra: true,
+      label: 'Aberto fora do horário · até 02:00',
+      pauseReason: 'Festa',
+      changesAt: '2026-11-11T05:00:00.000Z',
+    });
+    expect(availability({ hours: week, pauses: [opening], now: new Date('2026-11-11T05:00:00Z'), timeZone: TZ })).toMatchObject({ open: false, reason: 'hours' });
+    // still inside the hours: the opening only takes over at the closing time
+    expect(availability({ hours: week, pauses: [opening], now: new Date('2026-11-11T01:45:00Z'), timeZone: TZ })).toMatchObject({ open: true, extra: false, changesAt: '2026-11-11T02:00:00.000Z' });
+    const closure = { startsAt: '2026-11-11T03:00:00Z', endsAt: null };
+    expect(availability({ hours: week, pauses: [opening, closure], now: late, timeZone: TZ })).toMatchObject({ open: false, reason: 'pause' });
+  });
+  it('checks a new extra opening: it needs an end, lasts a day at most, and only clashes with other openings', () => {
+    const at = (iso: string) => new Date(iso);
+    expect(pauseProblems({ kind: 'opening', startsAt: now, endsAt: null }, [], now)).toEqual(['opening_needs_end']);
+    expect(pauseProblems({ kind: 'opening', startsAt: now, endsAt: at('2026-11-12T00:00:00Z') }, [], now)).toEqual(['opening_too_long']);
+    const closure = { startsAt: '2026-11-10T22:00:00Z', endsAt: null };
+    expect(pauseProblems({ kind: 'opening', startsAt: now, endsAt: at('2026-11-11T03:00:00Z') }, [closure], now)).toEqual([]);
+    expect(pauseProblems({ kind: 'opening', startsAt: now, endsAt: at('2026-11-11T03:00:00Z') }, [{ kind: 'opening', startsAt: '2026-11-11T02:00:00Z', endsAt: '2026-11-11T04:00:00Z' }], now)).toEqual(['overlaps']);
   });
   it('checks a new closure', () => {
     const at = (iso: string) => new Date(iso);

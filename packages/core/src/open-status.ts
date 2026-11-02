@@ -27,6 +27,15 @@ function localClock(now: Date, timeZone: string): { dow: number; minute: number 
   return { dow, minute: Number(get('hour')) * 60 + Number(get('minute')) };
 }
 
+/**
+ * For a shift that closes after midnight, when it really ends: "até 01:00 de segunda".
+ * The early hours of a day belong to the shift of the day before.
+ */
+export function overnightLabel(day: number, h: DayHours | null | undefined): string | null {
+  if (!h || !isHHMM(h.open) || !isHHMM(h.close) || minutes(h.close) > minutes(h.open)) return null;
+  return `até ${h.close} de ${WEEKDAYS[(day + 1) % 7]}`;
+}
+
 interface HoursState extends OpenStatus {
   /** Minutes until the status flips (approximate across DST changes). */
   flipsIn: number | null;
@@ -69,18 +78,30 @@ export function openStatus(hours: OpeningHours | null | undefined, now: Date, ti
   return { open, label };
 }
 
-/** A temporary closure. `endsAt` null lasts until someone ends it; `endedAt` is an early end. */
+/**
+ * A window that overrides the opening hours: a temporary closure, or an extra opening
+ * outside the hours (a late night, a private event). `endsAt` null (closures only)
+ * lasts until someone ends it; `endedAt` is an early end.
+ */
+export type PauseKind = 'closure' | 'opening';
+
 export interface PauseWindow {
+  /** Missing on closures saved before extra openings existed. */
+  kind?: PauseKind;
   startsAt: string | Date;
   endsAt: string | Date | null;
   endedAt?: string | Date | null;
   reason?: string | null;
 }
 
+const kindOf = (p: PauseWindow): PauseKind => p.kind ?? 'closure';
+
 export interface Availability {
   open: boolean;
   /** Why it is closed: outside opening hours or a temporary closure. */
   reason: 'hours' | 'pause' | null;
+  /** Open only thanks to an extra opening outside the hours. */
+  extra: boolean;
   /** Ready-made text for guests and staff; null when there are no hours and no closure (always open). */
   label: string | null;
   pauseReason: string | null;
@@ -101,60 +122,79 @@ export const isPauseActive = (p: PauseWindow, now: Date) => {
   return time(p.startsAt)! <= now.getTime() && (end === null || end > now.getTime());
 };
 
-function returnLabel(end: number, now: Date, timeZone: string): string {
+/** "hoje às 23:00" or "em 02/11 às 01:00", in the restaurant's time zone. */
+function whenLabel(end: number, now: Date, timeZone: string): string {
   const fmt = (d: Date, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('pt-BR', { timeZone, ...o }).format(d);
   const at = new Date(end);
   const hour = fmt(at, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const sameDay = fmt(at, { day: '2-digit', month: '2-digit' }) === fmt(now, { day: '2-digit', month: '2-digit' });
-  return sameDay ? `volta hoje às ${hour}` : `volta em ${fmt(at, { day: '2-digit', month: '2-digit' })} às ${hour}`;
+  return sameDay ? `hoje às ${hour}` : `em ${fmt(at, { day: '2-digit', month: '2-digit' })} às ${hour}`;
 }
 
 /**
- * Whether guests can open a table right now: a temporary closure wins over the
- * opening hours, and a restaurant without hours is always open.
+ * Whether guests can open a table right now: a temporary closure wins over
+ * everything, then an extra opening, then the opening hours; a restaurant without
+ * hours is always open.
  */
 export function availability(input: { hours: OpeningHours | null | undefined; pauses: PauseWindow[]; now: Date; timeZone: string }): Availability {
   const { hours, pauses, now, timeZone } = input;
-  const active = pauses.find((p) => isPauseActive(p, now));
-  if (active) {
-    const end = pauseEnd(active);
+  const closure = pauses.find((p) => kindOf(p) === 'closure' && isPauseActive(p, now));
+  if (closure) {
+    const end = pauseEnd(closure);
     return {
       open: false,
       reason: 'pause',
-      label: end === null ? 'Fechado temporariamente' : `Fechado temporariamente · ${returnLabel(end, now, timeZone)}`,
-      pauseReason: active.reason?.trim() || null,
+      extra: false,
+      label: end === null ? 'Fechado temporariamente' : `Fechado temporariamente · volta ${whenLabel(end, now, timeZone)}`,
+      pauseReason: closure.reason?.trim() || null,
       changesAt: end === null ? null : new Date(end).toISOString(),
     };
   }
-  const nextPause = pauses
-    .map((p) => time(p.startsAt)!)
-    .filter((t) => t > now.getTime())
-    .sort((a, b) => a - b)[0];
   const state = Array.isArray(hours) && hours.length === 7 ? hoursState(hours, now, timeZone) : null;
+  const opening = pauses.find((p) => kindOf(p) === 'opening' && isPauseActive(p, now));
   const flip = state?.flipsIn != null ? now.getTime() + state.flipsIn * 60_000 - now.getSeconds() * 1000 - now.getMilliseconds() : undefined;
-  const next = [flip, nextPause].filter((t): t is number => t !== undefined).sort((a, b) => a - b)[0];
+  const starts = pauses.map((p) => time(p.startsAt)!).filter((t) => t > now.getTime());
+  const next = (extra: (number | null | undefined)[]) => {
+    const t = [...extra, ...starts].filter((v): v is number => typeof v === 'number').sort((a, b) => a - b)[0];
+    return t === undefined ? null : new Date(t).toISOString();
+  };
+  if (opening && state && !state.open) {
+    const end = pauseEnd(opening)!;
+    return { open: true, reason: null, extra: true, label: `Aberto fora do horário · até ${whenLabel(end, now, timeZone).replace(/^hoje às /, '').replace(/^em /, '')}`, pauseReason: opening.reason?.trim() || null, changesAt: next([end]) };
+  }
+  // An extra opening that runs past the closing time takes over when the hours close.
+  const openingEnd = opening ? pauseEnd(opening) : null;
   return {
     open: state?.open ?? true,
     reason: state && !state.open ? 'hours' : null,
+    extra: false,
     label: state?.label ?? null,
     pauseReason: null,
-    changesAt: next === undefined ? null : new Date(next).toISOString(),
+    changesAt: next([flip, openingEnd]),
   };
 }
 
-export const PAUSE_LIMITS = { reasonMax: 120, aheadDays: 365 } as const;
+export const PAUSE_LIMITS = {
+  reasonMax: 120,
+  aheadDays: 365,
+  /** An extra opening covers one night or event, never a standing change of the hours. */
+  openingMaxHours: 24,
+} as const;
 
-export type PauseProblem = 'ends_before_start' | 'starts_in_past' | 'too_far_ahead' | 'overlaps';
+export type PauseProblem = 'ends_before_start' | 'starts_in_past' | 'too_far_ahead' | 'overlaps' | 'opening_needs_end' | 'opening_too_long';
 
-/** What is wrong with a closure about to be scheduled; empty when it can be saved. */
-export function pauseProblems(p: { startsAt: Date; endsAt: Date | null }, others: PauseWindow[], now: Date): PauseProblem[] {
+/** What is wrong with a closure or an extra opening about to be scheduled; empty when it can be saved. */
+export function pauseProblems(p: { kind?: PauseKind; startsAt: Date; endsAt: Date | null }, others: PauseWindow[], now: Date): PauseProblem[] {
   const problems: PauseProblem[] = [];
+  const kind = p.kind ?? 'closure';
   const start = p.startsAt.getTime();
   const end = p.endsAt?.getTime() ?? null;
   if (start < now.getTime() - 60_000) problems.push('starts_in_past');
   if (start > now.getTime() + PAUSE_LIMITS.aheadDays * 86_400_000) problems.push('too_far_ahead');
   if (end !== null && end <= start) problems.push('ends_before_start');
-  const overlaps = others.some((o) => {
+  if (kind === 'opening' && end === null) problems.push('opening_needs_end');
+  if (kind === 'opening' && end !== null && end - start > PAUSE_LIMITS.openingMaxHours * 3_600_000) problems.push('opening_too_long');
+  const overlaps = others.filter((o) => kindOf(o) === kind).some((o) => {
     const oStart = time(o.startsAt)!;
     const oEnd = pauseEnd(o);
     if (oEnd !== null && oEnd <= now.getTime()) return false;

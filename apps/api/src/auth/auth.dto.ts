@@ -19,3 +19,7 @@ export class SuperadminLoginDto {
 export class RestaurantLoginParams {
   @Matches(SLUG_PATTERN) @MaxLength(60) slug: string;
 }
+
+export class SessionScopeDto {
+  @IsString() @MaxLength(90) scope: string;
+}

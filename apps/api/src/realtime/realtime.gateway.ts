@@ -7,6 +7,7 @@ import { AccessState } from '@elo/core';
 import { corsOrigin } from '../config/cors';
 import { TableSession } from '../database/entities';
 import type { JwtUser } from '../common/auth-types';
+import { SessionsService } from '../sessions/sessions.service';
 import { StaffService } from '../staff/staff.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { RealtimeService, staffRoom, tableRoom, memberRoom } from './realtime.service';
@@ -38,6 +39,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly restaurants: RestaurantsService,
     private readonly staff: StaffService,
     @InjectRepository(TableSession) private readonly sessions: Repository<TableSession>,
+    private readonly staffSessions: SessionsService,
   ) {}
 
   afterInit(server: Server) {
@@ -62,6 +64,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
         return reject((e as Error).name === 'TokenExpiredError' ? 'expired' : 'invalid');
       }
       if (!user.restaurantId) return reject('invalid');
+      if (user.sid && !(await this.staffSessions.alive(user.sid))) return reject('expired');
       const state = await this.restaurants.accessStateOf(user.restaurantId).catch(() => null);
       if (!state) return reject('invalid');
       if (state === AccessState.Suspended) return reject('suspended');

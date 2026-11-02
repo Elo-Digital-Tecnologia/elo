@@ -17,6 +17,7 @@ import {
 } from '../common/decorators';
 import type { JwtUser } from '../common/auth-types';
 import { RestaurantsService } from '../restaurants/restaurants.service';
+import { SessionsService } from '../sessions/sessions.service';
 import { StaffService } from '../staff/staff.service';
 
 @Injectable()
@@ -25,6 +26,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
     private readonly staff: StaffService,
+    private readonly sessions: SessionsService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -39,8 +41,10 @@ export class JwtAuthGuard implements CanActivate {
     } catch {
       throw new UnauthorizedException();
     }
-    // Funcionário desativado perde o acesso mesmo com o JWT ainda válido.
     const user: JwtUser = req.user;
+    // Signing out, a new password or a long idle period ends the session and every token issued from it.
+    if (user.sid && !(await this.sessions.alive(user.sid))) throw new UnauthorizedException('session_ended');
+    // Funcionário desativado perde o acesso mesmo com o JWT ainda válido.
     // Entrada da equipe Elo no restaurante: vale enquanto quem entrou continua ativo.
     const subject = user.impersonatedBy ?? user.sub;
     if (subject === 'superadmin') return true;
@@ -104,7 +108,7 @@ export class SubscriptionGuard implements CanActivate {
       // The panel says what to do: pay, wait for the Elo team, or sign a new contract.
       const r = await this.restaurants.get(user.restaurantId).catch(() => null);
       const sub = r ? await this.restaurants.subscription(r) : null;
-      throw new ForbiddenException({ statusCode: 403, message: 'subscription_suspended', reasons: sub?.reasons ?? [], contractEndsOn: sub?.contract.endsOn ?? null });
+      throw new ForbiddenException({ statusCode: 403, message: 'subscription_suspended', status: sub?.status ?? 'suspended', reasons: sub?.reasons ?? [], contractEndsOn: sub?.contract.endsOn ?? null, contractStartsOn: sub?.contract.nextStartsOn ?? null });
     }
     return true;
   }

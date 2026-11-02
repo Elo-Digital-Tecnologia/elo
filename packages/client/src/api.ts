@@ -22,6 +22,16 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Fired on `window` when the API refuses a staff token (401), with that token as
+ * `detail.token`: the area's `useAuth` renews it from the session, or signs out.
+ */
+export const UNAUTHORIZED_EVENT = 'elo:unauthorized';
+
+function reportUnauthorized(status: number, token: string | null | undefined) {
+  if (status === 401 && token && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { token } }));
+}
+
 export interface ApiOptions {
   method?: string;
   body?: unknown;
@@ -43,6 +53,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   if (!res.ok) {
+    reportUnauthorized(res.status, opts.token);
     const data = await res.json().catch(() => ({}));
     const msg = Array.isArray(data.message) ? data.message[0] : data.message;
     throw new ApiError(res.status, msg ?? res.statusText, data);
@@ -58,6 +69,7 @@ export async function apiUpload<T>(path: string, file: File, token: string, fiel
   body.append('file', file);
   const res = await fetch(path, { method: 'POST', credentials: 'include', headers: { authorization: `Bearer ${token}` }, body });
   if (!res.ok) {
+    reportUnauthorized(res.status, token);
     const data = await res.json().catch(() => ({}));
     throw new ApiError(res.status, (Array.isArray(data.message) ? data.message[0] : data.message) ?? res.statusText, data);
   }
@@ -67,6 +79,7 @@ export async function apiUpload<T>(path: string, file: File, token: string, fiel
 /** Downloads a private file with the staff token, for showing it on screen or in a new tab. */
 export async function apiBlob(path: string, token: string): Promise<Blob> {
   const res = await fetch(path, { credentials: 'include', headers: { authorization: `Bearer ${token}` } });
+  reportUnauthorized(res.status, token);
   if (!res.ok) throw new ApiError(res.status, res.statusText);
   return res.blob();
 }

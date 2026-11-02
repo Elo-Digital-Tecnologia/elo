@@ -113,7 +113,7 @@ export class MeController {
   @Patch('password')
   async changePassword(@CurrentUser() user: JwtUser, @Body() dto: ChangePasswordDto) {
     if (user.sub === 'superadmin') throw new BadRequestException('superadmin_uses_env_key');
-    await this.staff.changePassword(user.sub, dto.current, dto.next);
+    await this.staff.changePassword(user.sub, dto.current, dto.next, user.sid);
   }
 }
 

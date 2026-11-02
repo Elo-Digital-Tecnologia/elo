@@ -20,12 +20,13 @@ import {
   businessDay,
   CONTRACT_LIMITS,
   contractSummary,
-  type ContractState,
+  type SubscriptionView,
   type RestaurantStatus,
   restaurantStatus,
   shiftDay,
   type TrialStatus,
   trialStatus,
+  voidedLatest,
 } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
@@ -56,7 +57,7 @@ export interface SubscriptionInfo {
   plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
   status: RestaurantStatus;
   trial: TrialStatus;
-  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null; nextStartsOn: string | null };
+  contract: SubscriptionView['contract'];
 }
 
 const DAY_MS = 86_400_000;
@@ -123,6 +124,7 @@ export class RestaurantsService {
       restaurantId: id,
       permissions: [],
       impersonatedBy: actor.sub,
+      sid: actor.sid,
     };
     return { accessToken: await this.jwt.signAsync(payload, { expiresIn: '45m' }), slug: restaurant.slug };
   }
@@ -308,7 +310,7 @@ export class RestaurantsService {
       reasons: suspensionReasons(r.dueDate, r.suspended, now, contract.state),
       plan: r.plan ? { id: r.plan.id, name: r.plan.name, priceCents: r.plan.priceCents, cycleMonths: r.plan.cycleMonths } : null,
       trial: trialStatus(terms, today),
-      contract,
+      contract: { ...contract, voided: voidedLatest(terms) },
     };
   }
 
@@ -327,8 +329,13 @@ export class RestaurantsService {
     return saved;
   }
 
+  /**
+   * Manual suspension only takes away an access the team still has: a restaurant
+   * without a contract in force, or already locked for an overdue payment, has none.
+   */
   async setSuspended(id: string, suspended: boolean): Promise<Restaurant> {
     const r = await this.get(id);
+    if (suspended && (r.suspended || !['active', 'grace'].includes((await this.subscription(r)).status))) throw new ConflictException('nothing_to_suspend');
     r.suspended = suspended;
     return this.restaurants.save(r);
   }

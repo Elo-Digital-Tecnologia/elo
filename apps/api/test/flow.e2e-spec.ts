@@ -743,10 +743,67 @@ suite('fluxo da mesa (e2e)', () => {
     const team = (await http().get('/staff').set(auth(support)).expect(200)).body as { id: string; username: string }[];
     const owner = team.find((m) => m.username === `adm${suf}`)!;
     await http().patch(`/staff/${owner.id}/password`).set(auth(support)).send({ password: 'senha12345' }).expect(204);
+    // a password set by someone else ends the owner's sessions: sign in again
+    await http().get('/restaurant/me').set(auth(admin)).expect(401);
+    admin = await login(`adm${suf}`);
     // the kitchen status belongs to the kitchen, not to the administrator
     await http().patch(`/orders/${anyId}/revert`).set(auth(admin)).expect(403);
     await http().patch(`/orders/${anyId}/status`).set(auth(admin)).send({ status: 'received' }).expect(403);
   });
+  it('sessões duram entre abas, renovam pelo cookie e acabam com saída, senha nova ou desativação', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const scope = `r:${slug}`;
+    await http().post('/staff').set(auth(admin)).send({ username: `ss${suf}`, password: 'senha12345', name: 'Sara Souza', roles: ['waiter'] }).expect(201);
+    const signIn = async () => {
+      const res = await http().post(`/auth/restaurants/${slug}/login`).send({ username: `ss${suf}`, password: 'senha12345' }).expect(201);
+      expect(res.headers['set-cookie'][0]).toMatch(new RegExp(`^elo_session_r_${slug}=.+HttpOnly`, 'i'));
+      return { token: res.body.accessToken as string, cookie: cookieOf(res) };
+    };
+    const renew = (cookie: string, as = scope) => http().post('/auth/session').set('Cookie', cookie).send({ scope: as });
+
+    // a new tab trades the cookie for a token; the cookie of a restaurant does not open another panel
+    const phone = await signIn();
+    const tab = (await renew(phone.cookie).expect(201)).body.accessToken as string;
+    await http().get('/calls').set(auth(tab)).expect(200);
+    await renew(phone.cookie, 'admin').expect(401);
+    await renew(phone.cookie, 'r:outro-lugar').expect(401);
+    await http().post('/auth/session').send({ scope }).expect(401);
+    await http().post('/auth/session').send({ scope: 'qualquer' }).expect(400);
+
+    // signing out ends that session and its tokens, not the other devices
+    const tablet = await signIn();
+    await http().post('/auth/logout').set('Cookie', tablet.cookie).send({ scope }).expect(204);
+    await renew(tablet.cookie).expect(401);
+    await http().get('/calls').set(auth(tablet.token)).expect(401);
+    await http().get('/calls').set(auth(phone.token)).expect(200);
+
+    // a new password keeps the device that changed it and ends the others
+    const laptop = await signIn();
+    await http().patch('/me/password').set(auth(phone.token)).send({ current: 'senha12345', next: 'novasenha123' }).expect(204);
+    await http().get('/calls').set(auth(phone.token)).expect(200);
+    await renew(phone.cookie).expect(201);
+    await renew(laptop.cookie).expect(401);
+    await http().get('/calls').set(auth(laptop.token)).expect(401);
+
+    // the administrator resetting the password ends every session of the member
+    const member = (await http().get('/staff').set(auth(admin)).expect(200)).body.find((m: { username: string }) => m.username === `ss${suf}`);
+    await http().patch(`/staff/${member.id}/password`).set(auth(admin)).send({ password: 'senha12345' }).expect(204);
+    await renew(phone.cookie).expect(401);
+    await http().get('/calls').set(auth(phone.token)).expect(401);
+
+    // a member turned off cannot renew either
+    const again = await signIn();
+    await http().patch(`/staff/${member.id}/active`).set(auth(admin)).send({ active: false }).expect((r) => expect(r.status).toBeLessThan(300));
+    await renew(again.cookie).expect(401);
+
+    // superadmin: same rules, in the Elo panel only
+    const sa = await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }).expect(201);
+    expect((await renew(cookieOf(sa), 'admin').expect(201)).body.accessToken).toBeTruthy();
+    await renew(cookieOf(sa)).expect(401);
+    await http().post('/auth/logout').set('Cookie', cookieOf(sa)).send({ scope: 'admin' }).expect(204);
+    await http().get('/admin/overview').set(auth(sa.body.accessToken)).expect(401);
+  });
+
   it('perfis trocados valem na hora e o painel recebe um token novo sem entrar de novo', async () => {
     const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
     const member = (await http().post('/staff').set(auth(admin)).send({ username: `pf${suf}`, password: 'senha12345', name: 'Paula Fernandes', roles: ['waiter'] }).expect(201)).body;
@@ -756,10 +813,10 @@ suite('fluxo da mesa (e2e)', () => {
     // the old token already carries the new roles on the server
     await http().get('/calls').set(auth(before)).expect(403);
     await http().get('/orders').set(auth(before)).expect(200);
-    const fresh = (await http().post('/auth/refresh').set(auth(before)).expect(201)).body.accessToken as string;
+    const signIn = await http().post(`/auth/restaurants/${slug}/login`).send({ username: `pf${suf}`, password: 'senha12345' }).expect(201);
+    const fresh = (await http().post('/auth/session').set('Cookie', cookieOf(signIn)).send({ scope: `r:${slug}` }).expect(201)).body.accessToken as string;
     const claims = JSON.parse(Buffer.from(fresh.split('.')[1], 'base64url').toString());
-    const old = JSON.parse(Buffer.from(before.split('.')[1], 'base64url').toString());
-    expect(claims).toMatchObject({ sub: member.id, roles: ['kitchen'], exp: old.exp });
+    expect(claims).toMatchObject({ sub: member.id, roles: ['kitchen'] });
     // answering calls is the waiters' job, and the floor only lists orders of tables still in use
     await http().post(`/calls/00000000-0000-4000-8000-000000000000/resolve`).set(auth(admin)).expect(403);
     await http().get('/orders?open=true&status=ready').set(auth(admin)).expect(200);
@@ -904,9 +961,18 @@ suite('fluxo da mesa (e2e)', () => {
     await http().patch('/restaurant/settings').set(auth(owner)).send({ ...settings, openingHours: [null, null, null, null, null, null, null] }).expect(200);
     const refused = await http().post(`/tables/${t2.id}/validate-open`).set(auth(waiterP)).expect(409);
     expect(refused.body.availability).toMatchObject({ reason: 'hours', label: 'Fechado' });
-    await http().post(`/tables/${t2.id}/reject-open`).set(auth(waiterP)).expect(201);
+    // an extra opening outside the hours lets the table open; it needs an end and ends early on request
+    expect((await http().post('/restaurant/pauses').set(auth(manager)).send({ kind: 'opening' }).expect(400)).body.problems).toEqual(['opening_needs_end']);
+    const extra = (await http().post('/restaurant/pauses').set(auth(manager)).send({ kind: 'opening', endsAt: new Date(Date.now() + 2 * 3_600_000).toISOString(), reason: 'Evento' }).expect(201)).body;
+    expect(extra).toMatchObject({ kind: 'opening' });
+    expect((await http().get('/restaurant/me').set(auth(owner)).expect(200)).body.availability).toMatchObject({ open: true, extra: true });
+    // the request that was waiting can now be accepted
+    await http().post(`/tables/${t2.id}/validate-open`).set(auth(waiterP)).expect(201);
+    await http().post(`/restaurant/pauses/${extra.id}/end`).set(auth(owner)).expect(204);
+    expect((await http().get('/restaurant/me').set(auth(owner)).expect(200)).body.availability).toMatchObject({ open: false, reason: 'hours' });
     const log = (await http().get('/restaurant/activity?category=settings').set(auth(owner)).expect(200)).body.items as { action: string }[];
     expect(log.filter((l) => l.action === 'pause_created')).toHaveLength(2);
+    expect(log.filter((l) => l.action === 'opening_created' || l.action === 'opening_ended')).toHaveLength(2);
   });
 
   it('histórico de pedidos por perfil, foto de perfil e limpeza dos registros antigos', async () => {
@@ -1072,6 +1138,8 @@ suite('fluxo da mesa (e2e)', () => {
     // billing starts with the contract: nothing is paid or rescheduled before it
     expect((await http().post(`/admin/restaurants/${r.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(409)).body.message).toBe('contract_pending');
     await http().post(`/admin/restaurants/${r.id}/due-date`).set(auth(sa)).send({ dueDate: day(10), reason: 'Combinado' }).expect(409);
+    // a manual suspension only takes away an access the team still has
+    expect((await http().post(`/admin/restaurants/${r.id}/suspend`).set(auth(sa)).expect(409)).body.message).toBe('nothing_to_suspend');
     expect(await inList('pending', `Contrato ${suf}`)).toEqual([r.id]);
     expect((await http().get(`/admin/restaurants?dueWithin=7&q=${encodeURIComponent(`Contrato ${suf}`)}`).set(auth(sa)).expect(200)).body.items).toEqual([]);
 

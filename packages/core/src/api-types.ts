@@ -1,7 +1,7 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
-import type { Availability, OpeningHours } from './open-status';
-import type { ContractState, TrialStatus } from './contracts';
+import type { Availability, OpeningHours, PauseKind } from './open-status';
+import type { ContractKind, ContractState, TrialStatus } from './contracts';
 import type { Role } from './roles';
 import type { AccessState, RestaurantStatus } from './subscription';
 import type { SuspensionReason } from './billing';
@@ -110,7 +110,14 @@ export interface SubscriptionView {
   /** Free trial of the first pilot contract. */
   trial: TrialStatus;
   /** Whether a signed contract is in force, and until when (renewals included). */
-  contract: { state: ContractState; endsOn: string | null; daysLeft: number | null; nextStartsOn: string | null };
+  contract: {
+    state: ContractState;
+    endsOn: string | null;
+    daysLeft: number | null;
+    nextStartsOn: string | null;
+    /** The latest contract registered was voided by the Elo team. */
+    voided: { kind: ContractKind | null; at: string } | null;
+  };
 }
 
 export interface WaiterCallView {
@@ -244,6 +251,7 @@ export interface RestaurantListView {
 
 export interface PauseView {
   id: string;
+  kind: PauseKind;
   startsAt: string;
   endsAt: string | null;
   endedAt: string | null;

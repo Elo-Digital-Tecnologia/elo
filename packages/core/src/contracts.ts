@@ -57,8 +57,9 @@ export interface ContractTerm {
   trialDays?: number;
   trialEndedOn?: string | null;
   trialEndReason?: TrialEndReason | null;
-  /** Set when the contract was voided; such contracts count for nothing. */
+  /** Set when the contract was voided; such contracts count for nothing. The API rows carry `voidedAt`, the views `voided`. */
   voidedAt?: string | Date | null;
+  voided?: { at: string } | null;
 }
 
 const DAY = 86_400_000;
@@ -71,8 +72,10 @@ export function businessDay(now: Date = new Date(), timeZone = 'America/Sao_Paul
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 
+export const isVoided = (t: ContractTerm) => !!(t.voidedAt ?? t.voided);
+
 /** Contracts that count: the voided ones stay only in the history. */
-export const liveContracts = <T extends ContractTerm>(terms: T[]): T[] => terms.filter((t) => !t.voidedAt);
+export const liveContracts = <T extends ContractTerm>(terms: T[]): T[] => terms.filter((t) => !isVoided(t));
 
 const time = (d: string | Date) => new Date(d).getTime();
 const newestFirst = <T extends ContractTerm>(terms: T[]) => [...terms].sort((a, b) => time(b.createdAt) - time(a.createdAt));
@@ -130,10 +133,12 @@ export interface ContractStatus {
   daysLeft: number | null;
   /** First day of a contract that has not started yet, when today is not covered. */
   nextStartsOn: string | null;
+  /** The latest contract registered was voided (kind and when). */
+  voided: { kind: ContractKind | null; at: string } | null;
 }
 
 /** Contract summary of a restaurant: state, the stretch that matters and what comes next. */
-export function contractSummary(terms: ContractTerm[], today: string): Omit<ContractStatus, 'current'> {
+export function contractSummary(terms: ContractTerm[], today: string): Omit<ContractStatus, 'current' | 'voided'> {
   const merged = spans(terms);
   const state = contractState(terms, today);
   const running = merged.find((m) => m.startsOn <= today && today <= m.endsOn);
@@ -147,7 +152,15 @@ export function contractSummary(terms: ContractTerm[], today: string): Omit<Cont
 export function contractStatus(contracts: ContractView[], today: string): ContractStatus {
   const live = liveContracts(contracts);
   const current = live.filter((c) => c.startsOn <= today && today <= c.effectiveEndsOn).sort((a, b) => b.startsOn.localeCompare(a.startsOn))[0] ?? latestContract(live);
-  return { ...contractSummary(contracts, today), current };
+  return { ...contractSummary(contracts, today), current, voided: voidedLatest(contracts) };
+}
+
+/** The latest contract registered, when it was voided: the screens say what changed and why the one before counts again. */
+export function voidedLatest(terms: ContractTerm[]): { kind: ContractKind | null; at: string } | null {
+  const newest = newestFirst(terms)[0];
+  if (!newest || !isVoided(newest)) return null;
+  const at = newest.voided?.at ?? newest.voidedAt!;
+  return { kind: newest.kind ?? null, at: new Date(at).toISOString() };
 }
 
 export type TrialState = 'none' | 'scheduled' | 'running' | 'finished' | 'ended_early' | 'ended_by_conversion';
