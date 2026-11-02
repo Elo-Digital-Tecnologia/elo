@@ -12,7 +12,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { unlink } from 'fs/promises';
 import * as path from 'path';
 import { DataSource, IsNull, LessThan, Not, Repository } from 'typeorm';
-import { AccessState } from '@elo/core';
+import { AccessState, isReservedSlug, restaurantScope } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import type { Env } from '../config/env';
 import {
@@ -23,13 +23,16 @@ import {
   Payment,
   Product,
   Restaurant,
+  RestaurantSlugAlias,
   Review,
+  StaffSession,
   StaffUser,
   WaiterCall,
 } from '../database/entities';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AuditService } from '../audit/audit.service';
 import { RestaurantsService } from './restaurants.service';
+import { slugTaken } from './slugs';
 
 const DAY_MS = 86_400_000;
 /** How often the purge looks for restaurants past their retention period. */
@@ -69,6 +72,27 @@ export class RestaurantLifecycleService implements OnApplicationBootstrap, OnApp
     if (suspended) this.realtime.disconnectRestaurant(id);
     await this.audit.record(actor, suspended ? 'restaurant_suspended' : 'restaurant_reactivated', id);
     return r;
+  }
+
+  /**
+   * Gives the restaurant a new link. The old one becomes an alias, so printed QR codes,
+   * NFC tags and the team's signed-in devices keep working; nobody else can take it.
+   */
+  async changeSlug(id: string, next: string, reason: string, actor: JwtUser): Promise<Restaurant> {
+    const r = await this.service.get(id);
+    const from = r.slug;
+    if (next === from) return r;
+    if (isReservedSlug(next)) throw new ConflictException({ statusCode: 409, message: 'slug_reserved', field: 'slug' });
+    await this.db.transaction(async (em) => {
+      if (await slugTaken(em, next, r.id)) throw new ConflictException({ statusCode: 409, message: 'slug_taken', field: 'slug' });
+      // Going back to an old link of its own turns it into the current one again.
+      await em.delete(RestaurantSlugAlias, { slug: next });
+      await em.insert(RestaurantSlugAlias, { slug: from, restaurantId: r.id });
+      await em.update(Restaurant, { id: r.id }, { slug: next });
+      await em.update(StaffSession, { scope: restaurantScope(from) }, { scope: restaurantScope(next) });
+    });
+    await this.audit.record(actor, 'slug_changed', id, { meta: { from, to: next, reason: reason.trim() } });
+    return this.service.get(id);
   }
 
   async remove(id: string, actor: JwtUser, confirmSlug: string): Promise<void> {

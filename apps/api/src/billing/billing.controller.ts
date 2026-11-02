@@ -41,7 +41,7 @@ export class BillingController {
   @RequirePermission(Permission.PaymentsRecord)
   @Patch('restaurants/:id/plan')
   changePlan(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangePlanDto, @CurrentUser() user: JwtUser) {
-    return this.billing.changePlan(id, dto.planId, user);
+    return this.billing.changePlan(id, dto.planId, dto.reason, user);
   }
 
   @RequirePermission(Permission.PaymentsView)

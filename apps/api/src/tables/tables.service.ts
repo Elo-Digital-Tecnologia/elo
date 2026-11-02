@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { restaurantBySlug } from '../restaurants/slugs';
 import { randomBytes } from 'crypto';
 import * as QRCode from 'qrcode';
 import { EntityManager, In, IsNull, Repository } from 'typeorm';
@@ -180,7 +181,7 @@ export class TablesService {
    * aparelhos são bloqueados enquanto ela existir.
    */
   async startSession(slug: string, token: string, cookieSessionId?: string) {
-    const restaurant = await this.restaurants.findOne({ where: { slug } });
+    const restaurant = await restaurantBySlug(this.restaurants.manager, slug);
     const table = restaurant
       ? await this.tables.findOne({ where: { token, restaurantId: restaurant.id } })
       : null;

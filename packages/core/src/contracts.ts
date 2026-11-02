@@ -20,8 +20,18 @@ export const CONTRACT_LIMITS = {
 /** Why a pilot's free trial stopped before its last day. */
 export type TrialEndReason = 'early' | 'conversion';
 
+/** What a contract (or an amendment) charges: kept as signed, whatever the plan costs later. */
+export interface BillingPlan {
+  id: string | null;
+  name: string;
+  priceCents: number;
+  cycleMonths: number;
+}
+
 export interface ContractView {
   id: string;
+  /** Plan and price signed in this contract; null on contracts registered before plans were part of them. */
+  plan: BillingPlan | null;
   kind: ContractKind;
   origin: ContractOrigin;
   previousId: string | null;
@@ -57,6 +67,12 @@ export interface ContractTerm {
   trialDays?: number;
   trialEndedOn?: string | null;
   trialEndReason?: TrialEndReason | null;
+  /** Plan signed in the contract: the API rows carry the loose columns, the views `plan`. */
+  plan?: BillingPlan | null;
+  planId?: string | null;
+  planName?: string | null;
+  priceCents?: number | null;
+  cycleMonths?: number | null;
   /** Set when the contract was voided; such contracts count for nothing. The API rows carry `voidedAt`, the views `voided`. */
   voidedAt?: string | Date | null;
   voided?: { at: string } | null;
@@ -209,7 +225,8 @@ export type ContractProblem =
   | 'overlaps'
   | 'nothing_to_convert'
   | 'conversion_is_definitive'
-  | 'trial_only_initial_pilot';
+  | 'trial_only_initial_pilot'
+  | 'plan_required';
 
 /**
  * What is wrong with a contract about to be registered, empty when it can be saved.
@@ -252,4 +269,52 @@ export function latestContract<T extends ContractTerm>(terms: T[]): T | null {
   const live = liveContracts(terms);
   const followed = new Set(live.map((t) => t.previousId));
   return newestFirst(live.filter((t) => !followed.has(t.id)))[0] ?? newestFirst(live)[0] ?? null;
+}
+
+/**
+ * The due date once the days without a contract are left out: billing stops during a
+ * gap between contracts. `due` is the latest entry's due date and `base` the due date
+ * it started from (the period start, or the due date itself for an adjustment). Each gap
+ * that begins at or after `base` and that the due date reaches pushes it by the gap's
+ * length, so credit paid past an end carries over and a debt of covered days stays.
+ */
+export function billedDueDate(entry: { due: string; base: string }, terms: ContractTerm[]): string {
+  const merged = spans(terms);
+  let due = entry.due;
+  for (let i = 0; i + 1 < merged.length; i++) {
+    const gapStart = shiftDay(merged[i].endsOn, 1);
+    if (gapStart < entry.base || gapStart > due) continue;
+    due = shiftDay(due, daysBetween(gapStart, merged[i + 1].startsOn));
+  }
+  return due;
+}
+
+export type BillingProblem = 'contract_pending' | 'nothing_owed';
+
+/**
+ * Whether a payment can be recorded: never before the first contract; after the last
+ * one ended, only to settle days it covered or ahead of a renewal already scheduled.
+ */
+export function billingProblem(contract: { state: ContractState; endsOn: string | null; nextStartsOn: string | null }, due: string): BillingProblem | null {
+  if (contract.state === 'pending') return 'contract_pending';
+  if (contract.state === 'ended' && !contract.nextStartsOn && contract.endsOn && due > contract.endsOn) return 'nothing_owed';
+  return null;
+}
+
+const termPlan = (t: ContractTerm): BillingPlan | null =>
+  t.plan ?? (t.priceCents != null && t.cycleMonths != null ? { id: t.planId ?? null, name: t.planName ?? '', priceCents: t.priceCents, cycleMonths: t.cycleMonths } : null);
+
+/**
+ * What the restaurant pays now: the plan of the contract in force (or of the last one,
+ * for a debt after it ended), unless a later amendment changed it. Nothing before
+ * the first contract starts.
+ */
+export function planInForce(terms: ContractTerm[], today: string, amendment: (BillingPlan & { at: string | Date }) | null): BillingPlan | null {
+  const live = liveContracts(terms);
+  const ends = effectiveEnds(live);
+  const started = live.filter((t) => t.startsOn <= today);
+  if (!started.length) return null;
+  const current = started.filter((t) => today <= ends.get(t.id)!).sort((a, b) => b.startsOn.localeCompare(a.startsOn))[0] ?? latestContract(started)!;
+  if (amendment && time(amendment.at) > time(current.createdAt)) return { id: amendment.id, name: amendment.name, priceCents: amendment.priceCents, cycleMonths: amendment.cycleMonths };
+  return termPlan(current) ?? (amendment ? { id: amendment.id, name: amendment.name, priceCents: amendment.priceCents, cycleMonths: amendment.cycleMonths } : null);
 }

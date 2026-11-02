@@ -39,7 +39,8 @@ export class CreateRestaurantDto {
   @Field(FIELD_RULES.slug, { optional: true }) slug?: string;
   @Field(FIELD_RULES.personName) managerName: string;
   @Field(FIELD_RULES.contact) managerContact: string;
-  @IsUUID() planId: string;
+  /** Optional: the plan comes with the contract; this one is only its starting suggestion. */
+  @IsOptional() @IsUUID() planId?: string;
   @Field(FIELD_RULES.serviceFeeBps, { optional: true }) serviceFeeBps?: number;
   @Field(FIELD_RULES.username) adminUsername: string;
   @Field(FIELD_RULES.password) adminPassword: string;
@@ -86,6 +87,11 @@ export class RestaurantListQuery {
 }
 
 /** Deleting asks for the slug typed back, so a misclick cannot remove a restaurant. */
+export class ChangeSlugDto {
+  @Field(FIELD_RULES.slug) slug: string;
+  @Field(FIELD_RULES.reason) reason: string;
+}
+
 export class DeleteRestaurantDto {
   @IsString() @MaxLength(60) confirmSlug: string;
 }

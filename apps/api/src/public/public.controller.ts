@@ -53,6 +53,12 @@ export class PublicController {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
+  /** The restaurant's current link, for screens opened from an old one (also while its menu is off the air). */
+  @Get(':slug/link')
+  async link(@Param() { slug }: SlugParams) {
+    return { slug: (await this.restaurants.getBySlug(slug)).slug };
+  }
+
   /** Link fixo: somente consulta do cardápio. */
   @Get(':slug/menu')
   async menu(@Param() { slug }: SlugParams) {

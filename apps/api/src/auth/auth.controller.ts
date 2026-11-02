@@ -60,7 +60,13 @@ export class AuthController {
   @Post('session')
   async session(@Body() dto: SessionScopeDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const scope = scopeOf(dto);
-    return signedIn(res, this.secure, await this.auth.renew(scope, req.cookies?.[sessionCookie(scope)]));
+    let token: string | undefined = req.cookies?.[sessionCookie(scope)];
+    // The restaurant's link changed since this device signed in: its cookie still has the old name.
+    const old = token ? null : (await this.auth.aliasScopes(scope)).find((s) => req.cookies?.[sessionCookie(s)]);
+    if (old) token = req.cookies[sessionCookie(old)];
+    const out = signedIn(res, this.secure, await this.auth.renew(scope, token));
+    if (old) res.clearCookie(sessionCookie(old), { path: '/' });
+    return out;
   }
 
   @Throttle({ default: { limit: 120, ttl: 60_000 } })

@@ -13,7 +13,7 @@ export interface OpenStatus {
   label: string;
 }
 
-const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+export const WEEKDAYS = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export const isHHMM = (v: unknown): v is string => typeof v === 'string' && HHMM.test(v);
@@ -34,6 +34,32 @@ function localClock(now: Date, timeZone: string): { dow: number; minute: number 
 export function overnightLabel(day: number, h: DayHours | null | undefined): string | null {
   if (!h || !isHHMM(h.open) || !isHHMM(h.close) || minutes(h.close) > minutes(h.open)) return null;
   return `até ${h.close} de ${WEEKDAYS[(day + 1) % 7]}`;
+}
+
+/** A stretch of a day (minutes from midnight) when the restaurant is open; `spill` when it is the early hours of the day before's shift. */
+export interface ShiftPiece {
+  from: number;
+  to: number;
+  spill: boolean;
+  /** Day (0 = Sunday) whose shift this is. */
+  day: number;
+}
+
+/**
+ * What each day of the week looks like on a 24 h strip: a shift that closes after
+ * midnight shows on its own day until 24:00 and, as `spill`, in the early hours of the next.
+ */
+export function weekShifts(hours: OpeningHours): ShiftPiece[][] {
+  const week: ShiftPiece[][] = Array.from({ length: 7 }, () => []);
+  hours.forEach((h, day) => {
+    if (!h || !isHHMM(h.open) || !isHHMM(h.close)) return;
+    const open = minutes(h.open);
+    const close = minutes(h.close);
+    if (close > open) return void week[day].push({ from: open, to: close, spill: false, day });
+    week[day].push({ from: open, to: 1440, spill: false, day });
+    if (close > 0) week[(day + 1) % 7].unshift({ from: 0, to: close, spill: true, day });
+  });
+  return week;
 }
 
 interface HoursState extends OpenStatus {

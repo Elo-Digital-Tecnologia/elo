@@ -1,12 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
+import { DataSource, type EntityManager, Repository } from 'typeorm';
 import { businessDay, contractProblems, type ContractView, dateOnly, effectiveEnds, latestContract, trialStatus } from '@elo/core';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
-import { Contract, Payment, Restaurant } from '../database/entities';
+import { Contract, Plan, Restaurant } from '../database/entities';
+import { syncDueDate } from '../billing/due-date';
 import { documentView, DocumentsService } from '../documents/documents.service';
 import type { ContractDto } from './contracts.dto';
 
@@ -44,6 +45,7 @@ export class ContractsService {
       startsOn: c.startsOn,
       endsOn: c.endsOn,
       effectiveEndsOn: c.effectiveEndsOn,
+      plan: c.priceCents != null && c.cycleMonths != null ? { id: c.planId, name: c.planName ?? '', priceCents: c.priceCents, cycleMonths: c.cycleMonths } : null,
       trialDays: c.trialDays,
       trialEndedOn: c.trialEndedOn,
       trialEndReason: c.trialEndReason,
@@ -63,9 +65,10 @@ export class ContractsService {
 
     const saved = await this.data.transaction(async (em) => {
       // One operation at a time per restaurant: two "first contracts" sent together cannot both pass.
-      await this.lock(em, restaurantId);
+      const restaurant = await this.lock(em, restaurantId);
       const existing = await em.find(Contract, { where: { restaurantId }, order: { createdAt: 'DESC' } });
-      const problems = contractProblems({ ...dto, trialDays }, existing, today);
+      const plan = await this.planFor(em, dto.planId ?? restaurant.planId, restaurant.planId);
+      const problems = [...contractProblems({ ...dto, trialDays }, existing, today), ...(plan ? [] : (['plan_required'] as const))];
       if (problems.length) throw new BadRequestException({ statusCode: 400, message: 'invalid_contract', problems });
       if (await em.exists(Contract, { where: { documentId: doc.id } })) throw new ConflictException({ statusCode: 409, message: 'document_in_use', field: 'documentId' });
       const previous = latestContract(existing);
@@ -88,6 +91,10 @@ export class ContractsService {
           endsOn: dto.endsOn,
           effectiveEndsOn: dto.endsOn,
           trialDays,
+          planId: plan!.id,
+          planName: plan!.name,
+          priceCents: plan!.priceCents,
+          cycleMonths: plan!.cycleMonths,
           signatoryName: dto.signatory.name,
           signatoryRole: dto.signatory.role,
           signatoryContact: dto.signatory.contact,
@@ -96,11 +103,13 @@ export class ContractsService {
           createdByName: who.name,
         }),
       );
+      // The plan signed last is the restaurant's reference plan (the price in force comes from the contracts).
+      await em.update(Restaurant, { id: restaurantId }, { planId: plan!.id });
       await this.refresh(em, restaurantId);
       return row;
     });
     await this.audit.record(actor, ACTION[dto.origin], restaurantId, {
-      meta: { kind: dto.kind, startsOn: dto.startsOn, endsOn: dto.endsOn, ...(trialDays ? { trialDays } : {}) },
+      meta: { kind: dto.kind, startsOn: dto.startsOn, endsOn: dto.endsOn, plan: saved.planName, priceCents: saved.priceCents, ...(trialDays ? { trialDays } : {}) },
     });
     return (await this.list(restaurantId)).find((c) => c.id === saved.id)!;
   }
@@ -148,17 +157,22 @@ export class ContractsService {
     await this.audit.record(actor, 'trial_ended', restaurantId, { meta: { reason: reason.trim(), from: ended.billingStartsOn } });
   }
 
+  /** The plan a new contract signs: an active one, or the restaurant's own even if it was retired since. */
+  private async planFor(em: EntityManager, planId: string | null | undefined, own: string | null): Promise<Plan | null> {
+    if (!planId) return null;
+    const plan = await em.findOne(Plan, { where: { id: planId } });
+    if (!plan) throw new NotFoundException('plan_not_found');
+    if (!plan.active && plan.id !== own) throw new ConflictException('plan_inactive');
+    return plan;
+  }
+
   private async lock(em: EntityManager, restaurantId: string): Promise<Restaurant> {
     const r = await em.findOne(Restaurant, { where: { id: restaurantId }, loadEagerRelations: false, lock: { mode: 'pessimistic_write' } });
     if (!r) throw new NotFoundException();
     return r;
   }
 
-  /**
-   * Brings derived data in line with the contracts: each one's last covered day (for
-   * the SQL filters) and the restaurant's first billed day, which is also its due
-   * date while nothing was paid.
-   */
+  /** Brings derived data in line with the contracts: each one's last covered day (for the SQL filters) and the due date. */
   private async refresh(em: EntityManager, restaurantId: string): Promise<void> {
     const rows = await em.find(Contract, { where: { restaurantId } });
     const ends = effectiveEnds(rows);
@@ -166,10 +180,10 @@ export class ContractsService {
       const end = ends.get(c.id) ?? c.endsOn;
       if (c.effectiveEndsOn !== end) await em.update(Contract, { id: c.id }, { effectiveEndsOn: end });
     }
+    // The first billed day follows the pilot's trial.
     const billing = trialStatus(rows, this.today()).billingStartsOn;
     if (!billing) return;
-    const initialDueDate = dateOnly(billing)!;
-    const paid = await em.findOne(Payment, { where: { restaurantId, voidedAt: IsNull() }, order: { createdAt: 'DESC' } });
-    await em.update(Restaurant, { id: restaurantId }, { initialDueDate, dueDate: paid?.newDueDate ?? initialDueDate });
+    await em.update(Restaurant, { id: restaurantId }, { initialDueDate: dateOnly(billing)! });
+    await syncDueDate(em, restaurantId);
   }
 }

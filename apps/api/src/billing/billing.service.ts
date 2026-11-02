@@ -5,7 +5,9 @@ import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import {
   type BillingEntryView,
   businessDay,
-  contractState,
+  billingProblem,
+  type BillingPlan,
+  contractSummary,
   type DocumentView,
   dateOnly,
   dueDateProblems,
@@ -13,13 +15,16 @@ import {
   type PaymentPreview,
   paymentPeriod,
   paymentProblems,
+  planInForce,
   type PlanView,
+  toDay,
 } from '@elo/core';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
 import type { Env } from '../config/env';
 import { Contract, Document, Payment, Plan, Restaurant } from '../database/entities';
 import { documentView, DocumentsService } from '../documents/documents.service';
+import { amendmentOf, syncDueDate } from './due-date';
 import { StaffService } from '../staff/staff.service';
 
 export interface PlanInput {
@@ -100,15 +105,22 @@ export class BillingService {
     return plan;
   }
 
-  async changePlan(restaurantId: string, planId: string, actor: JwtUser): Promise<Restaurant> {
+  /**
+   * Changes the plan during a contract (an amendment, with a reason). The price agreed
+   * now is kept and applies from the next payment; before a contract, the plan comes with it.
+   */
+  async changePlan(restaurantId: string, planId: string, reason: string, actor: JwtUser): Promise<Restaurant> {
     const r = await this.restaurant(restaurantId);
-    if (r.planId === planId) return r;
+    await this.assertBilling(r, false);
+    const before = await this.planOf(r);
     const plan = await this.activePlan(planId);
-    const from = r.plan?.name ?? null;
-    r.planId = plan.id;
-    r.plan = plan;
+    if (before && before.id === plan.id && before.priceCents === plan.priceCents && before.cycleMonths === plan.cycleMonths) return r;
+    Object.assign(r, { planId: plan.id, plan, priceCents: plan.priceCents, cycleMonths: plan.cycleMonths, planAmendedAt: new Date() });
     const saved = await this.restaurants.save(r);
-    await this.audit.record(actor, 'plan_changed', restaurantId, { target: plan.name, meta: { from } });
+    await this.audit.record(actor, 'plan_changed', restaurantId, {
+      target: plan.name,
+      meta: { from: before?.name ?? null, fromCents: before?.priceCents ?? null, toCents: plan.priceCents, reason: reason.trim() },
+    });
     return saved;
   }
 
@@ -130,7 +142,7 @@ export class BillingService {
 
   async preview(restaurantId: string, cycles: number, paidAt: string): Promise<PaymentPreview> {
     const r = await this.restaurant(restaurantId);
-    const plan = this.planOf(r);
+    const plan = await this.planOf(r);
     const period = paymentPeriod({ dueDate: r.dueDate, paidAt: day(paidAt, 'paidAt'), cycles, cycleMonths: plan.cycleMonths });
     return {
       periodStart: period.start.toISOString(),
@@ -143,8 +155,8 @@ export class BillingService {
   /** The period and the new due date come from the plan, never from the form. */
   async record(restaurantId: string, input: PaymentInput, actor: JwtUser): Promise<BillingEntryView> {
     const r = await this.restaurant(restaurantId);
-    await this.assertBilling(restaurantId);
-    const plan = this.planOf(r);
+    await this.assertBilling(r, true);
+    const plan = await this.planOf(r);
     const paidAt = day(input.paidAt, 'paidAt');
     const expectedCents = expectedAmount(plan.priceCents, input.cycles);
     const amountCents = input.amountCents ?? expectedCents;
@@ -251,7 +263,7 @@ export class BillingService {
   /** Sets the due date by hand, with a reason: fixes a wrong entry or grants extra days. */
   async adjustDueDate(restaurantId: string, dueDate: string, reason: string, actor: JwtUser): Promise<BillingEntryView> {
     const r = await this.restaurant(restaurantId);
-    await this.assertBilling(restaurantId);
+    await this.assertBilling(r, false);
     const due = day(dueDate, 'dueDate');
     const problems = dueDateProblems({ dueDate: due, reason });
     if (problems.length) throw new BadRequestException({ message: 'invalid_due_date', problems });
@@ -279,15 +291,27 @@ export class BillingService {
     return r;
   }
 
-  /** Billing starts with the first contract: before it, its start (and the pilot's trial) is not known yet. */
-  private async assertBilling(restaurantId: string): Promise<void> {
-    const terms = await this.data.getRepository(Contract).find({ where: { restaurantId } });
-    if (contractState(terms, businessDay(new Date(), this.config.get('REPORT_TZ', { infer: true }))) === 'pending') throw new ConflictException('contract_pending');
+  private today(): string {
+    return businessDay(new Date(), this.config.get('REPORT_TZ', { infer: true }));
   }
 
-  private planOf(r: Restaurant): Plan {
-    if (!r.plan) throw new ConflictException('no_plan');
-    return r.plan;
+  /**
+   * Billing starts with the first contract. A payment also needs a contract in force,
+   * a debt of covered days or a renewal already scheduled; due date fixes only the first.
+   */
+  private async assertBilling(r: Restaurant, payment: boolean): Promise<void> {
+    const terms = await this.data.getRepository(Contract).find({ where: { restaurantId: r.id } });
+    const summary = contractSummary(terms, this.today());
+    const problem = billingProblem(summary, toDay(r.dueDate));
+    if (problem === 'contract_pending' || (payment && problem)) throw new ConflictException(problem);
+  }
+
+  /** What the restaurant pays now: the contract in force, or a later amendment. */
+  private async planOf(r: Restaurant): Promise<BillingPlan> {
+    const terms = await this.data.getRepository(Contract).find({ where: { restaurantId: r.id } });
+    const plan = planInForce(terms, this.today(), amendmentOf(r));
+    if (!plan) throw new ConflictException('no_plan');
+    return plan;
   }
 
   private async activeEntry(restaurantId: string, id: string): Promise<Payment> {
@@ -302,9 +326,7 @@ export class BillingService {
   }
 
   private async syncDueDate(em: EntityManager, r: Restaurant): Promise<void> {
-    const latest = await this.latest(em, r.id);
-    r.dueDate = latest?.newDueDate ?? r.initialDueDate;
-    await em.update(Restaurant, { id: r.id }, { dueDate: r.dueDate });
+    r.dueDate = await syncDueDate(em, r.id);
   }
 
   private async recorder(actor: JwtUser) {

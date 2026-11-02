@@ -29,7 +29,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     items: [
       { permission: Permission.RestaurantsView, label: 'Ver', hint: 'Lista, busca e detalhes.' },
       { permission: Permission.RestaurantsCreate, label: 'Cadastrar' },
-      { permission: Permission.RestaurantsEdit, label: 'Editar dados', hint: 'Nome, responsável e contato.' },
+      { permission: Permission.RestaurantsEdit, label: 'Editar dados', hint: 'Nome, endereço do cardápio, titular e contato.' },
       { permission: Permission.RestaurantsSuspend, label: 'Suspender e reativar' },
       { permission: Permission.ContractsManage, label: 'Registrar e renovar contratos', hint: 'Anexar o contrato assinado, converter piloto em definitivo e renovar.' },
       { permission: Permission.RestaurantsOwner, label: 'Trocar o titular', hint: 'Passa a administração do restaurante para outra pessoa da equipe.' },

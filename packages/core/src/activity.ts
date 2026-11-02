@@ -36,6 +36,7 @@ export const ACTIVITY_ACTIONS = {
   contract_renewed: { category: 'restaurant', label: 'Contrato renovado' },
   contract_voided: { category: 'restaurant', label: 'Contrato anulado' },
   settings_updated: { category: 'settings', label: 'Configurações alteradas' },
+  slug_changed: { category: 'settings', label: 'Endereço do cardápio alterado' },
   pause_created: { category: 'settings', label: 'Parada agendada' },
   pause_ended: { category: 'settings', label: 'Parada encerrada' },
   opening_created: { category: 'settings', label: 'Aberto fora do horário' },

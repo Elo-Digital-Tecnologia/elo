@@ -26,8 +26,12 @@ import {
   shiftDay,
   type TrialStatus,
   trialStatus,
+  type BillingPlan,
+  planInForce,
   voidedLatest,
 } from '@elo/core';
+import { amendmentOf } from '../billing/due-date';
+import { restaurantBySlug, slugTaken } from './slugs';
 import type { Env } from '../config/env';
 import type { JwtUser } from '../common/auth-types';
 import { AuditService } from '../audit/audit.service';
@@ -41,7 +45,7 @@ export interface NewRestaurant {
   slug?: string;
   managerName: string;
   managerContact: string;
-  planId: string;
+  planId?: string;
   serviceFeeBps?: number;
   adminUsername: string;
   adminPassword: string;
@@ -54,7 +58,7 @@ export interface SubscriptionInfo {
   /** Aviso de vencimento mostrado no dashboard do restaurante. */
   warning: boolean;
   reasons: SuspensionReason[];
-  plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
+  plan: BillingPlan | null;
   status: RestaurantStatus;
   trial: TrialStatus;
   contract: SubscriptionView['contract'];
@@ -133,15 +137,15 @@ export class RestaurantsService {
     const slug = data.slug ?? slugify(data.name);
     if (!slug) throw new ConflictException({ statusCode: 409, message: 'invalid_slug', field: 'slug' });
     if (isReservedSlug(slug)) throw new ConflictException({ statusCode: 409, message: 'slug_reserved', field: 'slug' });
-    // A deleted restaurant keeps its slug until it is purged.
-    if (await this.restaurants.findOne({ where: { slug }, withDeleted: true })) {
+    // A deleted restaurant keeps its slug until it is purged; an old link stays reserved.
+    if (await slugTaken(this.restaurants.manager, slug)) {
       throw new ConflictException({ statusCode: 409, message: 'slug_taken', field: 'slug' });
     }
     // Placeholder until the first contract sets when billing starts; ignored while pending.
     const due = dateOnly(this.today())!;
-    const plan = await this.plans.findOne({ where: { id: data.planId } });
-    if (!plan) throw new NotFoundException('plan_not_found');
-    if (!plan.active) throw new ConflictException('plan_inactive');
+    const plan = data.planId ? await this.plans.findOne({ where: { id: data.planId } }) : null;
+    if (data.planId && !plan) throw new NotFoundException('plan_not_found');
+    if (plan && !plan.active) throw new ConflictException('plan_inactive');
     const restaurant = await this.restaurants.save(
       this.restaurants.create({
         slug,
@@ -150,7 +154,7 @@ export class RestaurantsService {
         managerContact: data.managerContact,
         dueDate: due,
         initialDueDate: due,
-        planId: plan.id,
+        planId: plan?.id ?? null,
         plan,
         serviceFeeBps: data.serviceFeeBps ?? 1000,
       }),
@@ -260,7 +264,7 @@ export class RestaurantsService {
   }
 
   async getBySlug(slug: string): Promise<Restaurant> {
-    const r = await this.restaurants.findOne({ where: { slug } });
+    const r = await restaurantBySlug(this.restaurants.manager, slug);
     if (!r) throw new NotFoundException();
     return r;
   }
@@ -308,7 +312,7 @@ export class RestaurantsService {
       graceEndsAt: new Date(r.dueDate.getTime() + GRACE_DAYS * DAY_MS),
       warning: state === AccessState.Grace,
       reasons: suspensionReasons(r.dueDate, r.suspended, now, contract.state),
-      plan: r.plan ? { id: r.plan.id, name: r.plan.name, priceCents: r.plan.priceCents, cycleMonths: r.plan.cycleMonths } : null,
+      plan: planInForce(terms, today, amendmentOf(r)),
       trial: trialStatus(terms, today),
       contract: { ...contract, voided: voidedLatest(terms) },
     };

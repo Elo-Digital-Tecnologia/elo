@@ -1,4 +1,4 @@
-import { availability, openStatus, pauseProblems } from './open-status';
+import { availability, openStatus, pauseProblems, weekShifts } from './open-status';
 import { cancellationRule, returnRule } from './cancellation';
 import { calculateBill, splitBillByItems, splitBillEqually } from './bill';
 import { canTransitionTable, canWaiterClose } from './table-state';
@@ -144,6 +144,17 @@ describe('openStatus', () => {
   });
   it('semana toda fechada', () => {
     expect(openStatus([null, null, null, null, null, null, null], new Date(), TZ)).toEqual({ open: false, label: 'Fechado' });
+  });
+});
+
+describe('weekShifts', () => {
+  it('splits a shift that closes after midnight into its day and the early hours of the next', () => {
+    const week = weekShifts([{ open: '21:00', close: '01:00' }, null, null, null, null, null, { open: '11:00', close: '23:00' }]);
+    expect(week[0]).toEqual([{ from: 1260, to: 1440, spill: false, day: 0 }]);
+    // Monday is off, but the early hours still belong to Sunday's shift
+    expect(week[1]).toEqual([{ from: 0, to: 60, spill: true, day: 0 }]);
+    expect(week[6]).toEqual([{ from: 660, to: 1380, spill: false, day: 6 }]);
+    expect(weekShifts([null, null, null, null, null, null, { open: '18:00', close: '00:00' }])[0]).toEqual([]);
   });
 });
 

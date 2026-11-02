@@ -722,6 +722,18 @@ suite('fluxo da mesa (e2e)', () => {
     const log = (await http().get(`/admin/restaurants/${r.id}/activity?category=payments`).set(auth(sa)).expect(200)).body as { items: { action: string }[] };
     expect(log.items.map((i) => i.action)).toEqual(expect.arrayContaining(['payment_recorded', 'payment_edited', 'payment_voided', 'due_date_adjusted']));
 
+    // the price signed in the contract stays when the plan's price changes; an amendment changes it, with a reason
+    const pricey = (await http().post('/admin/plans').set(auth(sa)).send({ name: `Mutavel ${suf}`, priceCents: 5000, cycleMonths: 1 }).expect(201)).body;
+    const signed = (await restaurant(sa, { name: `Assinado ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId: pricey.id, initialDueDate: dayFrom(10), adminUsername: `as${suf}`, adminPassword: 'senha12345' }, 201)).body;
+    await http().patch(`/admin/plans/${pricey.id}`).set(auth(sa)).send({ priceCents: 7000 }).expect(200);
+    const subOf = async () => (await http().get(`/admin/restaurants/${signed.id}`).set(auth(sa)).expect(200)).body.subscription;
+    expect((await subOf()).plan).toMatchObject({ id: pricey.id, priceCents: 5000 });
+    await http().patch(`/admin/restaurants/${signed.id}/plan`).set(auth(sa)).send({ planId: planId }).expect(400);
+    await http().patch(`/admin/restaurants/${signed.id}/plan`).set(auth(sa)).send({ planId: planId, reason: 'Aditivo assinado' }).expect(200);
+    expect((await subOf()).plan).toMatchObject({ id: planId, priceCents: 9900 });
+    const charged = (await http().get(`/admin/restaurants/${signed.id}/payments/preview?cycles=1&paidAt=${dayFrom(0)}`).set(auth(sa)).expect(200)).body;
+    expect(charged.expectedCents).toBe(9900);
+
     // a plan in use is never deleted; a deactivated one takes no new restaurants
     await http().delete(`/admin/plans/${planId}`).set(auth(sa)).expect(409);
     const spare = (await http().post('/admin/plans').set(auth(sa)).send({ name: `Avulso ${suf}`, priceCents: 1000, cycleMonths: 1 }).expect(201)).body;
@@ -802,6 +814,34 @@ suite('fluxo da mesa (e2e)', () => {
     await renew(cookieOf(sa)).expect(401);
     await http().post('/auth/logout').set('Cookie', cookieOf(sa)).send({ scope: 'admin' }).expect(204);
     await http().get('/admin/overview').set(auth(sa.body.accessToken)).expect(401);
+  });
+
+  it('endereço novo: o antigo continua levando ao restaurante, fica reservado e a equipe segue logada', async () => {
+    const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+    const sa = await superadmin();
+    const r = (await restaurant(sa, { name: `Endereco ${suf}`, managerName: 'Rita', managerContact: '11977777777', planId, adminUsername: `ed${suf}`, adminPassword: 'senha12345' })).body;
+    const signIn = await http().post(`/auth/restaurants/${r.slug}/login`).send({ username: `ed${suf}`, password: 'senha12345' }).expect(201);
+    const owner = signIn.body.accessToken as string;
+    const table = (await http().post('/tables').set(auth(owner)).send({ name: 'Mesa 1' }).expect(201)).body;
+    const next = `novo-${suf}`;
+
+    await http().post(`/admin/restaurants/${r.id}/slug`).set(auth(sa)).send({ slug: next }).expect(400);
+    await http().post(`/admin/restaurants/${r.id}/slug`).set(auth(sa)).send({ slug: slug, reason: 'Pedido do titular' }).expect(409);
+    await http().post(`/admin/restaurants/${r.id}/slug`).set(auth(sa)).send({ slug: next, reason: 'Pedido do titular' }).expect(201);
+
+    // the old link still opens the menu and a table (printed QR codes), and answers with the current one
+    expect((await http().get(`/public/${r.slug}/menu`).expect(200)).body.restaurant.slug).toBe(next);
+    await http().post(`/public/${r.slug}/${table.token}/session`).expect(201);
+    // the team stays signed in: the old cookie renews under the new link
+    const renewed = await http().post('/auth/session').set('Cookie', cookieOf(signIn)).send({ scope: `r:${next}` }).expect(201);
+    expect(String(renewed.headers['set-cookie'])).toContain(`elo_session_r_${next}=`);
+    await http().post(`/auth/restaurants/${r.slug}/login`).send({ username: `ed${suf}`, password: 'senha12345' }).expect(201);
+    // nobody else can take the old link, and the restaurant can go back to it
+    await restaurant(sa, { name: 'Outro', slug: r.slug, managerName: 'Rita', managerContact: '11977777777', planId, adminUsername: `eo${suf}`, adminPassword: 'senha12345' }, 409);
+    await http().post(`/admin/restaurants/${r.id}/slug`).set(auth(sa)).send({ slug: r.slug, reason: 'Voltou atrás' }).expect(201);
+    expect((await http().get(`/public/${next}/menu`).expect(200)).body.restaurant.slug).toBe(r.slug);
+    const log = (await http().get(`/admin/restaurants/${r.id}/activity?category=settings`).set(auth(sa)).expect(200)).body.items as { action: string }[];
+    expect(log.filter((l) => l.action === 'slug_changed')).toHaveLength(2);
   });
 
   it('perfis trocados valem na hora e o painel recebe um token novo sem entrar de novo', async () => {
@@ -1197,6 +1237,20 @@ suite('fluxo da mesa (e2e)', () => {
     // billing started back at the first contract and nothing was paid: overdue, but no longer "ended"
     expect(await inList('ended', `Intervalo ${suf}`)).toEqual([]);
     expect(await inList('suspended', `Intervalo ${suf}`)).toEqual([gap.id]);
+
+    // billing stops between contracts: days paid past the end carry over to the renewal
+    const credit = await create('Credito', 'cr');
+    await contract(credit.id, { kind: 'definitive', origin: 'initial', startsOn: day(0), endsOn: day(20), documentId: await upload(credit.id) }).expect(201);
+    await contract(credit.id, { kind: 'definitive', origin: 'renewal', startsOn: day(30), endsOn: day(395), documentId: await upload(credit.id) }).expect(201);
+    const paid = (await http().post(`/admin/restaurants/${credit.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(201)).body;
+    const shifted = new Date(Date.parse(paid.newDueDate) + 9 * 86_400_000).toISOString().slice(0, 10);
+    expect((await subOf(credit.id)).dueDate.slice(0, 10)).toBe(shifted);
+
+    // after the last contract ended, a payment only settles the days it covered
+    const owing = await create('Devendo', 'dv');
+    await contract(owing.id, { kind: 'definitive', origin: 'initial', signedOn: day(-100), startsOn: day(-90), endsOn: day(-10), documentId: await upload(owing.id) }).expect(201);
+    await http().post(`/admin/restaurants/${owing.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Quitou a dívida' }).expect(201);
+    expect((await http().post(`/admin/restaurants/${owing.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'De novo' }).expect(409)).body.message).toBe('nothing_owed');
 
     // a contract that ended locks the team, takes the menu down and stops orders from a table already open
     const ended = await create('Encerrado', 'en');

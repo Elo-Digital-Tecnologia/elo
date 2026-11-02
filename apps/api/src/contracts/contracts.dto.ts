@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsUUID, ValidateNested } from 'class-validator';
+import { IsIn, IsOptional, IsUUID, ValidateNested } from 'class-validator';
 import { ContractKind, ContractOrigin, FIELD_RULES } from '@elo/core';
 import { Field, IsDay } from '../common/validation';
 
@@ -18,6 +18,8 @@ export class ContractDto {
   @ValidateNested() @Type(() => SignatoryDto) signatory: SignatoryDto;
   /** The signed file, uploaded first to /admin/restaurants/:id/documents as a contract. */
   @IsUUID() documentId: string;
+  /** Plan signed in the contract; omitted, the restaurant's current plan. Its price is kept with the contract. */
+  @IsOptional() @IsUUID() planId?: string;
   /** Free days of a first pilot contract, counted from its start. */
   @Field(FIELD_RULES.trialDays, { optional: true }) trialDays?: number;
 }

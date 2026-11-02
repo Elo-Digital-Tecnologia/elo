@@ -17,6 +17,7 @@ import { RestaurantPause } from './restaurant-pause.entity';
 import { Document } from './document.entity';
 import { Contract } from './contract.entity';
 import { StaffSession } from './staff-session.entity';
+import { RestaurantSlugAlias } from './restaurant-slug-alias.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -37,6 +38,7 @@ export * from './restaurant-pause.entity';
 export * from './document.entity';
 export * from './contract.entity';
 export * from './staff-session.entity';
+export * from './restaurant-slug-alias.entity';
 
 export const ENTITIES = [
   Restaurant,
@@ -58,4 +60,5 @@ export const ENTITIES = [
   Document,
   Contract,
   StaffSession,
+  RestaurantSlugAlias,
 ];

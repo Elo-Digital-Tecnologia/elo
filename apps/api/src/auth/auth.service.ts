@@ -6,9 +6,10 @@ import { timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { IsNull, Repository } from 'typeorm';
 import { ALL_PERMISSIONS, EloStaffRoles, hasAnyRole, restaurantScope, Role, SESSION_RULES, type SessionScope } from '@elo/core';
-import { Restaurant, StaffUser } from '../database/entities';
+import { Restaurant, RestaurantSlugAlias, StaffUser } from '../database/entities';
 import type { JwtUser } from '../common/auth-types';
 import type { Env } from '../config/env';
+import { restaurantBySlug } from '../restaurants/slugs';
 import { SessionsService } from '../sessions/sessions.service';
 
 /** Dummy para igualar tempo de resposta quando o usuário não existe. */
@@ -32,9 +33,9 @@ export class AuthService {
 
   /** Login da equipe de um restaurante: o usuário só vale dentro do restaurante do endereço. */
   async restaurantLogin(slug: string, username: string, password: string, userAgent?: string): Promise<SignedIn> {
-    const restaurant = await this.restaurants.findOne({ where: { slug } });
+    const restaurant = await restaurantBySlug(this.restaurants.manager, slug);
     const user = restaurant ? await this.users.findOne({ where: { username, restaurantId: restaurant.id, deletedAt: IsNull() } }) : null;
-    return this.check(user, password, (u) => !hasAnyRole(u.roles, EloStaffRoles), restaurantScope(slug), userAgent);
+    return this.check(user, password, (u) => !hasAnyRole(u.roles, EloStaffRoles), restaurantScope(restaurant?.slug ?? slug), userAgent);
   }
 
   /** Login da equipe Elo Digital (sem restaurante). */
@@ -82,6 +83,15 @@ export class AuthService {
     return { accessToken: await this.sign(this.payloadOf(user, session.id)), session: { scope, token: token!, expiresAt: session.expiresAt } };
   }
 
+  /** Scopes of the restaurant's old links: a device signed in before the link changed still has its cookie under one of them. */
+  async aliasScopes(scope: SessionScope): Promise<SessionScope[]> {
+    if (scope === 'admin') return [];
+    const r = await restaurantBySlug(this.restaurants.manager, scope.slice(2));
+    if (!r) return [];
+    const rows = await this.restaurants.manager.find(RestaurantSlugAlias, { where: { restaurantId: r.id } });
+    return rows.map((a) => restaurantScope(a.slug));
+  }
+
   async logout(scope: SessionScope, token: string | undefined): Promise<void> {
     if (token) await this.sessions.revoke(scope, token);
   }
@@ -89,7 +99,7 @@ export class AuthService {
   private async belongs(user: StaffUser, scope: SessionScope): Promise<boolean> {
     if (scope === 'admin') return !user.restaurantId && hasAnyRole(user.roles, EloStaffRoles);
     if (!user.restaurantId || hasAnyRole(user.roles, EloStaffRoles)) return false;
-    return this.restaurants.exists({ where: { id: user.restaurantId, slug: scope.slice(2) } });
+    return (await restaurantBySlug(this.restaurants.manager, scope.slice(2)))?.id === user.restaurantId;
   }
 
   private payloadOf(user: StaffUser, sid: string): JwtUser {

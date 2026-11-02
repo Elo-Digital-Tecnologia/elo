@@ -19,6 +19,13 @@ export class Restaurant {
   @Column({ type: 'timestamptz' }) initialDueDate: Date;
   @Column({ type: 'uuid', nullable: true }) planId: string | null;
   @ManyToOne(() => Plan, { eager: true, nullable: true }) @JoinColumn({ name: 'plan_id' }) plan: Plan | null;
+  /**
+   * An amendment that changed the plan during a contract: the price agreed then, kept as
+   * it was. Null until there is one; the contract in force decides the price otherwise.
+   */
+  @Column({ type: 'int', nullable: true }) priceCents: number | null;
+  @Column({ type: 'int', nullable: true }) cycleMonths: number | null;
+  @Column({ type: 'timestamptz', nullable: true }) planAmendedAt: Date | null;
   @Column({ default: false }) suspended: boolean;
   /** Taxa de serviço em pontos-base (1000 = 10%). */
   @Column({ type: 'int', default: 1000 }) serviceFeeBps: number;

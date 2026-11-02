@@ -27,6 +27,11 @@ export class Contract {
   @Column({ type: 'int', default: 0 }) trialDays: number;
   @Column({ type: 'date', nullable: true }) trialEndedOn: string | null;
   @Column({ type: 'varchar', length: 20, nullable: true }) trialEndReason: TrialEndReason | null;
+  /** Plan and price as signed: later price changes of the plan do not reach this contract. */
+  @Column({ type: 'uuid', nullable: true }) planId: string | null;
+  @Column({ type: 'varchar', length: 60, nullable: true }) planName: string | null;
+  @Column({ type: 'int', nullable: true }) priceCents: number | null;
+  @Column({ type: 'int', nullable: true }) cycleMonths: number | null;
   @Column({ type: 'varchar', length: 80 }) signatoryName: string;
   @Column({ type: 'varchar', length: 80 }) signatoryRole: string;
   @Column({ type: 'varchar', length: 120 }) signatoryContact: string;

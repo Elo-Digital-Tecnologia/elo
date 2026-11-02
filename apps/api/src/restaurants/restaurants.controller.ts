@@ -17,7 +17,7 @@ import { RestaurantLifecycleService } from './restaurant-lifecycle.service';
 import {
   ChangeOwnerDto,
   CreateRestaurantDto,
-  DeleteRestaurantDto,
+  ChangeSlugDto, DeleteRestaurantDto,
   EditRestaurantDto,
   RestaurantListQuery,
   UpdateSettingsDto,
@@ -84,6 +84,12 @@ export class AdminRestaurantsController {
   @Patch('restaurants/:id')
   edit(@Param('id', ParseUUIDPipe) id: string, @Body() dto: EditRestaurantDto, @CurrentUser() user: JwtUser) {
     return this.restaurants.edit(id, dto, user);
+  }
+
+  @RequirePermission(Permission.RestaurantsEdit)
+  @Post('restaurants/:id/slug')
+  changeSlug(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeSlugDto, @CurrentUser() user: JwtUser) {
+    return this.lifecycle.changeSlug(id, dto.slug, dto.reason, user);
   }
 
   @RequirePermission(Permission.RestaurantsSuspend)

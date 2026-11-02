@@ -1,7 +1,7 @@
 import type { OrderStatus, TableState } from './orders';
 import type { ProductTag } from './catalog';
 import type { Availability, OpeningHours, PauseKind } from './open-status';
-import type { ContractKind, ContractState, TrialStatus } from './contracts';
+import type { BillingPlan, ContractKind, ContractState, TrialStatus } from './contracts';
 import type { Role } from './roles';
 import type { AccessState, RestaurantStatus } from './subscription';
 import type { SuspensionReason } from './billing';
@@ -104,7 +104,8 @@ export interface SubscriptionView {
   warning: boolean;
   /** Why the team is locked out, empty while it is not. */
   reasons: SuspensionReason[];
-  plan: { id: string; name: string; priceCents: number; cycleMonths: number } | null;
+  /** What the restaurant pays now: the plan signed in the contract in force, or a later amendment. */
+  plan: BillingPlan | null;
   /** The one status shown for the restaurant (pending and ended contracts apart from suspensions). */
   status: RestaurantStatus;
   /** Free trial of the first pilot contract. */

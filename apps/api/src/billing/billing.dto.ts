@@ -51,6 +51,8 @@ export class AdjustDueDateDto {
   @Field(FIELD_RULES.reason) reason: string;
 }
 
+/** A plan change during a contract is an amendment: it says why, and keeps the price agreed. */
 export class ChangePlanDto {
   @IsUUID() planId: string;
+  @Field(FIELD_RULES.reason) reason: string;
 }

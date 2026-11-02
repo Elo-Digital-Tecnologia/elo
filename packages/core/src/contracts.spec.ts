@@ -1,11 +1,11 @@
 import { accessState, restaurantStatus } from './subscription';
 import { suspensionReasons } from './billing';
-import { businessDay, contractProblems, contractState, contractStatus, type ContractView, coverage, effectiveEnds, latestContract, trialStatus } from './contracts';
+import { billedDueDate, billingProblem, planInForce, businessDay, contractProblems, contractState, contractStatus, type ContractView, coverage, effectiveEnds, latestContract, trialStatus } from './contracts';
 
 const doc = { id: 'd', kind: 'contract' as const, name: 'c.pdf', mime: 'application/pdf', bytes: 1, createdAt: '' };
 let n = 0;
 const c = (kind: 'pilot' | 'definitive', origin: ContractView['origin'], startsOn: string, endsOn: string, previousId: string | null = null): ContractView => ({
-  id: `c${++n}`, kind, origin, previousId, signedOn: startsOn, startsOn, endsOn, effectiveEndsOn: endsOn, trialDays: 0, trialEndedOn: null, trialEndReason: null, voided: null,
+  id: `c${++n}`, kind, origin, previousId, signedOn: startsOn, startsOn, endsOn, effectiveEndsOn: endsOn, trialDays: 0, trialEndedOn: null, trialEndReason: null, voided: null, plan: null,
   signatory: { name: 'Rita', role: 'Sócia', contact: '11977777777' }, document: doc, createdByName: 'Elo', createdAt: `2026-0${n}-01T00:00:00Z`,
 });
 
@@ -70,6 +70,49 @@ describe('contracts', () => {
     expect(status).toMatchObject({ state: 'active', endsOn: '2026-11-06', daysLeft: 4 });
     expect(latestContract([def, pilot])?.id).toBe(pilot.id);
     expect(contractStatus([{ ...pilot, voided: def.voided }], '2026-11-02')).toMatchObject({ state: 'pending', current: null });
+  });
+
+  it('billing stops between contracts: credit carries over, debt stays, gaps before the base do not count', () => {
+    const first = c('definitive', 'initial', '2026-01-01', '2026-06-30');
+    const renewal = c('definitive', 'renewal', '2026-08-01', '2027-07-31', first.id);
+    const terms = [first, renewal];
+    // paid up to 15/07, inside the gap: 15 days of credit start with the renewal
+    expect(billedDueDate({ due: '2026-07-15', base: '2026-06-15' }, terms)).toBe('2026-08-15');
+    // paid exactly to the end: due on the renewal's first day
+    expect(billedDueDate({ due: '2026-07-01', base: '2026-06-01' }, terms)).toBe('2026-08-01');
+    // debt of covered days stays where it is
+    expect(billedDueDate({ due: '2026-06-10', base: '2026-05-10' }, terms)).toBe('2026-06-10');
+    // a payment made after the gap does not move again
+    expect(billedDueDate({ due: '2026-09-15', base: '2026-08-15' }, terms)).toBe('2026-09-15');
+    // a debt paid across the gap is pushed by it
+    expect(billedDueDate({ due: '2026-07-10', base: '2026-06-10' }, terms)).toBe('2026-08-10');
+    // two gaps
+    const third = c('definitive', 'renewal', '2027-09-01', '2028-08-31', renewal.id);
+    expect(billedDueDate({ due: '2026-07-15', base: '2026-06-15' }, [...terms, third])).toBe('2026-08-15');
+    expect(billedDueDate({ due: '2027-08-10', base: '2026-06-15' }, [first, { ...renewal, endsOn: '2027-07-31' }, third])).toBe('2027-10-11');
+  });
+
+  it('records payments only with a contract, or to settle debt or ahead of a renewal', () => {
+    expect(billingProblem({ state: 'pending', endsOn: null, nextStartsOn: null }, '2026-01-01')).toBe('contract_pending');
+    expect(billingProblem({ state: 'ended', endsOn: '2026-06-30', nextStartsOn: null }, '2026-07-10')).toBe('nothing_owed');
+    expect(billingProblem({ state: 'ended', endsOn: '2026-06-30', nextStartsOn: null }, '2026-06-10')).toBeNull();
+    expect(billingProblem({ state: 'ended', endsOn: '2026-06-30', nextStartsOn: '2026-08-01' }, '2026-07-10')).toBeNull();
+    expect(billingProblem({ state: 'active', endsOn: '2026-06-30', nextStartsOn: null }, '2026-09-10')).toBeNull();
+  });
+
+  it('charges the plan signed in the contract in force, until an amendment after it', () => {
+    const basic = { id: 'p1', name: 'Mensal', priceCents: 3790, cycleMonths: 1 };
+    const pro = { id: 'p2', name: 'Pro', priceCents: 5990, cycleMonths: 1 };
+    const first = { ...c('definitive', 'initial', '2026-01-01', '2026-12-31'), plan: basic, createdAt: '2026-01-01T00:00:00Z' };
+    const renewal = { ...c('definitive', 'renewal', '2027-01-01', '2027-12-31', first.id), plan: pro, createdAt: '2026-11-01T00:00:00Z' };
+    expect(planInForce([first], '2025-12-31', null)).toBeNull();
+    expect(planInForce([first, renewal], '2026-06-01', null)).toEqual(basic);
+    expect(planInForce([first, renewal], '2027-02-01', null)).toEqual(pro);
+    const amendment = { ...pro, id: 'p3', name: 'Promo', priceCents: 2990, at: '2099-01-01T00:00:00Z' };
+    expect(planInForce([first, renewal], '2026-06-01', amendment)?.priceCents).toBe(2990);
+    expect(planInForce([first, renewal], '2026-06-01', { ...amendment, at: '2000-01-01T00:00:00Z' })).toEqual(basic);
+    // after the end, a debt is charged at the last contract's price
+    expect(planInForce([first], '2027-03-01', null)).toEqual(basic);
   });
 
   it('only a first pilot carries a trial, and the signature cannot come after the end', () => {
