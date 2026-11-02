@@ -200,6 +200,7 @@ export class PublicController {
         name: restaurant.name,
         slug: restaurant.slug,
         serviceFeeBps: restaurant.serviceFeeBps,
+        guestFeeRefusal: restaurant.guestFeeRefusal,
         ...(await this.restaurants.publicProfile(restaurant)),
         // Só quem está numa mesa recebe o Wi-Fi; o link de consulta nunca.
         wifi: restaurant.wifiName || restaurant.wifiPassword ? { name: restaurant.wifiName, password: restaurant.wifiPassword } : null,

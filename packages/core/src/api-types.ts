@@ -79,6 +79,8 @@ export interface RestaurantProfileView {
   address: string | null;
   phone: string | null;
   instagram: string | null;
+  /** Google review (or place) link the guests are invited to; null when the restaurant has none. */
+  googleReviewUrl: string | null;
   /** Computed by the server in the restaurant's time zone, closures included. */
   availability: Availability;
 }
@@ -91,7 +93,7 @@ export interface PublicMenuView {
 
 export interface SessionStateView {
   readOnly: false;
-  restaurant: { name: string; slug: string; serviceFeeBps: number; wifi: { name: string | null; password: string | null } | null } & RestaurantProfileView;
+  restaurant: { name: string; slug: string; serviceFeeBps: number; guestFeeRefusal: boolean; wifi: { name: string | null; password: string | null } | null } & RestaurantProfileView;
   table: { name: string; state: TableState; waiterName: string | null };
   orders: OrderView[];
   menu: CategoryView[];

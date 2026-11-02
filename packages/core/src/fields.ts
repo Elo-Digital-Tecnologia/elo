@@ -21,6 +21,7 @@ export type FieldErrorCode =
   | 'invalid_contact'
   | 'invalid_instagram'
   | 'invalid_url'
+  | 'invalid_google_url'
   | 'invalid_money'
   | 'not_integer'
   | 'too_small'
@@ -151,12 +152,16 @@ export const FIELD_LIMITS = {
   paymentNote: 300,
   pauseReason: 120,
   imageUrl: 500,
+  googleReviewUrl: 500,
   position: 10_000,
 } as const;
 
 const USERNAME = /^[a-z0-9._-]+$/;
 /** An image from the restaurant's own bank, or any https address. */
 const IMAGE_URL = /^(\/api\/media\/[0-9a-f-]{36}\.webp|https:\/\/[^\s<>"']+)$/;
+
+/** A place or review link of Google (its own addresses only, over https), so the field cannot send guests elsewhere. */
+const GOOGLE_REVIEW_URL = /^https:\/\/(g\.page\/|g\.co\/|maps\.app\.goo\.gl\/|goo\.gl\/maps|(www\.|maps\.)?google\.com(\.br)?\/maps|search\.google\.com\/local\/(writereview|reviews))[^\s<>"']*$/i;
 
 export const FIELD_RULES = {
   personName: text({ min: LIMITS.personName.min, max: LIMITS.personName.max, pattern: PERSON_NAME, patternCode: 'invalid_name' }),
@@ -189,6 +194,7 @@ export const FIELD_RULES = {
   paymentNote: text({ max: FIELD_LIMITS.paymentNote, optional: true }),
   pauseReason: text({ max: FIELD_LIMITS.pauseReason, optional: true }),
   imageUrl: text({ max: FIELD_LIMITS.imageUrl, optional: true, raw: true, pattern: IMAGE_URL, patternCode: 'invalid_url' }),
+  googleReviewUrl: text({ max: FIELD_LIMITS.googleReviewUrl, optional: true, raw: true, pattern: GOOGLE_REVIEW_URL, patternCode: 'invalid_google_url' }),
   priceCents: int({ min: 0, max: MONEY_MAX_CENTS, money: true }),
   planPriceCents: int({ min: 1, max: MONEY_MAX_CENTS, money: true }),
   paymentCents: int({ min: 1, max: MONEY_MAX_CENTS * 10, money: true }),
@@ -261,6 +267,8 @@ export function fieldMessage(error: FieldError): string {
       return 'Informe o usuário do Instagram, como @restaurante.';
     case 'invalid_url':
       return 'Use um endereço de imagem que comece com https://.';
+    case 'invalid_google_url':
+      return 'Cole o link do Google Maps ou do Google Meu Negócio, começando com https://.';
     case 'invalid_money':
       return 'Informe um valor como 39,90.';
     case 'not_integer':

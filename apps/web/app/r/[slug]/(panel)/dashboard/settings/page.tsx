@@ -1,18 +1,19 @@
 'use client';
 
-import { Save } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, WEEKDAYS } from '@elo/core';
-import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, Textarea } from '@elo/ui';
+import { Field, GlassCard, Input, PageHeader, PasswordInput, SaveBar, Switch, Textarea } from '@elo/ui';
 import { ImageField } from '../../../../../_components/image-field';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { HoursEditor, hoursErrors, toDrafts, toOpeningHours } from '../../../_components/hours-editor';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const MAX_FEE_PCT = LIMITS.serviceFeeBpsMax / 100;
-const FEE_MESSAGE = `Use um valor de 0% a ${MAX_FEE_PCT}%, como 10 ou 12,5.`;
+const FEE_MESSAGE = `Use um valor maior que 0% e até ${MAX_FEE_PCT}%, como 10 ou 12,5. Para não cobrar, desligue a taxa.`;
+/** A fee that is switched on starts at this percent. */
+const DEFAULT_FEE = '10';
 /** The fee is the only number in this form, so its range codes always mean the percent. */
 const MESSAGES = { too_small: FEE_MESSAGE, too_large: FEE_MESSAGE, not_integer: FEE_MESSAGE };
 
@@ -21,7 +22,8 @@ const percentOf = (fee: string) => Number(fee.replace(',', '.'));
 const feeError = (fee: string): FieldError | null => {
   if (!fee.trim()) return { code: 'required' };
   const pct = percentOf(fee);
-  return Number.isFinite(pct) && pct >= 0 && pct <= MAX_FEE_PCT ? null : { code: 'too_large' };
+  if (!Number.isFinite(pct) || pct > MAX_FEE_PCT) return { code: 'too_large' };
+  return pct > 0 ? null : { code: 'too_small' };
 };
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
@@ -38,6 +40,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 
 function Settings() {
   const { token, me, setMe } = useStaff();
+  const [feeOn, setFeeOn] = useState(me.serviceFeeBps > 0);
   const form = useForm(
     {
       name: me.name,
@@ -51,7 +54,8 @@ function Settings() {
       wifiPassword: me.wifiPassword ?? '',
       managerName: me.managerName,
       managerContact: me.managerContact,
-      fee: String(me.serviceFeeBps / 100).replace('.', ','),
+      fee: me.serviceFeeBps > 0 ? String(me.serviceFeeBps / 100).replace('.', ',') : DEFAULT_FEE,
+      googleReviewUrl: me.googleReviewUrl ?? '',
     },
     {
       name: rule(FIELD_RULES.restaurantName),
@@ -65,7 +69,8 @@ function Settings() {
       wifiPassword: rule(FIELD_RULES.wifiPassword),
       managerName: rule(FIELD_RULES.personName),
       managerContact: rule(FIELD_RULES.contact),
-      fee: feeError,
+      googleReviewUrl: rule(FIELD_RULES.googleReviewUrl),
+      fee: (fee: string) => (feeOn ? feeError(fee) : null),
     },
     MESSAGES,
   );
@@ -75,6 +80,31 @@ function Settings() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const values = form.values;
+
+  // What is on the page against what was last saved: any difference asks to be saved.
+  const snapshot = () => ({ values: { ...values, fee: feeOn ? values.fee : '' }, feeOn, feeRefusal, showHours, days });
+  const [saved, setSaved] = useState(snapshot);
+  const dirty = JSON.stringify(snapshot()) !== JSON.stringify(saved);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const discard = () => {
+    form.reset({ ...saved.values, fee: saved.feeOn ? saved.values.fee : DEFAULT_FEE });
+    setFeeOn(saved.feeOn);
+    setFeeRefusal(saved.feeRefusal);
+    setShowHours(saved.showHours);
+    setDays(saved.days);
+    setMsg(null);
+  };
+  const turnFee = (on: boolean) => {
+    setFeeOn(on);
+    // A fee never comes with the refusal: it is a separate choice, off until someone makes it.
+    setFeeRefusal(false);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,8 +122,9 @@ function Settings() {
           name: values.name,
           managerName: values.managerName,
           managerContact: values.managerContact,
-          serviceFeeBps: Math.round(percentOf(values.fee) * 100),
-          guestFeeRefusal: feeRefusal,
+          serviceFeeBps: feeOn ? Math.round(percentOf(values.fee) * 100) : 0,
+          guestFeeRefusal: feeOn && feeRefusal,
+          googleReviewUrl: values.googleReviewUrl,
           description: values.description,
           logoUrl: values.logoUrl,
           coverUrl: values.coverUrl,
@@ -106,7 +137,11 @@ function Settings() {
         },
       });
       setMe({ ...me, ...updated });
-      form.setValues((f) => ({ ...f, phone: updated.phone ?? '', instagram: updated.instagram ? `@${updated.instagram}` : '', managerContact: updated.managerContact, managerName: updated.managerName }));
+      const next = { ...values, phone: updated.phone ?? '', instagram: updated.instagram ? `@${updated.instagram}` : '', managerContact: updated.managerContact, managerName: updated.managerName, googleReviewUrl: updated.googleReviewUrl ?? '' };
+      const nextDays = showHours ? toDrafts(updated.openingHours) : days;
+      form.setValues(next);
+      setDays(nextDays);
+      setSaved({ values: { ...next, fee: feeOn ? next.fee : '' }, feeOn, feeRefusal: feeOn && feeRefusal, showHours, days: nextDays });
       setMsg({ ok: true, text: 'Alterações salvas.' });
     } catch (err) {
       if (form.fromServer(err, { serviceFeeBps: 'fee' })) return;
@@ -163,7 +198,7 @@ function Settings() {
           </div>
         </Section>
 
-        <Section title="Responsável pelo contrato" hint="Quem a Elo Digital procura sobre a assinatura. Não aparece para os clientes.">
+        <Section title="Responsável pelo contrato" hint="O contato da Elo Digital sobre a assinatura. Não aparece para os clientes. Mudar o responsável não altera os contratos já assinados.">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Nome do responsável" error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
             <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
@@ -171,20 +206,37 @@ function Settings() {
         </Section>
 
         <Section title="Taxa de serviço" hint="Entra na conta de cada mesa. O garçom e o caixa sempre podem remover.">
-          <Field label="Taxa de serviço (%)" hint={`De 0% a ${MAX_FEE_PCT}%. Use 0 para não cobrar.`} error={form.errors.fee}>
-            <Input {...form.bind('fee')} onChange={(e) => form.set('fee', e.target.value.replace(/[^\d,.]/g, ''))} inputMode="decimal" maxLength={5} />
-          </Field>
-          <label className="flex items-start gap-3 text-sm">
-            <Switch label="O cliente pode recusar a taxa pelo cardápio" checked={feeRefusal} onChange={setFeeRefusal} />
-            <span>
-              <span className="block font-medium">O cliente pode recusar a taxa pelo cardápio</span>
-              <span className="block text-muted">Desligado, a opção some da conta do cliente e só a equipe remove a taxa.</span>
-            </span>
+          <label className="flex items-center gap-3 text-sm font-medium">
+            <Switch label="Cobrar taxa de serviço" checked={feeOn} onChange={turnFee} /> Cobrar taxa de serviço
           </label>
+          {!feeOn && <p className="text-sm text-muted">Desligado, a conta não leva taxa de serviço.</p>}
+          {feeOn && (
+            <>
+              <Field label="Taxa de serviço (%)" hint={`Acima de 0% e até ${MAX_FEE_PCT}%.`} error={form.errors.fee}>
+                <Input {...form.bind('fee')} onChange={(e) => form.set('fee', e.target.value.replace(/[^\d,.]/g, ''))} inputMode="decimal" maxLength={5} />
+              </Field>
+              <label className="flex items-start gap-3 text-sm">
+                <Switch label="O cliente pode recusar a taxa pelo cardápio" checked={feeRefusal} onChange={setFeeRefusal} />
+                <span>
+                  <span className="block font-medium">O cliente pode recusar a taxa pelo cardápio</span>
+                  <span className="block text-muted">Desligado, a opção não aparece na conta do cliente e só a equipe remove a taxa.</span>
+                </span>
+              </label>
+            </>
+          )}
         </Section>
 
-        {msg && <p role="alert" className={`text-sm ${msg.ok ? 'text-success' : 'text-danger'}`}>{msg.text}</p>}
-        <Button type="submit" loading={loading}><Save size={16} /> Salvar alterações</Button>
+        <Section title="Avaliação no Google" hint="Depois de avaliar o atendimento, o cliente é convidado a avaliar o restaurante também no Google Maps.">
+          <Field
+            label="Link de avaliação"
+            hint="No Google Meu Negócio, use “Pedir avaliações” e cole o link: ele abre direto a tela de avaliar. O link do Google Maps também funciona. Vazio, o convite não aparece."
+            error={form.errors.googleReviewUrl}
+          >
+            <Input {...form.bind('googleReviewUrl')} maxLength={FIELD_RULES.googleReviewUrl.max} inputMode="url" placeholder="https://g.page/r/..." autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+          </Field>
+        </Section>
+
+        <SaveBar dirty={dirty} loading={loading} onDiscard={discard} message={msg} />
       </form>
     </div>
   );

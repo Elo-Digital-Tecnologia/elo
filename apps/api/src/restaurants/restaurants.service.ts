@@ -113,6 +113,7 @@ export class RestaurantsService {
       address: r.address,
       phone: r.phone,
       instagram: r.instagram,
+      googleReviewUrl: r.googleReviewUrl,
       availability: await this.pauses.of(r),
     };
   }
@@ -156,7 +157,7 @@ export class RestaurantsService {
         initialDueDate: due,
         planId: plan?.id ?? null,
         plan,
-        serviceFeeBps: data.serviceFeeBps ?? 1000,
+        serviceFeeBps: data.serviceFeeBps ?? 0,
       }),
     );
     await this.staff.create({
@@ -320,7 +321,7 @@ export class RestaurantsService {
 
   async updateSettings(
     id: string,
-    data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'wifiName' | 'wifiPassword' | 'openingHours' | 'guestFeeRefusal'>> &
+    data: Partial<Pick<Restaurant, 'description' | 'logoUrl' | 'coverUrl' | 'address' | 'phone' | 'instagram' | 'googleReviewUrl' | 'wifiName' | 'wifiPassword' | 'openingHours' | 'guestFeeRefusal'>> &
       Pick<Restaurant, 'name' | 'managerName' | 'managerContact' | 'serviceFeeBps'>,
     actor?: JwtUser,
   ): Promise<Restaurant> {

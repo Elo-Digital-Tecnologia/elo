@@ -237,6 +237,14 @@ suite('fluxo da mesa (e2e)', () => {
     const o1 = await http().post('/public/session/orders').set('Cookie', cookie).send({ items: [{ productId, quantity: 2 }] }).expect(201);
     const o2 = await http().post('/public/session/orders').set('Cookie', cookie).send({ items: [{ productId, quantity: 1 }] }).expect(201);
 
+    // a restaurant starts with no service fee and no refusal; the fee is turned on here, with the refusal as a separate choice
+    const fresh = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body;
+    expect(fresh).toMatchObject({ serviceFeeBps: 0, guestFeeRefusal: false });
+    const start = { name: fresh.name, managerName: fresh.managerName, managerContact: fresh.managerContact };
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...start, serviceFeeBps: 1000, guestFeeRefusal: false }).expect(200);
+    expect((await http().get('/public/session').set('Cookie', cookie).expect(200)).body.restaurant).toMatchObject({ serviceFeeBps: 1000, guestFeeRefusal: false });
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...start, serviceFeeBps: 1000, guestFeeRefusal: true }).expect(200);
+
     // 3 x R$ 40,00 + 10% de serviço
     let bill = (await http().get(`/bills/${tableId}`).set(auth(cashier)).expect(200)).body;
     expect(bill).toMatchObject({ subtotalCents: 12000, serviceFeeCents: 1200, totalCents: 13200, feeWaivedBy: null });
@@ -412,6 +420,16 @@ suite('fluxo da mesa (e2e)', () => {
     const split = await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], [lunch, dinner], [], [], [], [], []] }).expect(200);
     expect(split.body.openingHours).toEqual([[], [lunch, dinner], [], [], [], [], []]);
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[day], [day], [day], [day], [day], [day], [day]] }).expect(200);
+
+    // the Google review link: only Google addresses over https, shown in the public profile, cleared with an empty text
+    const google = 'https://g.page/r/CxYz123/review';
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, googleReviewUrl: 'https://exemplo.com/avaliar' }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, googleReviewUrl: 'http://g.page/r/x' }).expect(400);
+    const withGoogle = await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, googleReviewUrl: google }).expect(200);
+    expect(withGoogle.body.googleReviewUrl).toBe(google);
+    const slugOf = withGoogle.body.slug as string;
+    expect((await http().get(`/public/${slugOf}/menu`).expect(200)).body.restaurant.googleReviewUrl).toBe(google);
+    expect((await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, googleReviewUrl: '' }).expect(200)).body.googleReviewUrl).toBeNull();
 
     // consulta pública mostra o perfil, mas nunca o Wi-Fi
     const pub = await http().get(`/public/${slug}/menu`).expect(200);

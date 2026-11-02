@@ -11,6 +11,7 @@ import { CartBar } from '../../_components/menu/cart-bar';
 import { MenuHeader } from '../../_components/menu/header';
 import { CategoryTabs, filterMenu, Highlights, MenuList, MenuSearch } from '../../_components/menu-list';
 import { RestaurantInfo } from '../../_components/menu/info';
+import { GoogleReviewLink } from '../../_components/menu/google-review-link';
 import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
@@ -244,7 +245,18 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
       </Notice>
     );
   if (phase === 'expired') return <Notice title="Sessão expirada" icon={<Timer size={30} />}>Escaneie o QR Code da mesa de novo para continuar.</Notice>;
-  if (phase === 'ended') return <Notice title="Atendimento encerrado" icon={<Check size={30} />}>Obrigado pela visita! Para pedir de novo, escaneie o QR Code da mesa.</Notice>;
+  if (phase === 'ended') {
+    return (
+      <Notice title="Atendimento encerrado" icon={<Check size={30} />}>
+        Obrigado pela visita! Para pedir de novo, escaneie o QR Code da mesa.
+        {state?.restaurant.googleReviewUrl && (
+          <span className="mt-4 block">
+            <GoogleReviewLink url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug}>Avaliar no Google</GoogleReviewLink>
+          </span>
+        )}
+      </Notice>
+    );
+  }
   if (phase === 'error' || !state) return <Notice title="Algo deu errado" icon={<WifiOff size={30} />}>Não foi possível carregar o cardápio. Tente de novo em instantes.</Notice>;
 
   const tableState = state.table.state;
@@ -371,7 +383,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
       {view === 'bill' && (
         <BillPanel active version={billVersion}>
-          {(tableState === 'open' || tableState === 'pending_close') && <ReviewForm />}
+          {(tableState === 'open' || tableState === 'pending_close') && <ReviewForm googleUrl={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} waiting={tableState === 'pending_close'} />}
           {tableState === 'open' && (
             <>
               <Button className="w-full !py-3.5" disabled={busy || !billReady} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>
@@ -417,7 +429,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             )}
             {tableState === 'pending_open' && <p className="surface px-4 py-3 text-center text-sm">Aguardando o garçom confirmar a mesa.</p>}
             {tableState === 'closed' && !closedNow && <p className="text-center text-xs text-muted">O garçom confirma a abertura antes de você enviar a comanda.</p>}
-            {state.restaurant.serviceFeeBps > 0 && <p className="text-center text-xs text-muted">Taxa de serviço de {(state.restaurant.serviceFeeBps / 100).toLocaleString('pt-BR')}% na conta. Você pode recusá-la na aba Conta.</p>}
+            {state.restaurant.serviceFeeBps > 0 && <p className="text-center text-xs text-muted">Taxa de serviço de {(state.restaurant.serviceFeeBps / 100).toLocaleString('pt-BR')}% na conta.{state.restaurant.guestFeeRefusal ? ' Você pode recusá-la na aba Conta.' : ''}</p>}
           </div>
         }
       >

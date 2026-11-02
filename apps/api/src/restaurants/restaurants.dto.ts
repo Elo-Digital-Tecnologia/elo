@@ -61,6 +61,7 @@ export class UpdateSettingsDto {
   @Field(FIELD_RULES.address, { optional: true }) address?: string | null;
   @Field(FIELD_RULES.phone, { optional: true }) phone?: string | null;
   @Field(FIELD_RULES.instagram, { optional: true }) instagram?: string | null;
+  @Field(FIELD_RULES.googleReviewUrl, { optional: true }) googleReviewUrl?: string | null;
   @Field(FIELD_RULES.wifiName, { optional: true }) wifiName?: string | null;
   @Field(FIELD_RULES.wifiPassword, { optional: true }) wifiPassword?: string | null;
   /** Rebuilt as `{ open, close }` per shift, so nothing else lands in the stored JSON. */

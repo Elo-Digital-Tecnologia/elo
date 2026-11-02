@@ -22,4 +22,5 @@ export * from './components/app-shell';
 export * from './components/auth-layout';
 export * from './components/alerts';
 export * from './components/tabs';
+export * from './components/save-bar';
 export { themeInitScript, THEME_KEY } from './components/theme-script';

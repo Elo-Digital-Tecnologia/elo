@@ -29,6 +29,15 @@ describe('field rules', () => {
     expect(fieldError(R.imageUrl, 'javascript:alert(1)')).toEqual({ code: 'invalid_url' });
     expect(fieldError(R.imageUrl, '/api/media/0b3c1d2e-1111-4222-8333-944455556666.webp')).toBeNull();
   });
+  it('accepts only Google addresses over https as the review link', () => {
+    for (const ok of ['https://g.page/r/CxYz123/review', 'https://maps.app.goo.gl/AbC123', 'https://www.google.com/maps/place/Casa+Verde', 'https://www.google.com.br/maps/place/X', 'https://search.google.com/local/writereview?placeid=ChIJ123', 'https://goo.gl/maps/AbC']) {
+      expect(fieldError(R.googleReviewUrl, ok)).toBeNull();
+    }
+    for (const bad of ['http://g.page/r/x', 'https://exemplo.com/g.page/r/x', 'https://g.page.exemplo.com/x', 'https://google.com.evil.com/maps', 'javascript:alert(1)', 'casa verde']) {
+      expect(fieldError(R.googleReviewUrl, bad)).toEqual({ code: 'invalid_google_url' });
+    }
+    expect(fieldError(R.googleReviewUrl, '')).toBeNull();
+  });
   it('bounds numbers and money', () => {
     expect(fieldError(R.priceCents, 1_000_001)).toEqual({ code: 'too_large', params: { max: 1_000_000, money: true } });
     expect(fieldError(R.priceCents, 10.5)).toEqual({ code: 'invalid_money' });

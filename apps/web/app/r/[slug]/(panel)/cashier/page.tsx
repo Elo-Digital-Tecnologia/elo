@@ -198,7 +198,7 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
                 <option value="extra">Acréscimo</option>
               </Select>
             </Field>
-            <Button type="submit" disabled={busy}>Aplicar</Button>
+            <Button type="submit" disabled={busy} className="sm:mb-1.5">Aplicar</Button>
           </form>
         </GlassCard>
       )}

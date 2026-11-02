@@ -29,6 +29,7 @@ const FIELD: Record<string, string> = {
   address: 'endereço',
   phone: 'telefone',
   instagram: 'Instagram',
+  googleReviewUrl: 'link de avaliação do Google',
   wifiName: 'nome do Wi-Fi',
   wifiPassword: 'senha do Wi-Fi',
   openingHours: 'horários',

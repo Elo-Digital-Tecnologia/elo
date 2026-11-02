@@ -28,9 +28,9 @@ export class Restaurant {
   @Column({ type: 'timestamptz', nullable: true }) planAmendedAt: Date | null;
   @Column({ default: false }) suspended: boolean;
   /** Taxa de serviço em pontos-base (1000 = 10%). */
-  @Column({ type: 'int', default: 1000 }) serviceFeeBps: number;
+  @Column({ type: 'int', default: 0 }) serviceFeeBps: number;
   /** Whether guests may take the service fee off their own bill; staff can always remove it. */
-  @Column({ default: true }) guestFeeRefusal: boolean;
+  @Column({ default: false }) guestFeeRefusal: boolean;
   @Column({ type: 'text', nullable: true }) description: string | null;
   /** /api/media/<id>.webp ou link externo. */
   @Column({ type: 'text', nullable: true }) logoUrl: string | null;
@@ -41,6 +41,8 @@ export class Restaurant {
   /** Só aparece para quem está numa mesa aberta, nunca no link de consulta. */
   @Column({ type: 'varchar', length: 32, nullable: true }) wifiName: string | null;
   @Column({ type: 'varchar', length: 63, nullable: true }) wifiPassword: string | null;
+  /** Where guests are invited to review the place on Google. */
+  @Column({ type: 'varchar', length: 500, nullable: true }) googleReviewUrl: string | null;
   @Column({ type: 'jsonb', nullable: true }) openingHours: OpeningHours | null;
   @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
   /**
