@@ -1,16 +1,16 @@
 'use client';
 
-import { Ban, CalendarClock, Crown, CalendarCog, CircleCheck, ExternalLink, FilePlus2, Layers, Mail, MessageCircle, Pencil, Phone, RefreshCw, Table2, Trash2, UserRound, Users, Wallet } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { Ban, CalendarClock, CircleCheck, Crown, ExternalLink, FilePlus2, FileSignature, History, Hourglass, KeyRound, Layers, LayoutGrid, Mail, MessageCircle, Pencil, Phone, RefreshCw, Table2, Trash2, UserRound, Wallet } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, storeToken } from '@elo/client';
-import { cycleLabel, FIELD_RULES, formatBRL, RESTAURANT_STATUS_LABEL, type Role, type SubscriptionView } from '@elo/core';
-import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, Textarea } from '@elo/ui';
+import { CONTRACT_KIND_LABEL, CONTRACT_LIMITS, type ContractView, cycleLabel, FIELD_RULES, formatBRL, RESTAURANT_STATUS_LABEL, type Role, type SubscriptionView } from '@elo/core';
+import { Badge, Button, ConfirmModal, DataTable, EmptyState, ErrorState, Field, GlassCard, Input, Modal, PageHeader, Select, SkeletonCards, type TabItem, TabPanel, Tabs, Textarea } from '@elo/ui';
 import { useBilling } from './_components/billing';
 import { useContracts } from './_components/contracts';
 import { PaymentSummaryCard } from './_components/payment-summary';
 import { ActivityList } from '../../../../_components/activity-list';
-import { dayBR, STATUS_TONE } from '../../../../_lib/restaurant-status';
+import { dayBR, plural, STATUS_TONE } from '../../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { useAdmin } from '../../../_components/shell';
 
@@ -74,8 +74,14 @@ const EDIT_CHECKS = {
 
 const OWNER_CHECKS = { reason: rule(FIELD_RULES.reason) };
 
+type Tab = 'general' | 'contracts' | 'payments' | 'tables' | 'activity';
+
 function View({ id }: { id: string }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const tab = (params.get('tab') ?? 'general') as Tab;
+  const setTab = (next: Tab) => router.replace(next === 'general' ? pathname : `${pathname}?tab=${next}`, { scroll: false });
   const { token, can } = useAdmin();
   const [r, setR] = useState<Detail | null>(null);
   const [failed, setFailed] = useState(false);
@@ -179,6 +185,17 @@ function View({ id }: { id: string }) {
   const billingOn = sub.contract.state !== 'pending';
   const owner = team?.find((m) => m.roles.includes('restaurant_admin')) ?? null;
   const candidates = (team ?? []).filter((m) => m.active && m.id !== owner?.id);
+  // Manual suspension only takes away an access the team still has.
+  const canSuspend = can('restaurants.suspend') && !r.suspended && (sub.status === 'active' || sub.status === 'grace');
+  const canReactivate = can('restaurants.suspend') && r.suspended;
+  const tabs: TabItem<Tab>[] = [
+    { id: 'general', label: 'Geral', icon: LayoutGrid },
+    { id: 'contracts', label: 'Contratos', icon: FileSignature },
+    ...(can('payments.view') ? [{ id: 'payments' as const, label: 'Pagamentos', icon: Wallet }] : []),
+    ...(can('restaurants.tables') && tables ? [{ id: 'tables' as const, label: 'Mesas', icon: Table2 }] : []),
+    ...(can('restaurants.activity') ? [{ id: 'activity' as const, label: 'Registros', icon: History }] : []),
+  ];
+  const current = tabs.some((t) => t.id === tab) ? tab : 'general';
 
   return (
     <>
@@ -199,91 +216,100 @@ function View({ id }: { id: string }) {
               <Button variant="soft" loading={saving} onClick={openPanel}><ExternalLink size={17} /> Abrir painel</Button>
             )}
             {can('payments.record') && sub.plan && billingOn && <Button onClick={() => billing.open('pay')}><Wallet size={17} /> Registrar pagamento</Button>}
-            {can('restaurants.suspend') && (
-              <Button variant={r.suspended ? 'soft' : 'danger'} onClick={() => { setError(null); setAccess(r.suspended ? 'reactivate' : 'suspend'); }}>
-                {r.suspended ? <><CircleCheck size={17} /> Reativar acesso</> : <><Ban size={17} /> Suspender acesso</>}
-              </Button>
-            )}
+            {canSuspend && <Button variant="danger" onClick={() => { setError(null); setAccess('suspend'); }}><Ban size={17} /> Suspender acesso</Button>}
+            {canReactivate && <Button variant="soft" onClick={() => { setError(null); setAccess('reactivate'); }}><CircleCheck size={17} /> Reativar acesso</Button>}
           </>
         }
       />
       {error && !editing && !deleting && !access && !newOwner && <p role="alert" className="mb-4 text-sm text-danger">{error}</p>}
 
-      <StatusStrip
-        sub={sub}
-        overdueDays={overdueDays}
-        action={
-          sub.status === 'pending' && can('contracts.manage') && contracts.loaded && !contracts.latest ? (
-            <Button onClick={() => contracts.open('initial')}><FilePlus2 size={16} /> Registrar contrato</Button>
-          ) : sub.status === 'ended' && can('contracts.manage') && contracts.latest ? (
-            <Button onClick={() => contracts.open('renewal')}><RefreshCw size={16} /> Renovar contrato</Button>
-          ) : null
-        }
-        charge={charge}
-      />
+      <Tabs items={tabs} value={current} onChange={setTab} label="Seções do restaurante" />
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-3">
-        {contracts.card}
-        <GlassCard className="flex flex-col gap-4 p-6">
-          <h2 className="flex items-center gap-2 text-lg font-semibold"><Wallet size={20} className="text-brand" /> Assinatura</h2>
-          <div className="flex items-center gap-3">
-            <Layers className="text-brand" size={20} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-muted">Plano</div>
-              <div className="font-semibold">{sub.plan ? `${sub.plan.name} · ${formatBRL(sub.plan.priceCents)} ${cycleLabel(sub.plan.cycleMonths)}` : 'Sem plano'}</div>
-            </div>
-            {can('payments.record') && <Button variant="ghost" onClick={() => billing.open('plan')}>Trocar</Button>}
-          </div>
-          <div className="flex items-center gap-3">
-            <CalendarClock className="text-brand" size={20} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-muted">Vencimento</div>
-              <div className="font-semibold">{billingOn ? fmt(sub.dueDate) : 'Começa com o contrato'}</div>
-            </div>
-            {can('payments.record') && billingOn && <Button variant="ghost" onClick={() => billing.open('adjust')} aria-label="Ajustar vencimento"><CalendarCog size={16} /> Ajustar</Button>}
-          </div>
-        </GlassCard>
-        <GlassCard className="flex flex-col gap-4 p-6">
-          <h2 className="flex items-center gap-2 text-lg font-semibold"><Users size={20} className="text-brand" /> Responsáveis</h2>
-          <div className="flex items-center gap-3">
-            <Crown className="text-brand" size={20} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-muted">Titular do painel</div>
-              <div className="font-semibold [overflow-wrap:anywhere]">{owner ? `${owner.name} (${owner.username})` : 'Sem titular'}</div>
-            </div>
-            {can('restaurants.owner') && candidates.length > 0 && (
-              <Button variant="ghost" onClick={() => { setError(null); ownerForm.reset({ userId: candidates[0].id, reason: '' }); setNewOwner(true); }}>Trocar</Button>
-            )}
-          </div>
-          <div className="flex items-center gap-3"><UserRound className="text-brand" size={20} /><div className="min-w-0"><div className="text-sm text-muted">Responsável pelo contrato</div><div className="font-semibold [overflow-wrap:anywhere]">{r.managerName}</div></div></div>
-          <div className="flex items-center gap-3"><Phone className="text-brand" size={20} /><div className="min-w-0"><div className="text-sm text-muted">Contato</div><div className="font-semibold [overflow-wrap:anywhere]">{r.managerContact}</div></div></div>
-        </GlassCard>
-      </div>
+      {current === 'general' && (
+        <TabPanel id="general">
+          <StatusPanel
+            sub={sub}
+            contract={contracts.current}
+            overdueDays={overdueDays}
+            onPlan={can('payments.record') ? () => billing.open('plan') : null}
+            onAdjust={can('payments.record') && billingOn ? () => billing.open('adjust') : null}
+            action={
+              sub.status === 'pending' && can('contracts.manage') && contracts.loaded && !contracts.latest ? (
+                <Button onClick={() => contracts.open('initial')}><FilePlus2 size={16} /> Registrar contrato</Button>
+              ) : sub.status === 'ended' && can('contracts.manage') && contracts.latest ? (
+                <Button onClick={() => contracts.open('renewal')}><RefreshCw size={16} /> Renovar contrato</Button>
+              ) : null
+            }
+            charge={charge}
+          />
 
-      {can('payments.view') && (
-        <GlassCard className="mt-5 p-6">
-          <h2 className="mb-4 text-lg font-semibold">Resumo dos pagamentos</h2>
-          <PaymentSummaryCard entries={billing.entries} restaurant={r} />
-        </GlassCard>
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            {contracts.card}
+            <GlassCard className="flex flex-col gap-4 p-6">
+              <h2 className="flex items-center gap-2 text-lg font-semibold"><Crown size={20} className="text-brand" /> Titular</h2>
+              <div className="flex items-center gap-3">
+                <UserRound className="text-brand" size={20} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-muted">Nome</div>
+                  <div className="font-semibold [overflow-wrap:anywhere]">{r.managerName}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Phone className="text-brand" size={20} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-muted">Contato</div>
+                  <div className="font-semibold [overflow-wrap:anywhere]">{r.managerContact}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <KeyRound className="text-brand" size={20} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-muted">Conta no painel</div>
+                  <div className="font-semibold [overflow-wrap:anywhere]">{owner ? `${owner.name} (${owner.username})` : 'Sem conta de titular'}</div>
+                </div>
+                {can('restaurants.owner') && candidates.length > 0 && (
+                  <Button variant="ghost" onClick={() => { setError(null); ownerForm.reset({ userId: candidates[0].id, reason: '' }); setNewOwner(true); }}>Trocar</Button>
+                )}
+              </div>
+            </GlassCard>
+          </div>
+
+          {can('restaurants.delete') && (
+            <section className="mt-8 rounded-lg border border-danger/40 p-5">
+              <h2 className="flex items-center gap-2 text-lg font-semibold text-danger"><Trash2 size={18} /> Excluir restaurante</h2>
+              <p className="mt-1 text-sm text-muted">O cardápio sai do ar e a equipe perde o acesso. Os dados ficam guardados para restauração ou exportação e depois são apagados de vez.</p>
+              {r.subscription.state !== 'suspended' && <p className="mt-2 text-sm font-medium text-warning">Para excluir, suspenda o acesso primeiro.</p>}
+              <Button className="mt-3" variant="danger" disabled={r.subscription.state !== 'suspended'} onClick={() => { setError(null); setConfirmSlug(''); setDeleting(true); }}>Excluir restaurante</Button>
+            </section>
+          )}
+        </TabPanel>
       )}
 
-      {contracts.history && (
-        <section className="mt-6">
-          <h2 className="mb-3 text-xl font-semibold">Histórico de contratos</h2>
-          {contracts.history}
-        </section>
+      {current === 'contracts' && (
+        <TabPanel id="contracts">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted">Cada contrato fica guardado com o arquivo assinado. Um contrato registrado com erro é anulado, nunca apagado.</p>
+            {contracts.actions && <div className="flex flex-wrap gap-2">{contracts.actions}</div>}
+          </div>
+          {contracts.history ?? <EmptyState icon={FileSignature} title="Nenhum contrato registrado">Sem contrato, o restaurante fica Pendente: a equipe não acessa o painel e o cardápio fica fora do ar.</EmptyState>}
+        </TabPanel>
       )}
 
-      {can('payments.view') && (
-        <section className="mt-6">
-          <h2 className="mb-3 text-xl font-semibold">Histórico de pagamentos</h2>
-          {billing.history}
-        </section>
+      {current === 'payments' && (
+        <TabPanel id="payments">
+          <GlassCard className="p-6">
+            <h2 className="mb-4 text-lg font-semibold">Resumo dos pagamentos</h2>
+            <PaymentSummaryCard entries={billing.entries} restaurant={r} />
+          </GlassCard>
+          <section className="mt-6">
+            <h2 className="mb-3 text-xl font-semibold">Histórico de pagamentos</h2>
+            {billing.history}
+          </section>
+        </TabPanel>
       )}
 
-      {can('restaurants.tables') && tables && (
-        <section className="mt-6">
-          <h2 className="mb-1 text-xl font-semibold">Mesas e tokens</h2>
+      {current === 'tables' && tables && (
+        <TabPanel id="tables">
           <p className="mb-3 text-sm text-muted">Regravar um token invalida o QR Code e a tag atuais da mesa e encerra a sessão em andamento. Use só se suspeitar de abuso.</p>
           {tables.tables.length === 0 ? (
             <EmptyState icon={Table2} title="Nenhuma mesa cadastrada">As mesas são criadas pelo restaurante.</EmptyState>
@@ -298,23 +324,13 @@ function View({ id }: { id: string }) {
               ]}
             />
           )}
-        </section>
+        </TabPanel>
       )}
 
-      {can('restaurants.activity') && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-xl font-semibold">Registros</h2>
+      {current === 'activity' && (
+        <TabPanel id="activity">
           <ActivityList endpoint={`/api/admin/restaurants/${id}/activity`} token={token} />
-        </section>
-      )}
-
-      {can('restaurants.delete') && (
-        <section className="mt-8 rounded-lg border border-danger/40 p-5">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-danger"><Trash2 size={18} /> Excluir restaurante</h2>
-          <p className="mt-1 text-sm text-muted">O cardápio sai do ar e a equipe perde o acesso. Os dados ficam guardados para restauração ou exportação e depois são apagados de vez.</p>
-          {r.subscription.state !== 'suspended' && <p className="mt-2 text-sm font-medium text-warning">Para excluir, suspenda o acesso primeiro.</p>}
-          <Button className="mt-3" variant="danger" disabled={r.subscription.state !== 'suspended'} onClick={() => { setError(null); setConfirmSlug(''); setDeleting(true); }}>Excluir restaurante</Button>
-        </section>
+        </TabPanel>
       )}
 
       <ConfirmModal
@@ -374,8 +390,8 @@ function View({ id }: { id: string }) {
           <form onSubmit={saveEdit} noValidate className="space-y-4">
             <Field label="Nome do restaurante" error={editForm.errors.name}><Input {...editForm.bind('name')} maxLength={FIELD_RULES.restaurantName.max} autoFocus /></Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Responsável pelo contrato" error={editForm.errors.managerName}><Input {...editForm.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
-              <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={editForm.errors.managerContact}><Input {...editForm.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
+              <Field label="Nome do titular" error={editForm.errors.managerName}><Input {...editForm.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
+              <Field label="Contato do titular" hint="Telefone com DDD ou e-mail." error={editForm.errors.managerContact}><Input {...editForm.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
             </div>
             <p className="text-xs text-muted">O link /{r.slug} não muda: ele está impresso nos QR Codes.</p>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}
@@ -418,41 +434,116 @@ function View({ id }: { id: string }) {
 }
 
 /**
- * The one status of the restaurant, why it is so and the action that fixes it. Pending
- * and ended contracts are told apart from payment suspensions.
+ * The one status of the restaurant, why it is so and the action that fixes it, over
+ * the facts behind it: contract, due date, plan and trial.
  */
-function StatusStrip({ sub, overdueDays, action, charge }: { sub: SubscriptionView; overdueDays: number; action: React.ReactNode; charge: ReturnType<typeof billingLink> }) {
+function StatusPanel({
+  sub,
+  contract,
+  overdueDays,
+  onPlan,
+  onAdjust,
+  action,
+  charge,
+}: {
+  sub: SubscriptionView;
+  contract: ContractView | null;
+  overdueDays: number;
+  onPlan: (() => void) | null;
+  onAdjust: (() => void) | null;
+  action: React.ReactNode;
+  charge: ReturnType<typeof billingLink>;
+}) {
   const lines: string[] = [];
   if (sub.status === 'pending') {
     lines.push(sub.contract.nextStartsOn ? `O contrato começa em ${dayBR(sub.contract.nextStartsOn)}. Até lá, a equipe não acessa o painel e o cardápio fica fora do ar.` : 'Sem contrato registrado: a equipe não acessa o painel e o cardápio fica fora do ar.');
   } else if (sub.status === 'ended') {
     lines.push(`Contrato encerrado em ${sub.contract.endsOn ? dayBR(sub.contract.endsOn) : '—'}${sub.contract.nextStartsOn ? `; a renovação começa em ${dayBR(sub.contract.nextStartsOn)}` : ''}. A equipe não acessa o painel e o cardápio está fora do ar.`);
   } else {
-    if (sub.reasons.includes('manual')) lines.push('Suspenso manualmente pela Elo Digital.');
-    if (sub.reasons.includes('overdue')) lines.push(`Vencida há ${overdueDays} ${overdueDays === 1 ? 'dia' : 'dias'}: registre um pagamento ou ajuste o vencimento para liberar.`);
+    if (sub.reasons.includes('manual')) lines.push('Suspenso manualmente pela Elo Digital: a equipe não acessa o painel; o cardápio continua no ar.');
+    if (sub.reasons.includes('overdue')) lines.push(`Vencida há ${plural(overdueDays, 'dia', 'dias')}: registre um pagamento ou ajuste o vencimento para liberar.`);
     if (sub.status === 'grace') lines.push(`Venceu em ${fmt(sub.dueDate)}. A equipe perde o acesso em ${fmt(sub.graceEndsAt)} sem pagamento.`);
-    if (sub.status === 'active') lines.push(sub.trial.state === 'running' && sub.trial.endsOn ? `Em teste até ${dayBR(sub.trial.endsOn)}.` : `Em dia. Próximo vencimento em ${fmt(sub.dueDate)}.`);
+    if (sub.status === 'active') lines.push(sub.trial.state === 'running' ? 'Em período de teste: a equipe usa o painel e o cardápio está no ar, sem cobrança até o fim do teste.' : 'Em dia: a equipe usa o painel e o cardápio está no ar.');
   }
+
+  const facts: { icon: typeof Wallet; label: string; value: string; hint?: string | null; tone?: string; onEdit?: (() => void) | null; editLabel?: string }[] = [
+    {
+      icon: FileSignature,
+      label: 'Contrato',
+      value: sub.contract.state === 'active' && contract ? `${CONTRACT_KIND_LABEL[contract.kind]} até ${dayBR(sub.contract.endsOn!)}` : sub.contract.state === 'ended' ? 'Encerrado' : sub.contract.nextStartsOn ? `Começa em ${dayBR(sub.contract.nextStartsOn)}` : 'Sem contrato',
+      hint: sub.contract.daysLeft !== null ? (sub.contract.daysLeft === 0 ? 'termina hoje' : `faltam ${plural(sub.contract.daysLeft, 'dia', 'dias')}`) : null,
+      tone: sub.contract.daysLeft !== null && sub.contract.daysLeft <= CONTRACT_LIMITS.warnDays ? 'text-warning' : undefined,
+    },
+    {
+      icon: CalendarClock,
+      label: 'Vencimento',
+      value: sub.contract.state === 'pending' ? 'Começa com o contrato' : fmt(sub.dueDate),
+      hint: sub.contract.state === 'pending' ? null : sub.reasons.includes('overdue') || sub.status === 'grace' ? `vencida há ${plural(Math.max(overdueDays, 0), 'dia', 'dias')}` : `em ${plural(Math.max(Math.ceil((new Date(sub.dueDate).getTime() - Date.now()) / 86_400_000), 0), 'dia', 'dias')}`,
+      tone: sub.status === 'grace' ? 'text-warning' : sub.reasons.includes('overdue') ? 'text-danger' : undefined,
+      onEdit: onAdjust,
+      editLabel: 'Ajustar',
+    },
+    {
+      icon: Layers,
+      label: 'Plano',
+      value: sub.plan ? `${sub.plan.name} · ${formatBRL(sub.plan.priceCents)}` : 'Sem plano',
+      hint: sub.plan ? cycleLabel(sub.plan.cycleMonths) : null,
+      onEdit: onPlan,
+      editLabel: 'Trocar',
+    },
+  ];
+  if (sub.trial.state !== 'none' && sub.trial.endsOn) {
+    facts.push({
+      icon: Hourglass,
+      label: 'Período de teste',
+      value: sub.trial.state === 'running' ? `Até ${dayBR(sub.trial.endsOn)}` : sub.trial.state === 'scheduled' ? `Começa em ${dayBR(sub.trial.startsOn!)}` : sub.trial.state === 'finished' ? 'Concluído' : 'Encerrado antes',
+      hint: sub.trial.state === 'running' ? (sub.trial.daysLeft === 0 ? 'último dia' : `faltam ${plural(sub.trial.daysLeft!, 'dia', 'dias')}`) : sub.trial.state === 'ended_by_conversion' ? 'na conversão em definitivo' : `${plural(sub.trial.days, 'dia', 'dias')} previstos`,
+    });
+  }
+
   return (
-    <GlassCard strong className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <Badge tone={STATUS_TONE[sub.status]} dot>{RESTAURANT_STATUS_LABEL[sub.status]}</Badge>
-        {lines.map((l) => <p key={l} className="text-sm text-muted">{l}</p>)}
-      </div>
-      {(action || charge) && (
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {charge && (
-            <a href={charge.href} target="_blank" rel="noreferrer" className="btn-glass inline-flex items-center justify-center gap-2 rounded-pill px-4 py-2.5 text-sm font-semibold">
-              <charge.Icon size={16} /> {charge.label}
-            </a>
-          )}
-          {action}
+    <GlassCard strong className="p-5 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Badge tone={STATUS_TONE[sub.status]} dot>{RESTAURANT_STATUS_LABEL[sub.status]}</Badge>
+          {lines.map((l) => <p key={l} className="text-sm text-muted">{l}</p>)}
         </div>
-      )}
+        {(action || charge) && (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {charge && (
+              <a href={charge.href} target="_blank" rel="noreferrer" className="btn-glass inline-flex items-center justify-center gap-2 rounded-pill px-4 py-2.5 text-sm font-semibold">
+                <charge.Icon size={16} /> {charge.label}
+              </a>
+            )}
+            {action}
+          </div>
+        )}
+      </div>
+      <dl className={`mt-5 grid gap-3 border-t border-line/40 pt-5 sm:grid-cols-2 ${facts.length > 3 ? 'xl:grid-cols-4' : 'lg:grid-cols-3'}`}>
+        {facts.map((f) => (
+          <div key={f.label} className="flex items-start gap-3 rounded-md bg-leaf-100/40 px-4 py-3">
+            <f.icon size={18} className="mt-0.5 shrink-0 text-brand" />
+            <div className="min-w-0 flex-1">
+              <dt className="text-xs text-muted">{f.label}</dt>
+              <dd className={`font-semibold [overflow-wrap:anywhere] ${f.tone ?? ''}`}>{f.value}</dd>
+              {f.hint && <dd className="text-xs text-muted">{f.hint}</dd>}
+            </div>
+            {f.onEdit && <Button variant="ghost" className="!px-3 !py-1.5 text-xs" onClick={f.onEdit}>{f.editLabel}</Button>}
+          </div>
+        ))}
+      </dl>
     </GlassCard>
   );
 }
 
+function RestaurantView({ id }: { id: string }) {
+  return (
+    <Suspense fallback={<SkeletonCards count={3} />}>
+      <View id={id} />
+    </Suspense>
+  );
+}
+
 export default function RestaurantPage({ params }: { params: { id: string } }) {
-  return <View id={params.id} />;
+  return <RestaurantView id={params.id} />;
 }

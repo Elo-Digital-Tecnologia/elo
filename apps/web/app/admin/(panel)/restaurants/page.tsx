@@ -356,8 +356,8 @@ function View() {
         <form onSubmit={create} noValidate className="space-y-4">
           <Field label="Nome do restaurante" error={form.errors.name}><Input {...form.bind('name')} maxLength={FIELD_RULES.restaurantName.max} /></Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Responsável pelo contrato" hint="Também vira o titular do painel do restaurante." error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
-            <Field label="Contato do responsável" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
+            <Field label="Nome do titular" hint="Também vira a conta de titular no painel do restaurante." error={form.errors.managerName}><Input {...form.bind('managerName')} maxLength={FIELD_RULES.personName.max} /></Field>
+            <Field label="Contato do titular" hint="Telefone com DDD ou e-mail." error={form.errors.managerContact}><Input {...form.bind('managerContact')} maxLength={FIELD_RULES.contact.max} /></Field>
           </div>
           {plans?.length === 0 ? (
             <p className="rounded-md border border-warning/40 bg-warning/10 px-4 py-3 text-sm">Nenhum plano ativo. Crie um plano em <a href="/admin/plans" className="font-semibold underline">Planos</a> antes de cadastrar.</p>
@@ -380,7 +380,7 @@ function View() {
           </div>
           <fieldset className="space-y-4 rounded-md border border-line/50 p-4">
             <label className="flex items-start gap-3 text-sm">
-              <input type="checkbox" checked={withContract} onChange={(e) => toggleContract(e.target.checked)} className="mt-0.5 !w-auto" />
+              <input type="checkbox" checked={withContract} onChange={(e) => toggleContract(e.target.checked)} className="mt-0.5" />
               <span>
                 <span className="block font-medium">Anexar o contrato assinado agora</span>
                 <span className="block text-muted">Sem contrato, o restaurante fica Pendente: a equipe não acessa o painel e o cardápio fica fora do ar até o contrato ser registrado.</span>

@@ -1,6 +1,6 @@
 'use client';
 
-import { Building2, CircleCheck, FileClock, FileWarning, FileX, OctagonAlert, TimerReset } from 'lucide-react';
+import { Building2, CircleCheck, FileClock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '@elo/client';
 import { RESTAURANT_STATUS_LABEL, type RestaurantListItem, type RestaurantListView } from '@elo/core';
@@ -55,13 +55,9 @@ function View() {
   return (
     <>
       <PageHeader title="Visão geral" />
-      <Stagger className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <StaggerItem className="[&>*]:h-full"><Stat label="Restaurantes" value={o.total} icon={Building2} hint="Cadastrados" /></StaggerItem>
-        <StaggerItem className="[&>*]:h-full"><Stat label="Assinaturas ativas" value={o.active} icon={CircleCheck} hint="Em dia" /></StaggerItem>
-        <StaggerItem className="[&>*]:h-full"><Stat label="Em tolerância" value={o.grace} icon={TimerReset} hint="Vencidos há até 7 dias" /></StaggerItem>
-        <StaggerItem className="[&>*]:h-full"><Stat label="Suspensos" value={o.suspended} icon={OctagonAlert} hint="Pagamento ou suspensão manual" /></StaggerItem>
-        <StaggerItem className="[&>*]:h-full"><Stat label="Pendentes" value={o.pending} icon={FileWarning} hint="Contrato ainda não começou" /></StaggerItem>
-        <StaggerItem className="[&>*]:h-full"><Stat label="Contratos encerrados" value={o.ended} icon={FileX} hint="Sem renovação em vigor" /></StaggerItem>
+      <Stagger className="grid gap-4 sm:grid-cols-3">
+        <StaggerItem className="[&>*]:h-full"><Stat label="Restaurantes" value={o.total} icon={Building2} hint={`${o.pending} pendentes · ${o.ended} encerrados`} /></StaggerItem>
+        <StaggerItem className="[&>*]:h-full"><Stat label="Assinaturas ativas" value={o.active} icon={CircleCheck} hint={`${o.grace} em tolerância · ${o.suspended} suspensos`} /></StaggerItem>
         <StaggerItem className="[&>*]:h-full"><Stat label="Contratos a vencer" value={o.contractsEnding} icon={FileClock} hint="Terminam em até 30 dias" /></StaggerItem>
       </Stagger>
 
@@ -74,8 +70,8 @@ function View() {
                 { label: 'Ativos', value: o.active, color: 'hsl(var(--elo-success))' },
                 { label: 'Em tolerância', value: o.grace, color: 'hsl(var(--elo-warning))' },
                 { label: 'Suspensos', value: o.suspended, color: 'hsl(var(--elo-danger))' },
-                { label: 'Pendentes', value: o.pending, color: 'hsl(var(--elo-line))' },
-                { label: 'Contratos encerrados', value: o.ended, color: 'hsl(var(--elo-fg-muted))' },
+                { label: 'Pendentes', value: o.pending, color: 'hsl(var(--elo-chart-4))' },
+                { label: 'Contratos encerrados', value: o.ended, color: 'hsl(var(--elo-chart-2))' },
               ]}
               center={{ value: String(o.total), label: 'restaurantes' }}
             />

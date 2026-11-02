@@ -28,7 +28,7 @@ const NAV: (NavItem & { perm?: Permission })[] = [
 /** Exige login de equipe Elo Digital; itens do menu seguem as permissões. Fica no layout e não remonta entre as abas. */
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const { token, user, ready, setToken } = useAuth('admin');
+  const { token, user, ready, logout } = useAuth('admin');
   const apiOrigin = useServiceOrigin(3001, process.env.NEXT_PUBLIC_API_URL);
   const isElo = user && (user.roles.includes('superadmin') || user.roles.includes('elo_admin'));
 
@@ -53,7 +53,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         brandSub="Administração"
         nav={NAV.filter((n) => !n.perm || can(n.perm))}
         user={{ name: user.name ?? (isSuper ? 'Superadmin' : 'Equipe Elo'), role: isSuper ? 'Todas as permissões' : `${permissions.length} permissões` }}
-        onLogout={() => setToken(null)}
+        onLogout={() => void logout()}
         links={[{ href: `${apiOrigin}/docs`, label: 'Documentação da API', icon: BookOpen, external: true }]}
       >
         {children}

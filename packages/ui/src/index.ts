@@ -21,4 +21,5 @@ export * from './components/charts';
 export * from './components/app-shell';
 export * from './components/auth-layout';
 export * from './components/alerts';
+export * from './components/tabs';
 export { themeInitScript, THEME_KEY } from './components/theme-script';

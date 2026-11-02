@@ -103,20 +103,31 @@ function navFor(base: string, roles: string[], impersonated: boolean): NavItem[]
 
 /** Why the API refused the team (403 `subscription_suspended`). */
 interface Suspension {
+  status: string;
   reasons: string[];
   contractEndsOn: string | null;
+  contractStartsOn: string | null;
 }
 
+const text = (v: unknown) => (typeof v === 'string' ? v : null);
+
 const suspensionOf = (e: ApiError): Suspension => ({
+  status: text(e.data.status) ?? 'suspended',
   reasons: Array.isArray(e.data.reasons) ? (e.data.reasons as string[]) : [],
-  contractEndsOn: typeof e.data.contractEndsOn === 'string' ? e.data.contractEndsOn : null,
+  contractEndsOn: text(e.data.contractEndsOn),
+  contractStartsOn: text(e.data.contractStartsOn),
 });
 
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
 
-function suspensionText({ reasons, contractEndsOn }: Suspension): string {
-  if (reasons.includes('contract_pending')) return 'Contrato pendente: fale com a Elo Digital para liberar o acesso. O cardápio dos clientes também fica fora do ar até lá.';
-  if (reasons.includes('contract_ended'))
+const SUSPENSION_TITLE: Record<string, string> = { pending: 'Contrato pendente', ended: 'Contrato encerrado' };
+
+function suspensionText({ status, reasons, contractEndsOn, contractStartsOn }: Suspension): string {
+  if (status === 'pending' || reasons.includes('contract_pending'))
+    return contractStartsOn
+      ? `O contrato com a Elo Digital começa em ${dayLabel(contractStartsOn)}. Até lá, o painel e o cardápio dos clientes ficam fora do ar.`
+      : 'Ainda não há contrato registrado com a Elo Digital. Fale com a Elo Digital para liberar o acesso; o cardápio dos clientes também fica fora do ar até lá.';
+  if (status === 'ended' || reasons.includes('contract_ended'))
     return `Contrato encerrado${contractEndsOn ? ` em ${dayLabel(contractEndsOn)}` : ''}. Fale com a Elo Digital para renovar. O cardápio dos clientes fica fora do ar até a renovação.`;
   if (reasons.includes('manual')) return 'O acesso foi suspenso pela Elo Digital. Fale com a Elo Digital para reativar. O cardápio dos clientes continua disponível.';
   return 'O pagamento da assinatura não foi confirmado. Fale com a Elo Digital para reativar o acesso. O cardápio dos clientes continua disponível.';
@@ -136,7 +147,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   /** Where signing out leads: Elo support goes back to the restaurant in the Elo panel, not to this login. */
   const leavingTo = useRef<string | null>(null);
-  const { token, user, ready, setToken } = useAuth(slug);
+  const { token, user, ready, setToken, renew, logout } = useAuth(slug);
   const [me, setMe] = useState<Me | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [suspended, setSuspended] = useState<Suspension | null>(null);
@@ -151,9 +162,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
     {
       'staff.updated': (p: { id: string }) => {
         if (!token || p.id !== user?.sub || user?.impersonatedBy) return;
-        api<{ accessToken: string }>('/api/auth/refresh', { method: 'POST', body: {}, token })
-          .then((res) => setToken(res.accessToken))
-          .catch(() => undefined);
+        void renew();
         api<{ avatarUrl: string | null }>('/api/me', { token }).then((r) => setAvatarUrl(r.avatarUrl)).catch(() => undefined);
       },
       'restaurant.availability': (a: Availability) => setMe((m) => (m ? { ...m, availability: a } : m)),
@@ -188,11 +197,14 @@ export function PanelShell({ children }: { children: ReactNode }) {
         .then((data) => {
           // O token precisa ser do restaurante deste endereço.
           if (data.slug !== slug) return setToken(null);
+          // Elo support whose pass runs out goes back to the restaurant in the Elo panel.
+          if (user.impersonatedBy) leavingTo.current = `/admin/restaurants/${data.id}`;
           setMe(data);
         })
         .catch((e) => {
           if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
-          else if (e instanceof ApiError && e.status === 401) setToken(null);
+          // A refused token is renewed from the session (useAuth hears the 401); only an ended session signs out.
+          else if (e instanceof ApiError && e.status === 401) return;
           // Limite de requisições ou queda passageira: tenta de novo sem deslogar.
           else if (attempt < 4) retry = setTimeout(() => void load(attempt + 1), 1500 * (attempt + 1));
           else setFailed(true);
@@ -207,9 +219,8 @@ export function PanelShell({ children }: { children: ReactNode }) {
     if (live !== 'rejected' || !token) return;
     api<Me>('/api/restaurant/me', { token }).catch((e) => {
       if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
-      else if (e instanceof ApiError && e.status === 401) setToken(null);
     });
-  }, [live, token, setToken]);
+  }, [live, token]);
 
   if (suspended)
     return (
@@ -219,9 +230,9 @@ export function PanelShell({ children }: { children: ReactNode }) {
           <span className="mx-auto grid shrink-0 h-16 w-16 place-items-center rounded-pill bg-warning/20 text-warning">
             <ShieldAlert size={30} />
           </span>
-          <h1 className="text-2xl font-bold">Acesso suspenso</h1>
+          <h1 className="text-2xl font-bold">{SUSPENSION_TITLE[suspended.status] ?? 'Acesso suspenso'}</h1>
           <p className="text-muted">{suspensionText(suspended)}</p>
-          <Button variant="ghost" onClick={() => setToken(null)}>
+          <Button variant="ghost" onClick={() => void logout()}>
             Sair
           </Button>
         </GlassCard>
@@ -260,8 +271,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
         onLogout={() => {
           // This device stops getting the team's alerts before the next person signs in.
           void alerts.leave();
-          if (user.impersonatedBy) leavingTo.current = `/admin/restaurants/${me.id}`;
-          setToken(null);
+          void logout();
         }}
         defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
         headerExtra={
@@ -304,8 +314,14 @@ export function PanelShell({ children }: { children: ReactNode }) {
               <span>
                 <strong>{me.availability.label}</strong>
                 {me.availability.pauseReason && <> · {me.availability.pauseReason}</>}. Nenhuma mesa nova abre; as mesas e os pedidos em andamento seguem normalmente.
-                {user.roles.some((r) => r === 'restaurant_admin' || r === 'manager') && pathname !== `${base}/dashboard/hours` && (
-                  <> <Link href={`${base}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Ver funcionamento</Link></>
+                {manages && pathname !== `${base}/dashboard/hours` && (
+                  <>
+                    {' '}
+                    {me.availability.reason === 'hours' && (
+                      <><Link href={`${base}/dashboard/hours?abrir=1`} className="font-semibold text-brand underline-offset-2 hover:underline">Abrir fora do horário</Link> · </>
+                    )}
+                    <Link href={`${base}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Ver funcionamento</Link>
+                  </>
                 )}
               </span>
             </GlassCard>

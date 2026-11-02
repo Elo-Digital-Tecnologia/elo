@@ -53,12 +53,13 @@ function detail(a: ActivityView): string | null {
     const from = typeof m.from === 'string' ? `de ${day(m.from)} ` : '';
     return [`Vencimento ${from}para ${day(m.newDueDate)}`, reason].filter(Boolean).join(' · ');
   }
-  if (a.action === 'pause_created' && typeof m.startsAt === 'string') {
+  if ((a.action === 'pause_created' || a.action === 'opening_created') && typeof m.startsAt === 'string') {
     const stamp = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
     const span = typeof m.endsAt === 'string' ? `${stamp(m.startsAt)} até ${stamp(m.endsAt)}` : `desde ${stamp(m.startsAt)}, até reabrir`;
     return [span, reason].filter(Boolean).join(' · ');
   }
   if (a.action === 'pause_ended') return m.running === false ? 'Cancelada antes de começar.' : 'Restaurante reaberto.';
+  if (a.action === 'opening_ended') return m.running === false ? 'Cancelada antes de começar.' : 'Encerrada antes do previsto: vale de novo o horário da semana.';
   if (a.action === 'ownership_transferred') {
     return [typeof m.formerOwner === 'string' ? `Antes: ${m.formerOwner}` : null, reason].filter(Boolean).join(' · ') || null;
   }

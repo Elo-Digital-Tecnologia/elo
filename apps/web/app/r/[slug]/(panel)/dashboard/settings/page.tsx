@@ -4,7 +4,7 @@ import { Save } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, type OpeningHours } from '@elo/core';
+import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, type OpeningHours, overnightLabel } from '@elo/core';
 import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, Textarea, TimeInput } from '@elo/ui';
 import { ImageField } from '../../../../../_components/image-field';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
@@ -181,13 +181,19 @@ function Settings() {
                       <TimeInput value={d.from} onChange={(v) => setDay(i, { from: v })} aria-label={`${DAYS[i]}: abre`} className="!w-24 text-center" />
                       <span className="text-muted">às</span>
                       <TimeInput value={d.to} onChange={(v) => setDay(i, { to: v })} aria-label={`${DAYS[i]}: fecha`} className="!w-24 text-center" />
+                      {overnightLabel(i, { open: d.from, close: d.to }) && <span className="basis-full text-xs font-medium text-info sm:basis-auto">{overnightLabel(i, { open: d.from, close: d.to })}</span>}
                     </span>
                   )}
                 </li>
               ))}
             </ul>
           )}
-          {showHours && <p className="text-xs text-muted">Se o horário de fechar for menor que o de abrir, o restaurante fecha depois da meia-noite.</p>}
+          {showHours && (
+            <p className="text-xs text-muted">
+              Se o horário de fechar for menor que o de abrir, o restaurante fecha depois da meia-noite, no dia seguinte. A madrugada de cada dia conta como o turno do dia
+              anterior: para abrir às 00:30 de domingo, o sábado precisa ir até depois da meia-noite.
+            </p>
+          )}
         </Section>
 
         <Section title="Wi-Fi para clientes" hint="Aparece só para quem está com a mesa aberta. Nunca no link de consulta.">

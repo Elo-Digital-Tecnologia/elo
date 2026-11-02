@@ -1,10 +1,11 @@
 'use client';
 
-import { CalendarClock, CalendarX2, CirclePause, Clock, Play } from 'lucide-react';
+import { CalendarClock, CalendarX2, CirclePause, Clock, DoorOpen, Play } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { availability, FIELD_RULES, type FieldError, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
+import { availability, FIELD_RULES, type FieldError, overnightLabel, PAUSE_LIMITS, type PauseList, type PauseProblem, type PauseView } from '@elo/core';
 import { Badge, Button, ConfirmModal, DateTimeInput, EmptyState, ErrorState, Field, GlassCard, Modal, PageHeader, Pagination, SkeletonCards, Textarea } from '@elo/ui';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
@@ -16,7 +17,15 @@ const PROBLEM: Record<PauseProblem, string> = {
   starts_in_past: 'O início não pode estar no passado.',
   too_far_ahead: `Agende com no máximo ${PAUSE_LIMITS.aheadDays} dias de antecedência.`,
   overlaps: 'Já existe uma parada nesse período. Encerre ou ajuste a outra antes.',
+  opening_needs_end: 'Informe até quando o restaurante fica aberto.',
+  opening_too_long: `A abertura fora do horário dura no máximo ${PAUSE_LIMITS.openingMaxHours} horas.`,
 };
+
+const OPEN_FOR: [string, number][] = [
+  ['1 hora', 60],
+  ['2 horas', 120],
+  ['3 horas', 180],
+];
 
 const QUICK: [string, number][] = [
   ['1 hora', 60],
@@ -50,6 +59,12 @@ const dateError = (v: string, missing: FieldError): FieldError | null => (!v ? m
 const DRAFT_CHECKS = {
   start: (v: string, all: Draft) => (all.startNow ? null : dateError(v, own('start_missing'))),
   end: (v: string, all: Draft) => (all.untilReopen ? null : dateError(v, own('end_missing'))),
+  reason: rule(FIELD_RULES.pauseReason),
+};
+
+const OPENING_MESSAGES = { end_missing: 'Informe até quando o restaurante fica aberto.' };
+const OPENING_CHECKS = {
+  end: (v: string) => dateError(v, own('end_missing')),
   reason: rule(FIELD_RULES.pauseReason),
 };
 
@@ -89,7 +104,7 @@ function PastPause({ pause }: { pause: PauseView }) {
     <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-5">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-pill bg-brand/10 text-brand">
-          <CirclePause size={18} />
+          {pause.kind === 'opening' ? <DoorOpen size={18} /> : <CirclePause size={18} />}
         </span>
         <div className="min-w-0">
           <p className="font-semibold">
@@ -103,8 +118,9 @@ function PastPause({ pause }: { pause: PauseView }) {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-12 text-sm sm:shrink-0 sm:justify-end sm:pl-0">
+        {pause.kind === 'opening' && <Badge tone="info">Fora do horário</Badge>}
         <Badge>{lasted(new Date(end).getTime() - new Date(pause.startsAt).getTime())}</Badge>
-        {early && <Badge tone="success">Reaberto antes</Badge>}
+        {early && <Badge tone="success">{pause.kind === 'opening' ? 'Encerrada antes' : 'Reaberto antes'}</Badge>}
         <span className="text-muted">por {pause.createdByName}</span>
       </div>
     </div>
@@ -119,6 +135,9 @@ function View() {
   const form = useForm<Draft>(freshDraft(true), DRAFT_CHECKS, MESSAGES);
   const draft = composing ? form.values : null;
   const [ending, setEnding] = useState<PauseView | null>(null);
+  const [opening, setOpening] = useState(false);
+  const openForm = useForm({ end: '', reason: '' }, OPENING_CHECKS, OPENING_MESSAGES);
+  const params = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -185,6 +204,36 @@ function View() {
     }
   };
 
+  const startOpening = () => {
+    setError(null);
+    openForm.reset({ end: localInput(new Date(Date.now() + 2 * 3_600_000)), reason: '' });
+    setOpening(true);
+  };
+
+  // The closed banner of the panel links here to open at once.
+  const askedToOpen = params.get('abrir') === '1';
+  useEffect(() => {
+    if (askedToOpen) startOpening();
+  }, [askedToOpen]);
+
+  const saveOpening = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!openForm.validate()) return;
+    setBusy(true);
+    try {
+      await api('/api/restaurant/pauses', { body: { kind: 'opening', endsAt: new Date(openForm.values.end).toISOString(), reason: openForm.values.reason.trim() || null }, token });
+      setOpening(false);
+      await load();
+    } catch (err) {
+      if (openForm.fromServer(err, { endsAt: 'end' })) return;
+      const problems = err instanceof ApiError && Array.isArray(err.data.problems) ? (err.data.problems as PauseProblem[]) : [];
+      setError(problems.length ? problems.map((p) => PROBLEM[p]).join(' ') : unexpected(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const end = async () => {
     if (!ending) return;
     setBusy(true);
@@ -206,7 +255,9 @@ function View() {
   if (failed) return <ErrorState action={<Button onClick={load}>Tentar de novo</Button>}>Não foi possível carregar o funcionamento.</ErrorState>;
   if (!data) return <SkeletonCards count={2} />;
   const a = data.availability;
-  const running = data.upcoming.find((p) => new Date(p.startsAt).getTime() <= Date.now());
+  const started = (p: PauseView) => new Date(p.startsAt).getTime() <= Date.now();
+  const running = data.upcoming.find((p) => p.kind === 'closure' && started(p));
+  const extraOpening = data.upcoming.find((p) => p.kind === 'opening' && started(p));
   const owner = roles.includes('restaurant_admin');
 
   return (
@@ -239,6 +290,17 @@ function View() {
               <Button onClick={() => { setError(null); setEnding(running); }}><Play size={16} /> Reabrir agora</Button>
             </div>
           )}
+          {!running && !a.open && a.reason === 'hours' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={startOpening}><DoorOpen size={16} /> Abrir fora do horário</Button>
+              <span className="text-sm text-muted">Para uma noite que se estendeu ou um evento: as mesas voltam a abrir até a hora que você escolher.</span>
+            </div>
+          )}
+          {extraOpening && a.extra && (
+            <div>
+              <Button variant="ghost" onClick={() => { setError(null); setEnding(extraOpening); }}>Encerrar abertura extra</Button>
+            </div>
+          )}
           <div className="border-t border-line/40 pt-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">Horário da semana</h2>
@@ -252,6 +314,7 @@ function View() {
                     <li key={d} className={`surface px-3 py-2 text-sm ${i === new Date().getDay() ? 'ring-1 ring-brand/50' : ''}`}>
                       <span className="block text-xs text-muted">{d}</span>
                       <span className={`block font-semibold tabular-nums ${h ? '' : 'text-muted'}`}>{h ? `${h.open}–${h.close}` : 'Fechado'}</span>
+                      {overnightLabel(i, h) && <span className="block text-xs text-info">{overnightLabel(i, h)}</span>}
                     </li>
                   );
                 })}
@@ -263,24 +326,25 @@ function View() {
         </GlassCard>
 
         <section>
-          <h2 className="mb-3 text-xl font-semibold">Paradas atuais e agendadas</h2>
+          <h2 className="mb-3 text-xl font-semibold">Paradas e aberturas extras</h2>
           {data.upcoming.length === 0 ? (
             <EmptyState icon={CalendarX2} title="Nenhuma parada agendada">Use &quot;Pausar agora&quot; para um imprevisto, ou agende férias e reformas com antecedência.</EmptyState>
           ) : (
             <ul className="space-y-3">
               {data.upcoming.map((p) => {
-                const now = new Date(p.startsAt).getTime() <= Date.now();
+                const now = started(p);
+                const extra = p.kind === 'opening';
                 return (
                   <li key={p.id}>
                     <GlassCard className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Badge tone={now ? 'danger' : 'warning'} dot>{now ? 'Em andamento' : 'Agendada'}</Badge>
+                          <Badge tone={extra ? 'info' : now ? 'danger' : 'warning'} dot>{extra ? (now ? 'Aberto fora do horário' : 'Abertura agendada') : now ? 'Em andamento' : 'Agendada'}</Badge>
                           <span className="font-semibold">{period(p)}</span>
                         </div>
                         <p className="mt-1 text-sm text-muted">{p.reason ? `Motivo: ${p.reason}` : 'Sem motivo informado'} · por {p.createdByName}</p>
                       </div>
-                      <Button variant="ghost" onClick={() => { setError(null); setEnding(p); }}>{now ? 'Reabrir agora' : 'Cancelar parada'}</Button>
+                      <Button variant="ghost" onClick={() => { setError(null); setEnding(p); }}>{extra ? 'Encerrar abertura' : now ? 'Reabrir agora' : 'Cancelar parada'}</Button>
                     </GlassCard>
                   </li>
                 );
@@ -350,16 +414,46 @@ function View() {
 
       <ConfirmModal
         open={!!ending}
-        title={ending && new Date(ending.startsAt).getTime() <= Date.now() ? 'Reabrir agora?' : 'Cancelar esta parada?'}
-        confirmLabel={ending && new Date(ending.startsAt).getTime() <= Date.now() ? 'Reabrir' : 'Cancelar parada'}
+        title={ending?.kind === 'opening' ? 'Encerrar a abertura extra?' : ending && new Date(ending.startsAt).getTime() <= Date.now() ? 'Reabrir agora?' : 'Cancelar esta parada?'}
+        confirmLabel={ending?.kind === 'opening' ? 'Encerrar abertura' : ending && new Date(ending.startsAt).getTime() <= Date.now() ? 'Reabrir' : 'Cancelar parada'}
         loading={busy}
         error={error}
         onConfirm={end}
         onClose={() => setEnding(null)}
       >
         <p>{ending ? period(ending) : ''}</p>
-        <p className="text-muted">Os clientes voltam a abrir mesas{ending && new Date(ending.startsAt).getTime() <= Date.now() ? ' na hora' : ' nesse período'}, se estiver dentro do horário.</p>
+        <p className="text-muted">
+          {ending?.kind === 'opening'
+            ? 'Fora do horário, nenhuma mesa nova abre a partir de agora. As mesas já abertas continuam até o garçom fechar.'
+            : `Os clientes voltam a abrir mesas${ending && new Date(ending.startsAt).getTime() <= Date.now() ? ' na hora' : ' nesse período'}, se estiver dentro do horário.`}
+        </p>
       </ConfirmModal>
+
+      <Modal open={opening} onClose={() => setOpening(false)} title="Abrir fora do horário" sheet>
+        {opening && (
+          <form onSubmit={saveOpening} noValidate className="space-y-4">
+            <p className="text-sm text-muted">Os clientes voltam a abrir mesas agora, até a hora escolhida. Depois disso vale de novo o horário da semana.</p>
+            <Field label="Aberto até" error={openForm.errors.end}>
+              <DateTimeInput name="end" invalid={!!openForm.errors.end} onBlur={() => openForm.touch('end')} aria-label="Aberto até" value={openForm.values.end} min={localInput(new Date())} onChange={(v) => openForm.set('end', v)} />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              {OPEN_FOR.map(([label, minutes]) => (
+                <button key={label} type="button" onClick={() => openForm.set('end', localInput(new Date(Date.now() + minutes * 60_000)))} className="rounded-pill border border-line/60 px-3 py-1.5 text-xs font-semibold transition hover:border-brand/60 hover:text-brand">
+                  {label}
+                </button>
+              ))}
+            </div>
+            <Field label="Motivo (opcional)" hint="Fica nos registros do restaurante." error={openForm.errors.reason}>
+              <Textarea {...openForm.bind('reason')} maxLength={FIELD_RULES.pauseReason.max} rows={2} placeholder="Ex.: Evento fechado" />
+            </Field>
+            {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="ghost" onClick={() => setOpening(false)}>Voltar</Button>
+              <Button type="submit" loading={busy}><DoorOpen size={16} /> Abrir agora</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </>
   );
 }
@@ -367,7 +461,9 @@ function View() {
 export default function HoursPage() {
   return (
     <RequireRoles roles={['restaurant_admin', 'manager']}>
-      <View />
+      <Suspense fallback={<SkeletonCards count={2} />}>
+        <View />
+      </Suspense>
     </RequireRoles>
   );
 }

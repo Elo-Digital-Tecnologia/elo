@@ -248,6 +248,20 @@ export function useContracts({
   const tone = state === 'active' ? (status!.daysLeft !== null && status!.daysLeft <= CONTRACT_LIMITS.warnDays ? 'warning' : 'success') : state === 'ended' ? 'danger' : 'neutral';
   const label = state === 'active' ? `Vigente · ${CONTRACT_KIND_LABEL[status!.current!.kind]}` : state === 'ended' ? 'Encerrado' : 'Pendente';
   const trialText = trial ? trialLine(trial) : null;
+  const voided = status?.voided;
+  const voidedNote = voided
+    ? `${voided.kind ? `O contrato ${CONTRACT_KIND_LABEL[voided.kind].toLowerCase()}` : 'O contrato'} registrado por último foi anulado em ${new Date(voided.at).toLocaleDateString('pt-BR')}${status?.current ? '; vale o contrato anterior.' : '; não há outro contrato.'}`
+    : null;
+
+  /** Buttons that add a contract: the first one, the pilot's conversion or a renewal. */
+  const actions =
+    canManage && list ? (
+      <>
+        {!latest && <Button onClick={() => open('initial')}><FilePlus2 size={16} /> Registrar contrato</Button>}
+        {latest?.kind === 'pilot' && <Button onClick={() => open('conversion')}><Repeat2 size={16} /> Converter em definitivo</Button>}
+        {latest && <Button variant={latest.kind === 'pilot' ? 'ghost' : 'primary'} onClick={() => open('renewal')}><RefreshCw size={16} /> Renovar</Button>}
+      </>
+    ) : null;
 
   const card = (
     <GlassCard className="flex flex-col gap-4 p-6">
@@ -278,15 +292,14 @@ export function useContracts({
           )}
         </div>
       )}
+      {voidedNote && (
+        <p className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/5 px-3.5 py-2.5 text-sm">
+          <Ban size={16} className="mt-0.5 shrink-0 text-danger" /> {voidedNote}
+        </p>
+      )}
       <div className="mt-auto flex flex-wrap gap-2 border-t border-line/40 pt-4">
         {status?.current && <Button variant="ghost" onClick={() => setViewing(status.current)}><FileSignature size={16} /> Ver contrato</Button>}
-        {canManage && list && (
-          <>
-            {!latest && <Button onClick={() => open('initial')}><FilePlus2 size={16} /> Registrar contrato</Button>}
-            {latest?.kind === 'pilot' && <Button onClick={() => open('conversion')}><Repeat2 size={16} /> Converter em definitivo</Button>}
-            {latest && <Button variant={latest.kind === 'pilot' ? 'ghost' : 'primary'} onClick={() => open('renewal')}><RefreshCw size={16} /> Renovar</Button>}
-          </>
-        )}
+        {actions}
       </div>
     </GlassCard>
   );
@@ -396,5 +409,5 @@ export function useContracts({
     </>
   );
 
-  return { card, history, modals, open, latest, loaded: !!list };
+  return { card, history, actions, modals, open, latest, current: status?.current ?? null, loaded: !!list };
 }
