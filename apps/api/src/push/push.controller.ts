@@ -66,6 +66,7 @@ export class PushController {
   @Delete('subscriptions')
   @HttpCode(204)
   unsubscribe(@CurrentUser() user: JwtUser, @Body() dto: UnsubscribeDto) {
+    if (user.impersonatedBy) return;
     return this.push.unsubscribe(user.sub, dto.endpoint);
   }
 }
