@@ -13,10 +13,10 @@ import {
   registerDecorator,
   type ValidationOptions,
 } from 'class-validator';
-import { FIELD_RULES, isHHMM, RESTAURANT_LIST_STATUSES, type RestaurantListStatus } from '@elo/core';
+import { FIELD_RULES, hoursProblems, RESTAURANT_LIST_STATUSES, type RestaurantListStatus } from '@elo/core';
 import { Field, Present } from '../common/validation';
 
-/** Sete dias (domingo a sábado), cada um nulo (fechado) ou { open, close } em "HH:MM". */
+/** Seven days (Sunday to Saturday), each a list of shifts `{ open, close }` as "HH:MM"; the rules live in `hoursProblems`. */
 function IsOpeningHours(options?: ValidationOptions) {
   return (target: object, property: string) =>
     registerDecorator({
@@ -25,11 +25,11 @@ function IsOpeningHours(options?: ValidationOptions) {
       propertyName: property,
       options,
       validator: {
-        validate: (v: unknown) =>
-          Array.isArray(v) &&
-          v.length === 7 &&
-          v.every((d) => d === null || (typeof d === 'object' && d !== null && isHHMM((d as { open?: unknown }).open) && isHHMM((d as { close?: unknown }).close))),
-        defaultMessage: () => 'openingHours must have 7 entries, each null or { open, close } as HH:MM',
+        validate: (v: unknown) => hoursProblems(v).length === 0,
+        defaultMessage: (args) => {
+          const [first] = hoursProblems(args?.value);
+          return `openingHours is invalid: ${first?.code ?? 'unknown'}${first?.day != null ? ` on day ${first.day}` : ''}`;
+        },
       },
     });
 }
@@ -63,11 +63,13 @@ export class UpdateSettingsDto {
   @Field(FIELD_RULES.instagram, { optional: true }) instagram?: string | null;
   @Field(FIELD_RULES.wifiName, { optional: true }) wifiName?: string | null;
   @Field(FIELD_RULES.wifiPassword, { optional: true }) wifiPassword?: string | null;
-  /** Rebuilt as `{ open, close }` per day, so nothing else lands in the stored JSON. */
+  /** Rebuilt as `{ open, close }` per shift, so nothing else lands in the stored JSON. */
   @Transform(({ value }) =>
-    Array.isArray(value) ? value.map((d) => (d && typeof d === 'object' ? { open: (d as { open?: unknown }).open, close: (d as { close?: unknown }).close } : d)) : value,
+    Array.isArray(value)
+      ? value.map((day) => (Array.isArray(day) ? day.map((s) => (s && typeof s === 'object' ? { open: (s as { open?: unknown }).open, close: (s as { close?: unknown }).close } : s)) : day))
+      : value,
   )
-  @IsOptional() @IsArray() @IsOpeningHours() openingHours?: ({ open: string; close: string } | null)[] | null;
+  @IsOptional() @IsArray() @IsOpeningHours() openingHours?: { open: string; close: string }[][] | null;
 }
 
 export class EditRestaurantDto {

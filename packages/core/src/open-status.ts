@@ -1,11 +1,16 @@
-/** Horário de um dia, "HH:MM". Se `close` for menor ou igual a `open`, fecha depois da meia-noite. */
-export interface DayHours {
+/** A shift, "HH:MM". If `close` is less than or equal to `open`, it closes after midnight. */
+export interface Shift {
   open: string;
   close: string;
 }
 
-/** Sete posições, de domingo (0) a sábado (6). `null` = fechado naquele dia. */
-export type OpeningHours = (DayHours | null)[];
+/** Seven positions, Sunday (0) to Saturday (6), each with the day's shifts in order of opening. An empty list = closed. */
+export type OpeningHours = Shift[][];
+
+export const HOURS_LIMITS = {
+  /** A safety net for the payload; no real restaurant gets near it. */
+  maxShiftsPerDay: 10,
+} as const;
 
 export interface OpenStatus {
   open: boolean;
@@ -18,6 +23,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export const isHHMM = (v: unknown): v is string => typeof v === 'string' && HHMM.test(v);
 const minutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3));
+const crossesMidnight = (s: Shift) => minutes(s.close) <= minutes(s.open);
 
 /** Dia da semana (0 = domingo) e minuto do dia no fuso informado. */
 function localClock(now: Date, timeZone: string): { dow: number; minute: number } {
@@ -27,13 +33,55 @@ function localClock(now: Date, timeZone: string): { dow: number; minute: number 
   return { dow, minute: Number(get('hour')) * 60 + Number(get('minute')) };
 }
 
+const isShift = (s: unknown): s is Shift => typeof s === 'object' && s !== null && isHHMM((s as Shift).open) && isHHMM((s as Shift).close);
+const isWeek = (hours: unknown): hours is unknown[][] => Array.isArray(hours) && hours.length === 7 && hours.every(Array.isArray);
+
+export type HoursProblemCode = 'not_a_week' | 'too_many_shifts' | 'invalid_time' | 'unordered' | 'overlap' | 'overnight_not_last' | 'overlaps_next_day';
+
+/** `day` is null when the whole value is malformed; `shift` is the index of the shift at fault. */
+export interface HoursProblem {
+  day: number | null;
+  shift: number | null;
+  code: HoursProblemCode;
+}
+
 /**
- * For a shift that closes after midnight, when it really ends: "até 01:00 de segunda".
+ * Everything wrong with a week of hours, empty when it can be saved. Shifts of a day
+ * come in order of opening, with a real gap between them; only the last one may close
+ * after midnight, and that closing cannot reach the first shift of the next day.
+ */
+export function hoursProblems(hours: unknown): HoursProblem[] {
+  if (!isWeek(hours)) return [{ day: null, shift: null, code: 'not_a_week' }];
+  const problems: HoursProblem[] = [];
+  const week = hours;
+  week.forEach((shifts, day) => {
+    if (shifts.length > HOURS_LIMITS.maxShiftsPerDay) return void problems.push({ day, shift: null, code: 'too_many_shifts' });
+    const invalid = shifts.findIndex((s) => !isShift(s));
+    if (invalid >= 0) return void problems.push({ day, shift: invalid, code: 'invalid_time' });
+    (shifts as Shift[]).forEach((s, i, all) => {
+      const prev = all[i - 1];
+      if (!prev) return;
+      if (crossesMidnight(prev)) problems.push({ day, shift: i - 1, code: 'overnight_not_last' });
+      else if (minutes(s.open) <= minutes(prev.open)) problems.push({ day, shift: i, code: 'unordered' });
+      else if (minutes(s.open) <= minutes(prev.close)) problems.push({ day, shift: i, code: 'overlap' });
+    });
+    const last = shifts[shifts.length - 1] as Shift | undefined;
+    const nextFirst = (week[(day + 1) % 7] as Shift[])[0];
+    if (last && crossesMidnight(last) && minutes(last.close) > 0 && nextFirst && isHHMM(nextFirst.open) && minutes(nextFirst.open) <= minutes(last.close)) {
+      problems.push({ day, shift: shifts.length - 1, code: 'overlaps_next_day' });
+    }
+  });
+  return problems;
+}
+
+/**
+ * For the last shift of a day, if it closes after midnight, when it really ends: "até 01:00 de segunda".
  * The early hours of a day belong to the shift of the day before.
  */
-export function overnightLabel(day: number, h: DayHours | null | undefined): string | null {
-  if (!h || !isHHMM(h.open) || !isHHMM(h.close) || minutes(h.close) > minutes(h.open)) return null;
-  return `até ${h.close} de ${WEEKDAYS[(day + 1) % 7]}`;
+export function overnightLabel(day: number, shifts: Shift[] | null | undefined): string | null {
+  const last = shifts?.[shifts.length - 1];
+  if (!last || !isHHMM(last.open) || !isHHMM(last.close) || !crossesMidnight(last)) return null;
+  return `até ${last.close} de ${WEEKDAYS[(day + 1) % 7]}`;
 }
 
 /** A stretch of a day (minutes from midnight) when the restaurant is open; `spill` when it is the early hours of the day before's shift. */
@@ -43,6 +91,8 @@ export interface ShiftPiece {
   spill: boolean;
   /** Day (0 = Sunday) whose shift this is. */
   day: number;
+  /** Position of the shift in its day. */
+  index: number;
 }
 
 /**
@@ -51,13 +101,15 @@ export interface ShiftPiece {
  */
 export function weekShifts(hours: OpeningHours): ShiftPiece[][] {
   const week: ShiftPiece[][] = Array.from({ length: 7 }, () => []);
-  hours.forEach((h, day) => {
-    if (!h || !isHHMM(h.open) || !isHHMM(h.close)) return;
-    const open = minutes(h.open);
-    const close = minutes(h.close);
-    if (close > open) return void week[day].push({ from: open, to: close, spill: false, day });
-    week[day].push({ from: open, to: 1440, spill: false, day });
-    if (close > 0) week[(day + 1) % 7].unshift({ from: 0, to: close, spill: true, day });
+  hours.forEach((shifts, day) => {
+    shifts.forEach((h, index) => {
+      if (!isHHMM(h.open) || !isHHMM(h.close)) return;
+      const open = minutes(h.open);
+      const close = minutes(h.close);
+      if (close > open) return void week[day].push({ from: open, to: close, spill: false, day, index });
+      week[day].push({ from: open, to: 1440, spill: false, day, index });
+      if (close > 0) week[(day + 1) % 7].unshift({ from: 0, to: close, spill: true, day, index });
+    });
   });
   return week;
 }
@@ -69,24 +121,23 @@ interface HoursState extends OpenStatus {
 
 function hoursState(hours: OpeningHours, now: Date, timeZone: string): HoursState {
   const { dow, minute } = localClock(now, timeZone);
-  const today = hours[dow];
-  const yesterday = hours[(dow + 6) % 7];
+  const yesterdayLast = hours[(dow + 6) % 7].at(-1);
 
   // Turno de ontem que atravessa a meia-noite ainda vale agora.
-  if (yesterday && minutes(yesterday.close) <= minutes(yesterday.open) && minute < minutes(yesterday.close)) {
-    return { open: true, label: `Aberto · fecha às ${yesterday.close}`, flipsIn: minutes(yesterday.close) - minute };
+  if (yesterdayLast && crossesMidnight(yesterdayLast) && minute < minutes(yesterdayLast.close)) {
+    return { open: true, label: `Aberto · fecha às ${yesterdayLast.close}`, flipsIn: minutes(yesterdayLast.close) - minute };
   }
-  if (today) {
-    const o = minutes(today.open);
-    const c = minutes(today.close);
+  for (const shift of hours[dow]) {
+    const o = minutes(shift.open);
+    const c = minutes(shift.close);
     const overnight = c <= o;
     if (minute >= o && (overnight || minute < c)) {
-      return { open: true, label: `Aberto · fecha às ${today.close}`, flipsIn: overnight ? 1440 - minute + c : c - minute };
+      return { open: true, label: `Aberto · fecha às ${shift.close}`, flipsIn: overnight ? 1440 - minute + c : c - minute };
     }
-    if (minute < o) return { open: false, label: `Fechado · abre hoje às ${today.open}`, flipsIn: o - minute };
+    if (minute < o) return { open: false, label: `Fechado · abre hoje às ${shift.open}`, flipsIn: o - minute };
   }
   for (let k = 1; k <= 7; k++) {
-    const next = hours[(dow + k) % 7];
+    const next = hours[(dow + k) % 7][0];
     if (!next) continue;
     const when = k === 1 ? 'amanhã' : WEEKDAYS[(dow + k) % 7];
     return { open: false, label: `Fechado · abre ${when} às ${next.open}`, flipsIn: 1440 - minute + (k - 1) * 1440 + minutes(next.open) };
@@ -99,8 +150,8 @@ function hoursState(hours: OpeningHours, now: Date, timeZone: string): HoursStat
  * cadastrado (o cardápio então não mostra nada).
  */
 export function openStatus(hours: OpeningHours | null | undefined, now: Date, timeZone: string): OpenStatus | null {
-  if (!Array.isArray(hours) || hours.length !== 7) return null;
-  const { open, label } = hoursState(hours, now, timeZone);
+  if (!isWeek(hours)) return null;
+  const { open, label } = hoursState(hours as OpeningHours, now, timeZone);
   return { open, label };
 }
 
@@ -176,7 +227,7 @@ export function availability(input: { hours: OpeningHours | null | undefined; pa
       changesAt: end === null ? null : new Date(end).toISOString(),
     };
   }
-  const state = Array.isArray(hours) && hours.length === 7 ? hoursState(hours, now, timeZone) : null;
+  const state = isWeek(hours) ? hoursState(hours as OpeningHours, now, timeZone) : null;
   const opening = pauses.find((p) => kindOf(p) === 'opening' && isPauseActive(p, now));
   const flip = state?.flipsIn != null ? now.getTime() + state.flipsIn * 60_000 - now.getSeconds() * 1000 - now.getMilliseconds() : undefined;
   const starts = pauses.map((p) => time(p.startsAt)!).filter((t) => t > now.getTime());

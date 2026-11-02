@@ -1,4 +1,4 @@
-import { availability, openStatus, pauseProblems, weekShifts } from './open-status';
+import { availability, hoursProblems, openStatus, pauseProblems, weekShifts } from './open-status';
 import { cancellationRule, returnRule } from './cancellation';
 import { calculateBill, splitBillByItems, splitBillEqually } from './bill';
 import { canTransitionTable, canWaiterClose } from './table-state';
@@ -115,8 +115,8 @@ describe('parseCents', () => {
 
 describe('openStatus', () => {
   const TZ = 'America/Sao_Paulo'; // UTC-3, sem horário de verão
-  const day = { open: '11:00', close: '23:00' };
-  const week = [null, day, day, day, day, day, { open: '11:00', close: '02:00' }]; // dom fechado; sáb vai até 02:00
+  const day = [{ open: '11:00', close: '23:00' }];
+  const week = [[], day, day, day, day, day, [{ open: '11:00', close: '02:00' }]]; // dom fechado; sáb vai até 02:00
   const at = (isoUtc: string) => openStatus(week, new Date(isoUtc), TZ);
 
   it('sem horário cadastrado não mostra nada', () => {
@@ -143,24 +143,75 @@ describe('openStatus', () => {
     expect(at('2026-11-08T06:00:00Z')).toMatchObject({ open: false }); // dom 03:00
   });
   it('semana toda fechada', () => {
-    expect(openStatus([null, null, null, null, null, null, null], new Date(), TZ)).toEqual({ open: false, label: 'Fechado' });
+    expect(openStatus([[], [], [], [], [], [], []], new Date(), TZ)).toEqual({ open: false, label: 'Fechado' });
   });
 });
 
 describe('weekShifts', () => {
   it('splits a shift that closes after midnight into its day and the early hours of the next', () => {
-    const week = weekShifts([{ open: '21:00', close: '01:00' }, null, null, null, null, null, { open: '11:00', close: '23:00' }]);
-    expect(week[0]).toEqual([{ from: 1260, to: 1440, spill: false, day: 0 }]);
+    const week = weekShifts([[{ open: '21:00', close: '01:00' }], [], [], [], [], [], [{ open: '11:00', close: '23:00' }]]);
+    expect(week[0]).toEqual([{ from: 1260, to: 1440, spill: false, day: 0, index: 0 }]);
     // Monday is off, but the early hours still belong to Sunday's shift
-    expect(week[1]).toEqual([{ from: 0, to: 60, spill: true, day: 0 }]);
-    expect(week[6]).toEqual([{ from: 660, to: 1380, spill: false, day: 6 }]);
-    expect(weekShifts([null, null, null, null, null, null, { open: '18:00', close: '00:00' }])[0]).toEqual([]);
+    expect(week[1]).toEqual([{ from: 0, to: 60, spill: true, day: 0, index: 0 }]);
+    expect(week[6]).toEqual([{ from: 660, to: 1380, spill: false, day: 6, index: 0 }]);
+    expect(weekShifts([[], [], [], [], [], [], [{ open: '18:00', close: '00:00' }]])[0]).toEqual([]);
+  });
+  it('gives each shift of a day its own stretch', () => {
+    const week = weekShifts([[{ open: '11:00', close: '15:00' }, { open: '18:00', close: '23:00' }], [], [], [], [], [], []]);
+    expect(week[0].map((p) => [p.from, p.to, p.index])).toEqual([[660, 900, 0], [1080, 1380, 1]]);
+  });
+});
+
+describe('several shifts in a day', () => {
+  const TZ = 'America/Sao_Paulo';
+  const split = [{ open: '11:00', close: '15:00' }, { open: '18:00', close: '23:00' }];
+  const week = [[], split, split, split, split, split, [{ open: '11:00', close: '15:00' }, { open: '19:00', close: '02:00' }]];
+  const at = (isoUtc: string) => openStatus(week, new Date(isoUtc), TZ);
+
+  it('is open in each shift and closed in the break, pointing at the next shift of the day', () => {
+    expect(at('2026-11-02T14:00:00Z')).toEqual({ open: true, label: 'Aberto · fecha às 15:00' }); // seg 11:00... 14:00Z = 11:00
+    expect(at('2026-11-02T18:30:00Z')).toEqual({ open: false, label: 'Fechado · abre hoje às 18:00' }); // seg 15:30
+    expect(at('2026-11-02T22:00:00Z')).toEqual({ open: true, label: 'Aberto · fecha às 23:00' }); // seg 19:00
+    expect(at('2026-11-03T02:30:00Z')).toEqual({ open: false, label: 'Fechado · abre amanhã às 11:00' }); // seg 23:30
+  });
+  it('the last shift of a day can run past midnight', () => {
+    expect(at('2026-11-08T04:00:00Z')).toEqual({ open: true, label: 'Aberto · fecha às 02:00' }); // dom 01:00, turno de sábado
+    expect(at('2026-11-07T19:00:00Z')).toEqual({ open: false, label: 'Fechado · abre hoje às 19:00' }); // sáb 16:00
+  });
+  it('availability reports the break as outside the hours and when it ends', () => {
+    expect(availability({ hours: week, pauses: [], now: new Date('2026-11-02T18:30:00Z'), timeZone: TZ })).toMatchObject({ open: false, reason: 'hours', changesAt: '2026-11-02T21:00:00.000Z' });
+  });
+});
+
+describe('hoursProblems', () => {
+  const ok = { open: '11:00', close: '15:00' };
+  const week = (monday: unknown[], tuesday: unknown[] = []) => [[], monday, tuesday, [], [], [], []];
+  it('accepts a normal week, a break and a last shift past midnight', () => {
+    expect(hoursProblems(week([ok, { open: '18:00', close: '23:00' }]))).toEqual([]);
+    expect(hoursProblems(week([ok, { open: '18:00', close: '01:00' }], [{ open: '11:00', close: '15:00' }]))).toEqual([]);
+    expect(hoursProblems(week([{ open: '00:00', close: '00:00' }]))).toEqual([]);
+  });
+  it('refuses what is not a week of shifts', () => {
+    expect(hoursProblems(null)).toEqual([{ day: null, shift: null, code: 'not_a_week' }]);
+    expect(hoursProblems([null, [], [], [], [], [], []])).toEqual([{ day: null, shift: null, code: 'not_a_week' }]);
+    expect(hoursProblems(week([{ open: '25:00', close: '23:00' }]))).toEqual([{ day: 1, shift: 0, code: 'invalid_time' }]);
+    expect(hoursProblems(week(Array(11).fill(ok)))).toEqual([{ day: 1, shift: null, code: 'too_many_shifts' }]);
+  });
+  it('shifts must come in order, with a gap, and only the last may pass midnight', () => {
+    expect(hoursProblems(week([{ open: '18:00', close: '23:00' }, ok]))).toEqual([{ day: 1, shift: 1, code: 'unordered' }]);
+    expect(hoursProblems(week([ok, { open: '14:00', close: '20:00' }]))).toEqual([{ day: 1, shift: 1, code: 'overlap' }]);
+    expect(hoursProblems(week([ok, { open: '15:00', close: '20:00' }]))).toEqual([{ day: 1, shift: 1, code: 'overlap' }]);
+    expect(hoursProblems(week([{ open: '11:00', close: '02:00' }, { open: '18:00', close: '23:00' }]))).toEqual([{ day: 1, shift: 0, code: 'overnight_not_last' }]);
+  });
+  it('the night of one day cannot reach the first shift of the next', () => {
+    expect(hoursProblems(week([{ open: '21:00', close: '02:00' }], [{ open: '01:00', close: '05:00' }]))).toEqual([{ day: 1, shift: 0, code: 'overlaps_next_day' }]);
+    expect(hoursProblems(week([{ open: '21:00', close: '00:00' }], [{ open: '00:00', close: '05:00' }]))).toEqual([]);
   });
 });
 
 describe('availability', () => {
   const TZ = 'America/Sao_Paulo';
-  const week = [null, ...Array(6).fill({ open: '18:00', close: '23:00' })];
+  const week = [[], ...Array(6).fill([{ open: '18:00', close: '23:00' }])];
   const now = new Date('2026-11-10T22:30:00Z'); // terça 19:30 local
   it('is always open without hours or closures', () => {
     expect(availability({ hours: null, pauses: [], now, timeZone: TZ })).toEqual({ open: true, reason: null, extra: false, label: null, pauseReason: null, changesAt: null });

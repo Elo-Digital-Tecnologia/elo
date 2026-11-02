@@ -4,33 +4,12 @@ import { Save } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api, ApiError } from '@elo/client';
-import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, type OpeningHours } from '@elo/core';
-import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Select, Switch, Textarea, TimeInput } from '@elo/ui';
+import { brazilPhone, FIELD_RULES, type FieldError, instagramHandle, LIMITS, maskPhone, WEEKDAYS } from '@elo/core';
+import { Button, Field, GlassCard, Input, PageHeader, PasswordInput, Switch, Textarea } from '@elo/ui';
 import { ImageField } from '../../../../../_components/image-field';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
-import { WeekPreview } from '../../../_components/week-preview';
+import { HoursEditor, hoursErrors, toDrafts, toOpeningHours } from '../../../_components/hours-editor';
 import { RequireRoles, useStaff } from '../../../_components/shell';
-
-const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-
-interface Day {
-  open: boolean;
-  from: string;
-  to: string;
-  /** Closes after midnight, on the next day. */
-  nextDay: boolean;
-}
-
-const crosses = (d: Day) => d.to <= d.from;
-
-/** What is wrong with a day's hours, in a sentence; null when they make sense. */
-function dayProblem(d: Day, i: number): string | null {
-  if (!d.open) return null;
-  if (!isTime(d.from) || !isTime(d.to)) return `Informe os horários de abrir e fechar de ${DAYS[i]}.`;
-  if (!d.nextDay && crosses(d)) return `Fechando às ${d.to}, o turno termina depois da meia-noite: escolha "no dia seguinte".`;
-  if (d.nextDay && !crosses(d)) return `Fechando às ${d.to}, o turno termina no mesmo dia: escolha "no mesmo dia".`;
-  return null;
-}
 
 const MAX_FEE_PCT = LIMITS.serviceFeeBpsMax / 100;
 const FEE_MESSAGE = `Use um valor de 0% a ${MAX_FEE_PCT}%, como 10 ou 12,5.`;
@@ -44,14 +23,6 @@ const feeError = (fee: string): FieldError | null => {
   const pct = percentOf(fee);
   return Number.isFinite(pct) && pct >= 0 && pct <= MAX_FEE_PCT ? null : { code: 'too_large' };
 };
-
-const isTime = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
-
-const toDays = (hours: OpeningHours | null): Day[] =>
-  DAYS.map((_, i) => {
-    const h = hours?.[i];
-    return h ? { open: true, from: h.open, to: h.close, nextDay: h.close <= h.open } : { open: false, from: '11:00', to: '23:00', nextDay: false };
-  });
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -100,18 +71,18 @@ function Settings() {
   );
   const [feeRefusal, setFeeRefusal] = useState(me.guestFeeRefusal);
   const [showHours, setShowHours] = useState(me.openingHours !== null);
-  const [days, setDays] = useState<Day[]>(toDays(me.openingHours));
+  const [days, setDays] = useState(toDrafts(me.openingHours));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const values = form.values;
-  const setDay = (i: number, patch: Partial<Day>) => setDays((d) => d.map((x, k) => (k === i ? { ...x, ...patch } : x)));
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg(null);
     if (!form.validate()) return;
-    const badDay = showHours ? days.findIndex((d, i) => dayProblem(d, i)) : -1;
-    if (badDay >= 0) return setMsg({ ok: false, text: `${DAYS[badDay]}: ${dayProblem(days[badDay], badDay)}` });
+    const problems = showHours ? hoursErrors(days) : [];
+    const badDay = problems.findIndex(Boolean);
+    if (badDay >= 0) return setMsg({ ok: false, text: `${WEEKDAYS[badDay][0].toUpperCase()}${WEEKDAYS[badDay].slice(1)}: ${problems[badDay]}` });
     setLoading(true);
     try {
       const updated = await api<typeof me>('/api/restaurant/settings', {
@@ -131,7 +102,7 @@ function Settings() {
           instagram: values.instagram.trim() ? instagramHandle(values.instagram) : '',
           wifiName: values.wifiName,
           wifiPassword: values.wifiPassword,
-          openingHours: showHours ? days.map((d) => (d.open ? { open: d.from, close: d.to } : null)) : null,
+          openingHours: showHours ? toOpeningHours(days) : null,
         },
       });
       setMe({ ...me, ...updated });
@@ -140,7 +111,7 @@ function Settings() {
     } catch (err) {
       if (form.fromServer(err, { serviceFeeBps: 'fee' })) return;
       const hours = err instanceof ApiError && Object.keys(err.fields).some((k) => k.startsWith('openingHours'));
-      setMsg({ ok: false, text: hours ? 'Informe os horários no formato 00:00 em cada dia aberto.' : unexpected(err) });
+      setMsg({ ok: false, text: hours ? 'Revise os horários: use o formato 00:00 e deixe os turnos em ordem, sem se sobrepor.' : unexpected(err) });
     } finally {
       setLoading(false);
     }
@@ -182,37 +153,7 @@ function Settings() {
           <p className="text-sm text-muted">
             Para imprevistos, férias ou reformas, use <Link href={`/r/${me.slug}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Funcionamento</Link> e agende uma parada.
           </p>
-          {showHours && (
-            <ul className="divide-y divide-line/40">
-              {days.map((d, i) => (
-                <li key={DAYS[i]} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-                  <span className="w-24 text-sm font-medium">{DAYS[i]}</span>
-                  <label className="flex items-center gap-2 text-sm text-muted">
-                    <Switch label={`${DAYS[i]} aberto`} checked={d.open} onChange={(open) => setDay(i, { open })} /> {d.open ? 'Aberto' : 'Fechado'}
-                  </label>
-                  {d.open && (
-                    <span className="flex w-full flex-wrap items-center gap-2 text-sm sm:ml-auto sm:w-auto">
-                      <TimeInput value={d.from} onChange={(v) => setDay(i, { from: v })} aria-label={`${DAYS[i]}: abre`} className="!w-24 text-center" />
-                      <span className="text-muted">às</span>
-                      <TimeInput value={d.to} onChange={(v) => setDay(i, { to: v, ...(isTime(v) && isTime(d.from) ? { nextDay: v <= d.from } : {}) })} aria-label={`${DAYS[i]}: fecha`} className="!w-24 text-center" />
-                      <Select value={d.nextDay ? 'next' : 'same'} onChange={(e) => setDay(i, { nextDay: e.target.value === 'next' })} aria-label={`${DAYS[i]}: fecha em qual dia`} className="!w-auto !py-2 text-sm">
-                        <option value="same">no mesmo dia</option>
-                        <option value="next">no dia seguinte ({DAYS[(i + 1) % 7].toLowerCase()})</option>
-                      </Select>
-                    </span>
-                  )}
-                  {dayProblem(d, i) && <p role="alert" className="basis-full text-xs text-danger">{dayProblem(d, i)}</p>}
-                </li>
-              ))}
-            </ul>
-          )}
-          {showHours && (
-            <div className="space-y-2 border-t border-line/40 pt-4">
-              <h3 className="text-sm font-semibold">Como fica a semana</h3>
-              <WeekPreview hours={days.map((d) => (d.open && isTime(d.from) && isTime(d.to) ? { open: d.from, close: d.to } : null))} today={new Date().getDay()} />
-            </div>
-          )}
-          {showHours && <p className="text-xs text-muted">Cada turno pertence ao dia em que começa: a madrugada depois da meia-noite conta como o turno do dia anterior, mesmo que o dia seguinte esteja fechado.</p>}
+          {showHours && <HoursEditor days={days} onChange={setDays} today={new Date().getDay()} />}
         </Section>
 
         <Section title="Wi-Fi para clientes" hint="Aparece só para quem está com a mesa aberta. Nunca no link de consulta.">

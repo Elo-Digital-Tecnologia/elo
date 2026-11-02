@@ -385,8 +385,15 @@ suite('fluxo da mesa (e2e)', () => {
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, phone: 'abc' }).expect(400);
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, instagram: 'com espaço' }).expect(400);
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, logoUrl: 'javascript:alert(1)' }).expect(400);
-    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, null] }).expect(400);
-    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, { open: '25:00', close: '23:00' }, null, null, null, null, null] }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], []] }).expect(400);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], [{ open: '25:00', close: '23:00' }], [], [], [], [], []] }).expect(400);
+    // the old shape (one shift or null per day) is no longer accepted
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [null, { open: '10:00', close: '22:00' }, null, null, null, null, null] }).expect(400);
+    // shifts of a day cannot overlap, and only the last may pass midnight
+    const lunch = { open: '11:00', close: '15:00' };
+    const overlapping = await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], [lunch, { open: '14:00', close: '20:00' }], [], [], [], [], []] }).expect(400);
+    expect(JSON.stringify(overlapping.body)).toContain('openingHours');
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], [{ open: '11:00', close: '02:00' }, { open: '18:00', close: '23:00' }], [], [], [], [], []] }).expect(400);
     // same open and close time: a shift around the clock
     const day = { open: '00:00', close: '00:00' };
     const saved = await http().patch('/restaurant/settings').set(auth(admin)).send({
@@ -397,9 +404,14 @@ suite('fluxo da mesa (e2e)', () => {
       instagram: '@casaverde',
       wifiName: 'Casa Verde',
       wifiPassword: 'segredo-wifi-123',
-      openingHours: [day, day, day, day, day, day, day],
+      openingHours: [[day], [day], [day], [day], [day], [day], [day]],
     }).expect(200);
     expect(saved.body).toMatchObject({ description: 'Pizzas no forno a lenha.', wifiName: 'Casa Verde', availability: { open: true, reason: null } });
+    // a day with a break: lunch and dinner are kept as two shifts, in order
+    const dinner = { open: '18:00', close: '23:00' };
+    const split = await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[], [lunch, dinner], [], [], [], [], []] }).expect(200);
+    expect(split.body.openingHours).toEqual([[], [lunch, dinner], [], [], [], [], []]);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[day], [day], [day], [day], [day], [day], [day]] }).expect(200);
 
     // consulta pública mostra o perfil, mas nunca o Wi-Fi
     const pub = await http().get(`/public/${slug}/menu`).expect(200);
@@ -1000,7 +1012,7 @@ suite('fluxo da mesa (e2e)', () => {
 
     // fora do horário: o garçom não valida a mesa pedida antes de fechar
     const settings = { name: `Pausa ${suf}`, managerName: 'Rita', managerContact: '11977777777', serviceFeeBps: 1000 };
-    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...settings, openingHours: [null, null, null, null, null, null, null] }).expect(200);
+    await http().patch('/restaurant/settings').set(auth(owner)).send({ ...settings, openingHours: [[], [], [], [], [], [], []] }).expect(200);
     const refused = await http().post(`/tables/${t2.id}/validate-open`).set(auth(waiterP)).expect(409);
     expect(refused.body.availability).toMatchObject({ reason: 'hours', label: 'Fechado' });
     // an extra opening outside the hours lets the table open; it needs an end and ends early on request
@@ -1106,7 +1118,7 @@ suite('fluxo da mesa (e2e)', () => {
     const me = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body;
     const base = { name: me.name, managerName: me.managerName, managerContact: me.managerContact, serviceFeeBps: me.serviceFeeBps };
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, guestFeeRefusal: null }).expect(400);
-    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [{ open: '10:00', close: '22:00', extra: 'x'.repeat(50) }, null, null, null, null, null, null] }).expect(200);
+    await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: [[{ open: '10:00', close: '22:00', extra: 'x'.repeat(50) }], [], [], [], [], [], []] }).expect(200);
     expect(JSON.stringify((await http().get('/restaurant/me').set(auth(admin)).expect(200)).body.openingHours)).not.toContain('extra');
     await http().patch('/restaurant/settings').set(auth(admin)).send({ ...base, openingHours: null }).expect(200);
     const taken = (await http().post('/staff').set(auth(admin)).send({ username: `wai${suf}`, password: 'senha12345', name: 'Outra Pessoa', roles: ['waiter'] }).expect(409)).body;
@@ -1227,6 +1239,35 @@ suite('fluxo da mesa (e2e)', () => {
     expect(early.trial).toMatchObject({ state: 'ended_early', billingStartsOn: day(0) });
     expect(early.dueDate.slice(0, 10)).toBe(day(0));
     await http().post(`/admin/restaurants/${r.id}/trial/end`).set(auth(sa)).send({ reason: 'De novo' }).expect(409);
+
+    // payments made during the trial move up with it: the trial days left are not kept for free
+    const monthAfter = (d: string) => {
+      const [y, m, dd] = d.split('-').map(Number);
+      return new Date(Date.UTC(y, m, Math.min(dd, new Date(Date.UTC(y, m + 1, 0)).getUTCDate()))).toISOString().slice(0, 10);
+    };
+    const ledger = async (rid: string) => (await http().get(`/admin/restaurants/${rid}/payments`).set(auth(sa)).expect(200)).body as { kind: string; periodStart: string | null; newDueDate: string; voidedAt: string | null }[];
+    const prepaid = await create('Adiantado', 'ad');
+    await contract(prepaid.id, { kind: 'pilot', origin: 'initial', startsOn: day(0), endsOn: day(200), trialDays: 14, documentId: await upload(prepaid.id) }).expect(201);
+    await http().post(`/admin/restaurants/${prepaid.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(201);
+    await http().post(`/admin/restaurants/${prepaid.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(201);
+    expect((await subOf(prepaid.id)).dueDate.slice(0, 10)).toBe(monthAfter(monthAfter(day(14))));
+    await http().post(`/admin/restaurants/${prepaid.id}/trial/end`).set(auth(sa)).send({ reason: 'Começou a usar já' }).expect(204);
+    expect((await subOf(prepaid.id)).dueDate.slice(0, 10)).toBe(monthAfter(monthAfter(day(0))));
+    const moved = (await ledger(prepaid.id)).filter((e) => e.kind === 'payment').reverse();
+    expect(moved.map((e) => e.periodStart?.slice(0, 10))).toEqual([day(0), monthAfter(day(0))]);
+
+    // a manual adjustment keeps its date, and what came after it is not moved
+    const adjusted = await create('Ajustado', 'aj');
+    await contract(adjusted.id, { kind: 'pilot', origin: 'initial', startsOn: day(0), endsOn: day(300), trialDays: 14, documentId: await upload(adjusted.id) }).expect(201);
+    await http().post(`/admin/restaurants/${adjusted.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(201);
+    await http().post(`/admin/restaurants/${adjusted.id}/due-date`).set(auth(sa)).send({ dueDate: day(100), reason: 'Cortesia combinada' }).expect(201);
+    await http().post(`/admin/restaurants/${adjusted.id}/payments`).set(auth(sa)).send({ cycles: 1, paidAt: day(0), noReceiptReason: 'Pago em dinheiro' }).expect(201);
+    const before = (await ledger(adjusted.id)).filter((e) => e.kind === 'payment').reverse();
+    await http().post(`/admin/restaurants/${adjusted.id}/trial/end`).set(auth(sa)).send({ reason: 'Começou a usar já' }).expect(204);
+    const after = (await ledger(adjusted.id)).filter((e) => e.kind === 'payment').reverse();
+    expect(after[0].periodStart?.slice(0, 10)).toBe(day(0));
+    expect(after[1]).toMatchObject({ periodStart: before[1].periodStart, newDueDate: before[1].newDueDate });
+    expect((await subOf(adjusted.id)).dueDate.slice(0, 10)).toBe(before[1].newDueDate.slice(0, 10));
 
     // a renewal after a gap: the restaurant is "ended" in between, and the renewal takes over on its own start day
     const gap = await create('Intervalo', 'gp');
