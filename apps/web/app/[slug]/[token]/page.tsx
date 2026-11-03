@@ -11,7 +11,7 @@ import { CartBar } from '../../_components/menu/cart-bar';
 import { MenuHeader } from '../../_components/menu/header';
 import { CategoryTabs, filterMenu, Highlights, MenuList, MenuSearch } from '../../_components/menu-list';
 import { RestaurantInfo } from '../../_components/menu/info';
-import { GoogleReviewCard } from '../../_components/menu/google-review-card';
+import { GoogleReviewCard, GoogleReviewRow } from '../../_components/menu/google-review-card';
 import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
@@ -402,9 +402,6 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
           {!query && <Highlights menu={state.menu} onPick={pick} />}
           <CategoryTabs menu={visible} />
           <MenuList menu={visible} onPick={pick} searching={!!query} />
-          {tableState === 'open' && state.orders.length > 0 && (
-            <div className="px-4 pt-6"><GoogleReviewCard url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} name={state.restaurant.name} dismissible /></div>
-          )}
           <div className="px-4 pt-6"><MenuFooter name={state.restaurant.name} /></div>
         </>
       )}
@@ -420,12 +417,6 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
       {view === 'bill' && (
         <BillPanel active version={billVersion}>
-          {(tableState === 'open' || tableState === 'pending_close') && (
-            <>
-              <ReviewForm onSent={setReviewed} />
-              <GoogleReviewCard url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} name={state.restaurant.name} thanks={reviewed} />
-            </>
-          )}
           {tableState === 'open' && (
             <>
               <Button className="w-full !py-3.5" disabled={busy || !billReady} onClick={() => act(() => api('/api/public/session/close', { body: {} }))}>Pedir a conta</Button>
@@ -433,6 +424,9 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             </>
           )}
           {tableState === 'pending_close' && <p className="surface px-4 py-3 text-sm">Conta pedida. O garçom vai fechar a mesa.</p>}
+          {(tableState === 'open' || tableState === 'pending_close') && (
+            <ReviewForm onSent={setReviewed} footer={<GoogleReviewRow url={state.restaurant.googleReviewUrl} slug={state.restaurant.slug} thanks={reviewed} />} />
+          )}
         </BillPanel>
       )}
 

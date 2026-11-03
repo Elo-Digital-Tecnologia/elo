@@ -1,7 +1,7 @@
 'use client';
 
 import { Star } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { api, ApiError } from '@elo/client';
 import { FIELD_RULES, type ReviewView } from '@elo/core';
 import { Button, Textarea } from '@elo/ui';
@@ -13,8 +13,11 @@ const ERRORS: Record<string, string> = {
   table_not_open: 'A avaliação fica disponível enquanto a mesa estiver aberta.',
 };
 
-/** Avaliação do atendimento: de 1 a 5 estrelas e um comentário opcional. Pode ser corrigida enquanto a mesa estiver aberta. */
-export function ReviewForm({ onSent }: { onSent?: (sent: boolean) => void }) {
+/**
+ * Avaliação do atendimento: de 1 a 5 estrelas e um comentário opcional. Pode ser corrigida enquanto a mesa estiver aberta.
+ * `footer` goes inside the same block, below a divider (the Google invitation).
+ */
+export function ReviewForm({ onSent, footer }: { onSent?: (sent: boolean) => void; footer?: ReactNode }) {
   const [stars, setStars] = useState(0);
   const form = useForm({ comment: '' }, CHECKS);
   const { set } = form;
@@ -83,6 +86,7 @@ export function ReviewForm({ onSent }: { onSent?: (sent: boolean) => void }) {
           <Button className="w-full" loading={busy} onClick={send}>Enviar avaliação</Button>
         </>
       )}
+      {footer && <div className="border-t border-line/40 pt-3 empty:hidden">{footer}</div>}
     </section>
   );
 }

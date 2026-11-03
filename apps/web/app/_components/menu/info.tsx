@@ -3,6 +3,7 @@
 import { Check, Copy, Instagram, MapPin, Phone, Wifi } from 'lucide-react';
 import { useState } from 'react';
 import type { RestaurantProfileView } from '@elo/core';
+import { GoogleReviewChip } from './google-review-card';
 
 type Profile = RestaurantProfileView & { wifi?: { name: string | null; password: string | null } | null };
 
@@ -28,10 +29,10 @@ function CopyWifi({ password }: { password: string }) {
 
 /** Descrição, aberto/fechado, contatos e Wi-Fi. Não mostra nada que o restaurante não preencheu. */
 export function RestaurantInfo({ profile }: { profile: Profile }) {
-  const { description, availability, address, phone, instagram, wifi } = profile;
+  const { description, availability, address, phone, instagram, wifi, googleReviewUrl } = profile;
   const handle = instagram?.replace(/^@/, '');
   const status = availability.label;
-  if (!description && !status && !address && !phone && !handle && !wifi) return null;
+  if (!description && !status && !address && !phone && !handle && !wifi && !googleReviewUrl) return null;
   return (
     <section aria-label="Sobre o restaurante" className="space-y-3 px-4 pt-3">
       {description && <p className="text-[15px] leading-relaxed">{description}</p>}
@@ -58,6 +59,7 @@ export function RestaurantInfo({ profile }: { profile: Profile }) {
             <Instagram size={15} /> @{handle}
           </a>
         )}
+        <GoogleReviewChip url={googleReviewUrl} className={chip} />
       </div>
       {wifi && (wifi.name || wifi.password) && (
         <div className="surface flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">

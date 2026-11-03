@@ -1,10 +1,9 @@
 'use client';
 
-import { ExternalLink, Star, X } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const tappedKey = (slug: string) => `elo.google.${slug}`;
-const laterKey = (slug: string) => `elo.google.later.${slug}`;
 
 const read = (store: () => Storage, key: string) => {
   try {
@@ -23,9 +22,9 @@ const write = (store: () => Storage, key: string) => {
 };
 
 /** The Google "G" in the brand's own colors, the one place outside the theme tokens. */
-function GoogleMark() {
+function GoogleMark({ size = 26 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 48 48" width="26" height="26" aria-hidden>
+    <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden>
       <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
       <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
       <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
@@ -36,37 +35,19 @@ function GoogleMark() {
 
 /**
  * Invitation to review the restaurant on Google. Tapping it hides it on this device for
- * good, "Agora não" only for this visit; nothing about either leaves the device. It is
- * shown after any rating: inviting only the satisfied guests is against Google's rules.
+ * good; nothing about it leaves the device. It is shown after any rating: inviting only
+ * the satisfied guests is against Google's rules.
  */
-export function GoogleReviewCard({ url, slug, name, thanks = false, dismissible = false }: { url: string | null; slug: string; name: string; thanks?: boolean; dismissible?: boolean }) {
+export function GoogleReviewCard({ url, slug, name, thanks = false }: { url: string | null; slug: string; name: string; thanks?: boolean }) {
   const [hidden, setHidden] = useState(true);
-  useEffect(() => setHidden(read(() => localStorage, tappedKey(slug)) || read(() => sessionStorage, laterKey(slug))), [slug]);
+  useEffect(() => setHidden(read(() => localStorage, tappedKey(slug))), [slug]);
   if (!url || hidden) return null;
 
   return (
-    <section aria-label="Avaliação no Google" className="surface relative space-y-3 border-2 border-accent/60 p-4">
-      {dismissible && (
-        <button
-          type="button"
-          aria-label="Agora não"
-          onClick={() => {
-            write(() => sessionStorage, laterKey(slug));
-            setHidden(true);
-          }}
-          className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg"
-        >
-          <X size={16} aria-hidden />
-        </button>
-      )}
-      <div className="flex items-center gap-3 pr-8">
+    <section aria-label="Avaliação no Google" className="surface space-y-3 border-2 border-accent/60 p-4">
+      <div className="flex items-center gap-3">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-pill bg-white shadow-sm"><GoogleMark /></span>
-        <div className="min-w-0">
-          <h2 className="font-semibold leading-tight">{thanks ? 'Obrigado! Conte também no Google' : `Avalie o ${name} no Google`}</h2>
-          <span className="mt-1 flex gap-0.5" aria-hidden>
-            {[1, 2, 3, 4, 5].map((n) => <Star key={n} size={16} className="fill-accent text-accent" />)}
-          </span>
-        </div>
+        <h2 className="min-w-0 font-semibold leading-tight">{thanks ? 'Obrigado! Conte também no Google' : `Avalie o ${name} no Google`}</h2>
       </div>
       <p className="text-sm text-muted">Sua avaliação no Google Maps ajuda outras pessoas a nos encontrar. Leva menos de um minuto.</p>
       <a
@@ -82,5 +63,41 @@ export function GoogleReviewCard({ url, slug, name, thanks = false, dismissible 
         Avaliar no Google <ExternalLink size={15} aria-hidden />
       </a>
     </section>
+  );
+}
+
+/** Compact invitation for the bill tab, under the service review; hidden on this device once tapped. */
+export function GoogleReviewRow({ url, slug, thanks = false }: { url: string | null; slug: string; thanks?: boolean }) {
+  const [hidden, setHidden] = useState(true);
+  useEffect(() => setHidden(read(() => localStorage, tappedKey(slug))), [slug]);
+  if (!url || hidden) return null;
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-pill bg-white shadow-sm"><GoogleMark size={20} /></span>
+      <p className="min-w-0 flex-1 text-sm font-medium leading-snug">{thanks ? 'Obrigado! Conte também no Google' : 'Avalie também no Google'}</p>
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer noopener"
+        onClick={() => {
+          write(() => localStorage, tappedKey(slug));
+          setHidden(true);
+        }}
+        className="btn-glass inline-flex shrink-0 items-center gap-1.5 rounded-pill px-3.5 py-2 text-sm font-semibold"
+      >
+        Avaliar <ExternalLink size={14} aria-hidden />
+      </a>
+    </div>
+  );
+}
+
+/** Link to the restaurant's Google reviews among the menu's info chips; it is the restaurant's info, so it stays. */
+export function GoogleReviewChip({ url, className }: { url: string | null; className: string }) {
+  if (!url) return null;
+  return (
+    <a className={className} href={url} target="_blank" rel="noreferrer noopener">
+      <GoogleMark size={15} /> Avaliar no Google
+    </a>
   );
 }
