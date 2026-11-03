@@ -9,5 +9,35 @@ services:
       - '5433:5432'
     volumes:
       - dbdata:/var/lib/postgresql/data
+
+  # The hosted images, run locally before a deploy: docker compose --profile full up --build
+  # Plain http on localhost, so they run outside production mode (secure cookies need https).
+  api:
+    profiles: [full]
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    depends_on: [db]
+    env_file: apps/api/.env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://elo:elo@db:5432/elo_digital
+      PORT: '3001'
+    ports:
+      - '3001:3001'
+    volumes:
+      - uploads:/data/uploads
+
+  web:
+    profiles: [full]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+        API_URL: http://api:3001
+    depends_on: [api]
+    ports:
+      - '3000:3000'
+
 volumes:
   dbdata:
+  uploads:

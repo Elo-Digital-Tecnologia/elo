@@ -25,6 +25,9 @@ const NAV: (NavItem & { perm?: Permission })[] = [
   { href: '/admin/team', label: 'Equipe', icon: UsersRound, perm: 'team.manage' },
 ];
 
+/** The hosted API may keep its docs closed (`API_DOCS`); the web build then hides the link. */
+const API_DOCS = process.env.NEXT_PUBLIC_API_DOCS !== 'false';
+
 /** Exige login de equipe Elo Digital; itens do menu seguem as permissões. Fica no layout e não remonta entre as abas. */
 export function AdminShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -54,7 +57,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         nav={NAV.filter((n) => !n.perm || can(n.perm))}
         user={{ name: user.name ?? (isSuper ? 'Superadmin' : 'Equipe Elo'), role: isSuper ? 'Todas as permissões' : `${permissions.length} permissões` }}
         onLogout={() => void logout()}
-        links={[{ href: `${apiOrigin}/docs`, label: 'Documentação da API', icon: BookOpen, external: true }]}
+        links={API_DOCS ? [{ href: `${apiOrigin}/docs`, label: 'Documentação da API', icon: BookOpen, external: true }] : []}
       >
         {children}
       </AppShell>

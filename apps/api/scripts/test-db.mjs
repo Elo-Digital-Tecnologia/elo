@@ -4,10 +4,10 @@ import { createRequire } from 'node:module';
 import pg from 'pg';
 
 // Creates the e2e database named by DATABASE_URL_TEST (when missing) and applies the migrations to it.
-const env = new URL('../../../.env', import.meta.url);
+const env = new URL('../.env', import.meta.url);
 if (existsSync(env)) process.loadEnvFile(env);
 const { DATABASE_URL: dev, DATABASE_URL_TEST: test } = process.env;
-if (!test) throw new Error('Set DATABASE_URL_TEST in .env first');
+if (!test) throw new Error('Set DATABASE_URL_TEST in apps/api/.env first');
 if (test === dev) throw new Error('DATABASE_URL_TEST must differ from DATABASE_URL');
 
 const name = decodeURIComponent(new URL(test).pathname.slice(1));

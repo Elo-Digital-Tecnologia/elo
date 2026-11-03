@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+**/.next
+**/.next-*
+**/.turbo
+**/*.tsbuildinfo
+**/uploads
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+PENDENCIAS.md
+REFERENCE.md
+NOTES.txt

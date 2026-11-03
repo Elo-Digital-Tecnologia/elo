@@ -140,6 +140,10 @@ suite('fluxo da mesa (e2e)', () => {
     expect((await http().get('/public/session').set('Cookie', cookieOf(b)).expect(401)).body.message).toBe('session_closed');
   });
 
+  it('health answers without a login while the database is up', async () => {
+    expect((await http().get('/health').expect(200)).body).toEqual({ status: 'ok' });
+  });
+
   it('rejects invalid token and unvalidated ordering', async () => {
     await http().post(`/public/${slug}/${'a'.repeat(32)}/session`).expect(404);
     const s = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
@@ -1108,7 +1112,7 @@ suite('fluxo da mesa (e2e)', () => {
     const recent = (await http().get('/orders/history').set(auth(waiterH)).expect(200)).body;
     expect(recent.total).toBe(1);
     expect(recent.limitedFrom).not.toBeNull();
-    const old = new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10);
+    const old = businessDay(new Date(Date.now() - 10 * 86_400_000));
     expect((await http().get(`/orders/history?from=${old}&to=${old}`).set(auth(owner)).expect(200)).body.total).toBe(1);
     await http().get('/orders/history?from=ontem').set(auth(owner)).expect(400);
 

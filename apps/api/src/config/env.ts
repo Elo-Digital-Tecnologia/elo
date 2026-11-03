@@ -4,7 +4,12 @@ export interface Env {
   DATABASE_URL: string;
   JWT_SECRET: string;
   SUPERADMIN_KEY: string;
+  /** Port the API listens on: the platform's `PORT` first, then `API_PORT`. */
   API_PORT: number;
+  /** Swagger at /docs. Always on outside production; in production only with `API_DOCS=true`. */
+  API_DOCS: boolean;
+  /** TLS to the database, for managed databases reached by their public URL. */
+  DATABASE_SSL: boolean;
   CORS_ORIGINS: string[];
   PUBLIC_BASE_URL: string;
   NODE_ENV: string;
@@ -35,11 +40,18 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
   }
   if (raw.JWT_SECRET!.length < 16) throw new Error('JWT_SECRET must be at least 16 chars');
   if (raw.SUPERADMIN_KEY!.length < 24) throw new Error('SUPERADMIN_KEY must be at least 24 chars');
+  const production = raw.NODE_ENV === 'production';
+  if (production) {
+    const problems = productionProblems(raw);
+    if (problems.length) throw new Error(`Refusing to start in production: ${problems.join('; ')}`);
+  }
   return {
     DATABASE_URL: raw.DATABASE_URL!,
     JWT_SECRET: raw.JWT_SECRET!,
     SUPERADMIN_KEY: raw.SUPERADMIN_KEY!,
-    API_PORT: Number(raw.API_PORT ?? 3001),
+    API_PORT: Number(raw.PORT || raw.API_PORT || 3001),
+    API_DOCS: !production || raw.API_DOCS === 'true',
+    DATABASE_SSL: raw.DATABASE_SSL === 'true',
     CORS_ORIGINS: (raw.CORS_ORIGINS ?? 'http://localhost:3000').split(',').map((s) => s.trim()),
     PUBLIC_BASE_URL: raw.PUBLIC_BASE_URL ?? 'http://localhost:3000',
     NODE_ENV: raw.NODE_ENV ?? 'development',
@@ -54,6 +66,21 @@ export function loadEnv(raw: Record<string, string | undefined> = process.env): 
     VAPID_PRIVATE_KEY: raw.VAPID_PRIVATE_KEY || null,
     VAPID_SUBJECT: raw.VAPID_SUBJECT || (raw.PUBLIC_BASE_URL ?? 'http://localhost:3000'),
   };
+}
+
+const PRODUCTION_SECRET_LENGTH = 32;
+
+/** What a production deployment must not run with: plain http addresses or short secrets. */
+export function productionProblems(raw: Record<string, string | undefined>): string[] {
+  const problems: string[] = [];
+  const https = (url: string) => /^https:\/\/[^\s/]+/.test(url);
+  if (!raw.PUBLIC_BASE_URL || !https(raw.PUBLIC_BASE_URL)) problems.push('PUBLIC_BASE_URL must be an https address');
+  const origins = (raw.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!origins.length || !origins.every(https)) problems.push('CORS_ORIGINS must list https addresses only');
+  for (const key of ['JWT_SECRET', 'SUPERADMIN_KEY'] as const) {
+    if ((raw[key] ?? '').length < PRODUCTION_SECRET_LENGTH) problems.push(`${key} must be at least ${PRODUCTION_SECRET_LENGTH} chars`);
+  }
+  return problems;
 }
 
 function positive(value: string | undefined, fallback: number, name: string, unit = 'days'): number {

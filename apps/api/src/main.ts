@@ -11,6 +11,8 @@ import type { Env } from './config/env';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // A new deploy stops the old process: close the database and sockets before it exits.
+  app.enableShutdownHooks();
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   app.use(cookieParser());
@@ -18,11 +20,13 @@ async function bootstrap() {
   app.enableCors({ origin: corsOrigin, credentials: true });
   app.useGlobalPipes(createValidationPipe());
 
-  const doc = SwaggerModule.createDocument(
-    app,
-    new DocumentBuilder().setTitle('Elo Digital API').setVersion('0.1').addBearerAuth().build(),
-  );
-  SwaggerModule.setup('docs', app, doc);
+  if (config.get('API_DOCS', { infer: true })) {
+    const doc = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().setTitle('Elo Digital API').setVersion('0.1').addBearerAuth().build(),
+    );
+    SwaggerModule.setup('docs', app, doc);
+  }
 
   await app.listen(config.get('API_PORT', { infer: true }));
 }

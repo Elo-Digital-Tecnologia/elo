@@ -7,7 +7,7 @@ import { parseEnv } from 'util';
  * that must never land in the development database, so without `DATABASE_URL_TEST`
  * the e2e suites are skipped, and a test URL equal to `DATABASE_URL` is refused.
  */
-const root = path.resolve(__dirname, '../../../.env');
+const root = path.resolve(__dirname, '../.env');
 // Jest gives each suite its own copy of process.env, so the file is parsed into it here.
 const file = fs.existsSync(root) ? parseEnv(fs.readFileSync(root, 'utf8')) : {};
 for (const [key, value] of Object.entries(file)) process.env[key] ??= value;

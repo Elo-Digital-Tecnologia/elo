@@ -34,6 +34,7 @@ import { DocumentsModule } from './documents/documents.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { PausesModule } from './pauses/pauses.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { HealthModule } from './health/health.module';
 import { StaffModule } from './staff/staff.module';
 import { TablesModule } from './tables/tables.module';
 import { TABLE_COOKIE } from './realtime/realtime.gateway';
@@ -79,8 +80,8 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // O .env fica na raiz do monorepo; o dev roda com cwd em apps/api.
-      envFilePath: ['.env', '../../.env'],
+      // apps/api/.env; the scripts run with the API folder as the working directory.
+      envFilePath: ['.env'],
       validate: (raw) => ({ ...raw, ...loadEnv(raw) }),
     }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
@@ -99,11 +100,13 @@ class SessionOrIpThrottlerGuard extends ThrottlerGuard {
         url: config.get('DATABASE_URL', { infer: true }),
         entities: ENTITIES,
         namingStrategy: new SnakeNamingStrategy(),
+        ssl: config.get('DATABASE_SSL', { infer: true }) ? { rejectUnauthorized: false } : false,
         // Local apenas: demais ambientes usam migrations versionadas.
         synchronize: false,
         migrationsRun: false,
       }),
     }),
+    HealthModule,
     AuditModule,
     AuthModule,
     SessionsModule,

@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 const API_URL = process.env.API_URL ?? 'http://localhost:3001';
 
 /**
@@ -8,7 +10,12 @@ const API_URL = process.env.API_URL ?? 'http://localhost:3001';
  */
 export default (phase) => ({
   distDir: process.env.NEXT_DIST_DIR || (phase === 'phase-development-server' ? '.next-dev' : '.next'),
-  experimental: { optimizePackageImports: ['lucide-react', 'framer-motion', '@elo/ui'] },
+  // The container image runs the self-contained server; local `next start` keeps the regular build.
+  ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' } : {}),
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'framer-motion', '@elo/ui'],
+    outputFileTracingRoot: fileURLToPath(new URL('../../', import.meta.url)),
+  },
   transpilePackages: ['@elo/ui', '@elo/client'],
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${API_URL}/:path*` }];

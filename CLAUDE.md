@@ -24,7 +24,7 @@ pnpm --filter @elo/api migration:run
 pnpm --filter @elo/api migration:generate
 ```
 
-Other scripts (`dev`, `build`, `lint`, `test`, `format`) run through Turborepo from the root. Env vars live in `.env` (see `.env.example`). Never commit secrets.
+Other scripts (`dev`, `build`, `lint`, `test`, `format`) run through Turborepo from the root. Each app keeps its env vars in its own `.env` (`apps/api/.env`, `apps/web/.env`; see the `.env.example` next to it). Never commit secrets.
 
 ## Domain essentials
 

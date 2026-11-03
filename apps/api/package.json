@@ -6,6 +6,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node scripts/dev.mjs",
     "start": "node dist/main.js",
+    "start:prod": "typeorm migration:run -d dist/database/data-source.js && node dist/main.js",
     "lint": "eslint src",
     "test": "jest",
     "migration:run": "typeorm migration:run -d dist/database/data-source.js",
