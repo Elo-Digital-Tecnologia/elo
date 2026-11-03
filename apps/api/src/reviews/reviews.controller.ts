@@ -10,10 +10,10 @@ import { ReviewsService } from './reviews.service';
 @Roles(...RestaurantManagerRoles)
 @Controller('reviews')
 export class ReviewsController {
-  constructor(private readonly reviews: ReviewsService) {}
+    constructor(private readonly reviews: ReviewsService) {}
 
-  @Get()
-  summary(@TenantId() rid: string) {
-    return this.reviews.summary(rid);
-  }
+    @Get()
+    summary(@TenantId() rid: string) {
+        return this.reviews.summary(rid);
+    }
 }

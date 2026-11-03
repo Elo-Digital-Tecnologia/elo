@@ -7,9 +7,13 @@ import { AdminTablesController, TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([DiningTable, TableSession, Restaurant]), StaffModule, PausesModule],
-  controllers: [TablesController, AdminTablesController],
-  providers: [TablesService],
-  exports: [TablesService],
+    imports: [
+        TypeOrmModule.forFeature([DiningTable, TableSession, Restaurant]),
+        StaffModule,
+        PausesModule
+    ],
+    controllers: [TablesController, AdminTablesController],
+    providers: [TablesService],
+    exports: [TablesService]
 })
 export class TablesModule {}

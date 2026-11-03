@@ -10,15 +10,15 @@ import { ReportsService } from './reports.service';
 @Roles(...RestaurantManagerRoles)
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+    constructor(private readonly reports: ReportsService) {}
 
-  @Get()
-  get(@TenantId() rid: string, @Query() q: ReportQuery) {
-    return this.reports.build(rid, q.from, q.to);
-  }
+    @Get()
+    get(@TenantId() rid: string, @Query() q: ReportQuery) {
+        return this.reports.build(rid, q.from, q.to);
+    }
 
-  @Get('staff')
-  staff(@TenantId() rid: string, @Query() q: ReportQuery) {
-    return this.reports.staff(rid, q.from, q.to);
-  }
+    @Get('staff')
+    staff(@TenantId() rid: string, @Query() q: ReportQuery) {
+        return this.reports.staff(rid, q.from, q.to);
+    }
 }

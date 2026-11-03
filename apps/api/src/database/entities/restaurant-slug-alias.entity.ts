@@ -1,4 +1,12 @@
-import { CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn, Column } from 'typeorm';
+import {
+    Column,
+    CreateDateColumn,
+    Entity,
+    Index,
+    JoinColumn,
+    ManyToOne,
+    PrimaryColumn
+} from 'typeorm';
 import { Restaurant } from './restaurant.entity';
 
 /**
@@ -7,8 +15,15 @@ import { Restaurant } from './restaurant.entity';
  */
 @Entity('restaurant_slug_aliases')
 export class RestaurantSlugAlias {
-  @PrimaryColumn({ type: 'varchar', length: 60 }) slug: string;
-  @Index('IDX_restaurant_slug_aliases_restaurant') @Column({ type: 'uuid' }) restaurantId: string;
-  @ManyToOne(() => Restaurant, { onDelete: 'CASCADE' }) @JoinColumn({ name: 'restaurant_id', foreignKeyConstraintName: 'FK_restaurant_slug_aliases_restaurant' }) restaurant?: Restaurant;
-  @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
+    @PrimaryColumn({ type: 'varchar', length: 60 }) slug: string;
+    @Index('IDX_restaurant_slug_aliases_restaurant')
+    @Column({ type: 'uuid' })
+    restaurantId: string;
+    @ManyToOne(() => Restaurant, { onDelete: 'CASCADE' })
+    @JoinColumn({
+        name: 'restaurant_id',
+        foreignKeyConstraintName: 'FK_restaurant_slug_aliases_restaurant'
+    })
+    restaurant?: Restaurant;
+    @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
 }

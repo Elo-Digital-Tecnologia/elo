@@ -7,9 +7,9 @@ import { CallsController } from './calls.controller';
 import { CallsService } from './calls.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WaiterCall]), TablesModule, StaffModule],
-  controllers: [CallsController],
-  providers: [CallsService],
-  exports: [CallsService],
+    imports: [TypeOrmModule.forFeature([WaiterCall]), TablesModule, StaffModule],
+    controllers: [CallsController],
+    providers: [CallsService],
+    exports: [CallsService]
 })
 export class CallsModule {}

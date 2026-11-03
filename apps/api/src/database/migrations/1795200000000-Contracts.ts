@@ -1,10 +1,10 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class Contracts1795200000000 implements MigrationInterface {
-  name = 'Contracts1795200000000';
+    name = 'Contracts1795200000000';
 
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
       CREATE TABLE "contracts" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "restaurant_id" uuid NOT NULL,
@@ -26,13 +26,19 @@ export class Contracts1795200000000 implements MigrationInterface {
         CONSTRAINT "FK_contracts_document" FOREIGN KEY ("document_id") REFERENCES "documents"("id") ON DELETE RESTRICT
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_contracts_restaurant" ON "contracts" ("restaurant_id")`);
-    // Restaurants that exist today have no contract on file: they stay pending until one is registered.
-    await queryRunner.query(`ALTER TABLE "restaurants" ADD "trial_days" integer NOT NULL DEFAULT 0, ADD "contract_starts_on" date, ADD "contract_ends_on" date`);
-  }
+        await queryRunner.query(
+            `CREATE INDEX "IDX_contracts_restaurant" ON "contracts" ("restaurant_id")`
+        );
+        // Restaurants that exist today have no contract on file: they stay pending until one is registered.
+        await queryRunner.query(
+            `ALTER TABLE "restaurants" ADD "trial_days" integer NOT NULL DEFAULT 0, ADD "contract_starts_on" date, ADD "contract_ends_on" date`
+        );
+    }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "restaurants" DROP COLUMN "contract_ends_on", DROP COLUMN "contract_starts_on", DROP COLUMN "trial_days"`);
-    await queryRunner.query(`DROP TABLE "contracts"`);
-  }
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(
+            `ALTER TABLE "restaurants" DROP COLUMN "contract_ends_on", DROP COLUMN "contract_starts_on", DROP COLUMN "trial_days"`
+        );
+        await queryRunner.query(`DROP TABLE "contracts"`);
+    }
 }

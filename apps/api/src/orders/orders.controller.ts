@@ -1,60 +1,95 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import type { JwtUser } from '../common/auth-types';
+import type { Env } from '../config/env';
+import {
+    Body,
+    Controller,
+    Get,
+    Param,
+    ParseUUIDPipe,
+    Patch,
+    Post,
+    Query
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Role } from '@elo/core';
 import { CurrentUser, NoImpersonation, Roles, TenantId } from '../common/decorators';
-import type { JwtUser } from '../common/auth-types';
+import {
+    AdvanceOrderDto,
+    CancelStaffDto,
+    ListOrdersQuery,
+    OrderHistoryQuery
+} from './orders.dto';
 import { OrdersService } from './orders.service';
-import type { Env } from '../config/env';
-import { AdvanceOrderDto, CancelStaffDto, ListOrdersQuery, OrderHistoryQuery } from './orders.dto';
 
 @ApiTags('orders')
 @ApiBearerAuth()
 @Controller('orders')
 export class OrdersController {
-  constructor(
-    private readonly orders: OrdersService,
-    private readonly config: ConfigService<Env, true>,
-  ) {}
+    constructor(
+        private readonly orders: OrdersService,
+        private readonly config: ConfigService<Env, true>
+    ) {}
 
-  @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
-  @Get('history')
-  history(@TenantId() rid: string, @CurrentUser() user: JwtUser, @Query() query: OrderHistoryQuery) {
-    return this.orders.history(rid, user, query, this.config.get('REPORT_TZ', { infer: true }));
-  }
+    @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
+    @Get('history')
+    history(
+        @TenantId() rid: string,
+        @CurrentUser() user: JwtUser,
+        @Query() query: OrderHistoryQuery
+    ) {
+        return this.orders.history(
+            rid,
+            user,
+            query,
+            this.config.get('REPORT_TZ', { infer: true })
+        );
+    }
 
-  @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
-  @Get()
-  list(@TenantId() rid: string, @Query() query: ListOrdersQuery) {
-    return this.orders.list(rid, query);
-  }
+    @Roles(Role.Kitchen, Role.Waiter, Role.Cashier, Role.RestaurantAdmin, Role.Manager)
+    @Get()
+    list(@TenantId() rid: string, @Query() query: ListOrdersQuery) {
+        return this.orders.list(rid, query);
+    }
 
-  /** Quem muda o status é a cozinha. */
-  @Roles(Role.Kitchen)
-  @Patch(':id/status')
-  advance(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AdvanceOrderDto) {
-    return this.orders.advance(rid, id, dto.status);
-  }
+    /** Quem muda o status é a cozinha. */
+    @Roles(Role.Kitchen)
+    @Patch(':id/status')
+    advance(
+        @TenantId() rid: string,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: AdvanceOrderDto
+    ) {
+        return this.orders.advance(rid, id, dto.status);
+    }
 
-  /** Like moving forward, only the kitchen steps an order back. */
-  @Roles(Role.Kitchen)
-  @Patch(':id/revert')
-  revert(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
-    return this.orders.revert(rid, id);
-  }
+    /** Like moving forward, only the kitchen steps an order back. */
+    @Roles(Role.Kitchen)
+    @Patch(':id/revert')
+    revert(@TenantId() rid: string, @Param('id', ParseUUIDPipe) id: string) {
+        return this.orders.revert(rid, id);
+    }
 
-  @Roles(Role.Waiter, Role.RestaurantAdmin, Role.Manager)
-  @NoImpersonation()
-  @Post(':id/cancel')
-  cancel(@CurrentUser() user: JwtUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelStaffDto) {
-    return this.orders.cancelByStaff(user, id, dto.reason);
-  }
+    @Roles(Role.Waiter, Role.RestaurantAdmin, Role.Manager)
+    @NoImpersonation()
+    @Post(':id/cancel')
+    cancel(
+        @CurrentUser() user: JwtUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: CancelStaffDto
+    ) {
+        return this.orders.cancelByStaff(user, id, dto.reason);
+    }
 
-  /** Devolução de pedido já "pronto" (status separado, com motivo). */
-  @Roles(Role.Waiter, Role.RestaurantAdmin, Role.Manager)
-  @NoImpersonation()
-  @Post(':id/return')
-  returnOrder(@CurrentUser() user: JwtUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelStaffDto) {
-    return this.orders.returnByStaff(user, id, dto.reason);
-  }
+    /** Devolução de pedido já "pronto" (status separado, com motivo). */
+    @Roles(Role.Waiter, Role.RestaurantAdmin, Role.Manager)
+    @NoImpersonation()
+    @Post(':id/return')
+    returnOrder(
+        @CurrentUser() user: JwtUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: CancelStaffDto
+    ) {
+        return this.orders.returnByStaff(user, id, dto.reason);
+    }
 }

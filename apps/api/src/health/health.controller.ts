@@ -10,15 +10,15 @@ import { Public } from '../common/decorators';
 @SkipThrottle()
 @Controller('health')
 export class HealthController {
-  constructor(private readonly db: DataSource) {}
+    constructor(private readonly db: DataSource) {}
 
-  @Get()
-  async check() {
-    try {
-      await this.db.query('SELECT 1');
-    } catch {
-      throw new ServiceUnavailableException('database_unavailable');
+    @Get()
+    async check() {
+        try {
+            await this.db.query('SELECT 1');
+        } catch {
+            throw new ServiceUnavailableException('database_unavailable');
+        }
+        return { status: 'ok' };
     }
-    return { status: 'ok' };
-  }
 }

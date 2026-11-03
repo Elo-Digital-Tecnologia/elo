@@ -2,10 +2,10 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 
 @Entity('waiter_calls')
 export class WaiterCall {
-  @PrimaryGeneratedColumn('uuid') id: string;
-  @Index() @Column({ type: 'uuid' }) restaurantId: string;
-  @Column({ type: 'uuid' }) tableId: string;
-  @Column({ type: 'timestamptz', nullable: true }) resolvedAt: Date | null;
-  @Column({ type: 'uuid', nullable: true }) resolvedBy: string | null;
-  @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
+    @PrimaryGeneratedColumn('uuid') id: string;
+    @Index() @Column({ type: 'uuid' }) restaurantId: string;
+    @Column({ type: 'uuid' }) tableId: string;
+    @Column({ type: 'timestamptz', nullable: true }) resolvedAt: Date | null;
+    @Column({ type: 'uuid', nullable: true }) resolvedBy: string | null;
+    @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
 }

@@ -7,9 +7,13 @@ import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Plan, Payment, Restaurant]), StaffModule, DocumentsModule],
-  controllers: [BillingController],
-  providers: [BillingService],
-  exports: [BillingService],
+    imports: [
+        TypeOrmModule.forFeature([Plan, Payment, Restaurant]),
+        StaffModule,
+        DocumentsModule
+    ],
+    controllers: [BillingController],
+    providers: [BillingService],
+    exports: [BillingService]
 })
 export class BillingModule {}

@@ -8,9 +8,14 @@ import { BillsController } from './bills.controller';
 import { BillsService } from './bills.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TableSession]), TablesModule, OrdersModule, RestaurantsModule],
-  controllers: [BillsController],
-  providers: [BillsService],
-  exports: [BillsService],
+    imports: [
+        TypeOrmModule.forFeature([TableSession]),
+        TablesModule,
+        OrdersModule,
+        RestaurantsModule
+    ],
+    controllers: [BillsController],
+    providers: [BillsService],
+    exports: [BillsService]
 })
 export class BillsModule {}

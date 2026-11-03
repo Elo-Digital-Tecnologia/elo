@@ -1,60 +1,77 @@
 'use client';
 
+import type { RealtimeStatus } from '@elo/client';
+import type {
+    Availability,
+    RestaurantSettingsView,
+    Role,
+    SubscriptionView
+} from '@elo/core';
+import type { NavItem } from '@elo/ui';
+import type { ReactNode } from 'react';
+import { ApiError, api, useAuth, useRealtime, useRealtimeStatus } from '@elo/client';
+import { CONTRACT_LIMITS, ROLE_LABEL } from '@elo/core';
 import {
-  BarChart3,
-  BellRing,
-  BookOpen,
-  CalendarClock,
-  Clock,
-  ChefHat,
-  ClipboardList,
-  CreditCard,
-  KeyRound,
-  Star,
-  LayoutDashboard,
-  Receipt,
-  Settings,
-  Table2,
-  UtensilsCrossed,
-  Users,
-  ConciergeBell,
-  ShieldAlert,
-  History,
-  FileClock,
-  Trophy,
+    AppShell,
+    Aurora,
+    Button,
+    ErrorState,
+    GlassCard,
+    PageLoading,
+    SkeletonCards
+} from '@elo/ui';
+import {
+    BarChart3,
+    BellRing,
+    BookOpen,
+    CalendarClock,
+    ChefHat,
+    ClipboardList,
+    Clock,
+    ConciergeBell,
+    CreditCard,
+    FileClock,
+    History,
+    KeyRound,
+    LayoutDashboard,
+    Receipt,
+    Settings,
+    ShieldAlert,
+    Star,
+    Table2,
+    Trophy,
+    Users,
+    UtensilsCrossed
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, ApiError, type RealtimeStatus, useAuth, useRealtime, useRealtimeStatus } from '@elo/client';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAlertsControl, useStaffAlerts } from './alerts';
-import { type Availability, CONTRACT_LIMITS, ROLE_LABEL, type Role, type RestaurantSettingsView, type SubscriptionView } from '@elo/core';
-import { AppShell, Aurora, Button, ErrorState, GlassCard, type NavItem, PageLoading, SkeletonCards } from '@elo/ui';
 
 interface Me extends RestaurantSettingsView {
-  id: string;
-  slug: string;
-  name: string;
-  managerName: string;
-  managerContact: string;
-  serviceFeeBps: number;
-  subscription: SubscriptionView;
+    id: string;
+    slug: string;
+    name: string;
+    managerName: string;
+    managerContact: string;
+    serviceFeeBps: number;
+    subscription: SubscriptionView;
 }
 
 interface StaffCtx {
-  token: string;
-  roles: string[];
-  /** Signed-in team member's id, to tell "you" apart in lists. */
-  sub: string;
-  /** Elo support inside the panel: not bound by the admin-vs-admin rule. */
-  impersonated: boolean;
-  me: Me;
-  /** Atualiza os dados do restaurante após editar as configurações. */
-  setMe: (me: Me) => void;
-  /** Signed-in member's name and profile photo, shown in the header. */
-  name: string;
-  avatarUrl: string | null;
-  setAvatarUrl: (url: string | null) => void;
+    token: string;
+    roles: string[];
+    /** Signed-in team member's id, to tell "you" apart in lists. */
+    sub: string;
+    /** Elo support inside the panel: not bound by the admin-vs-admin rule. */
+    impersonated: boolean;
+    me: Me;
+    /** Atualiza os dados do restaurante após editar as configurações. */
+    setMe: (me: Me) => void;
+    /** Signed-in member's name and profile photo, shown in the header. */
+    name: string;
+    avatarUrl: string | null;
+    setAvatarUrl: (url: string | null) => void;
 }
 
 const Ctx = createContext<StaffCtx | null>(null);
@@ -62,78 +79,108 @@ export const useStaff = () => useContext(Ctx)!;
 
 /** First match wins: a waiter who also cooks lands on the salon. */
 const HOME_ORDER: [string, string][] = [
-  ['restaurant_admin', '/dashboard'],
-  ['manager', '/dashboard'],
-  ['waiter', '/waiter'],
-  ['kitchen', '/kitchen'],
-  ['cashier', '/cashier'],
+    ['restaurant_admin', '/dashboard'],
+    ['manager', '/dashboard'],
+    ['waiter', '/waiter'],
+    ['kitchen', '/kitchen'],
+    ['cashier', '/cashier']
 ];
 
 /** Landing page for the signed-in member's roles. */
 export const homeOf = (slug: string, roles: string[]) =>
-  `/r/${slug}${HOME_ORDER.find(([r]) => roles.includes(r))?.[1] ?? '/login'}`;
+    `/r/${slug}${HOME_ORDER.find(([r]) => roles.includes(r))?.[1] ?? '/login'}`;
 
 /** Navigation for every role the member holds, without repeated screens. */
 function navFor(base: string, roles: string[], impersonated: boolean): NavItem[] {
-  const item = (path: string, label: string, icon: NavItem['icon'], allowed: string[]): NavItem | null =>
-    roles.some((r) => allowed.includes(r)) ? { href: base + path, label, icon } : null;
-  // The restaurant's own settings and subscription stay with the administrator; the rest is shared with managers.
-  const admin = ['restaurant_admin'];
-  const leads = ['restaurant_admin', 'manager'];
-  return [
-    item('/dashboard', 'Visão geral', LayoutDashboard, leads),
-    item('/dashboard/reports', 'Relatórios', BarChart3, leads),
-    item('/dashboard/team-performance', 'Desempenho', Trophy, leads),
-    item('/dashboard/reviews', 'Avaliações', Star, leads),
-    item('/dashboard/menu', 'Cardápio', UtensilsCrossed, leads),
-    item('/dashboard/tables', 'Mesas e QR Codes', Table2, leads),
-    item('/waiter', 'Salão', ConciergeBell, [...leads, 'waiter']),
-    item('/cashier', 'Caixa', Receipt, [...leads, 'waiter', 'cashier']),
-    item('/kitchen', 'Cozinha', ChefHat, [...leads, 'kitchen']),
-    item('/orders', 'Pedidos', ClipboardList, [...leads, 'waiter', 'cashier', 'kitchen']),
-    item('/dashboard/staff', 'Equipe', Users, leads),
-    item('/dashboard/hours', 'Funcionamento', CalendarClock, leads),
-    item('/dashboard/settings', 'Configurações', Settings, admin),
-    item('/dashboard/activity', 'Registros', History, leads),
-    item('/dashboard/subscription', 'Assinatura', CreditCard, admin),
-    // Elo support has a temporary pass, not an account of this restaurant.
-    impersonated ? null : item('/account', 'Minha conta', KeyRound, [...leads, 'waiter', 'kitchen', 'cashier']),
-  ].filter((i): i is NavItem => !!i);
+    const item = (
+        path: string,
+        label: string,
+        icon: NavItem['icon'],
+        allowed: string[]
+    ): NavItem | null =>
+        roles.some((r) => allowed.includes(r))
+            ? { href: base + path, label, icon }
+            : null;
+    // The restaurant's own settings and subscription stay with the administrator; the rest is shared with managers.
+    const admin = ['restaurant_admin'];
+    const leads = ['restaurant_admin', 'manager'];
+    return [
+        item('/dashboard', 'Visão geral', LayoutDashboard, leads),
+        item('/dashboard/reports', 'Relatórios', BarChart3, leads),
+        item('/dashboard/team-performance', 'Desempenho', Trophy, leads),
+        item('/dashboard/reviews', 'Avaliações', Star, leads),
+        item('/dashboard/menu', 'Cardápio', UtensilsCrossed, leads),
+        item('/dashboard/tables', 'Mesas e QR Codes', Table2, leads),
+        item('/waiter', 'Salão', ConciergeBell, [...leads, 'waiter']),
+        item('/cashier', 'Caixa', Receipt, [...leads, 'waiter', 'cashier']),
+        item('/kitchen', 'Cozinha', ChefHat, [...leads, 'kitchen']),
+        item('/orders', 'Pedidos', ClipboardList, [
+            ...leads,
+            'waiter',
+            'cashier',
+            'kitchen'
+        ]),
+        item('/dashboard/staff', 'Equipe', Users, leads),
+        item('/dashboard/hours', 'Funcionamento', CalendarClock, leads),
+        item('/dashboard/settings', 'Configurações', Settings, admin),
+        item('/dashboard/activity', 'Registros', History, leads),
+        item('/dashboard/subscription', 'Assinatura', CreditCard, admin),
+        // Elo support has a temporary pass, not an account of this restaurant.
+        impersonated
+            ? null
+            : item('/account', 'Minha conta', KeyRound, [
+                  ...leads,
+                  'waiter',
+                  'kitchen',
+                  'cashier'
+              ])
+    ].filter((i): i is NavItem => !!i);
 }
 
 /** Why the API refused the team (403 `subscription_suspended`). */
 interface Suspension {
-  status: string;
-  reasons: string[];
-  contractEndsOn: string | null;
-  contractStartsOn: string | null;
+    status: string;
+    reasons: string[];
+    contractEndsOn: string | null;
+    contractStartsOn: string | null;
 }
 
 const text = (v: unknown) => (typeof v === 'string' ? v : null);
 
 const suspensionOf = (e: ApiError): Suspension => ({
-  status: text(e.data.status) ?? 'suspended',
-  reasons: Array.isArray(e.data.reasons) ? (e.data.reasons as string[]) : [],
-  contractEndsOn: text(e.data.contractEndsOn),
-  contractStartsOn: text(e.data.contractStartsOn),
+    status: text(e.data.status) ?? 'suspended',
+    reasons: Array.isArray(e.data.reasons) ? (e.data.reasons as string[]) : [],
+    contractEndsOn: text(e.data.contractEndsOn),
+    contractStartsOn: text(e.data.contractStartsOn)
 });
 
-const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
+const dayLabel = (day: string) =>
+    `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
 
-const SUSPENSION_TITLE: Record<string, string> = { pending: 'Contrato pendente', ended: 'Contrato encerrado' };
+const SUSPENSION_TITLE: Record<string, string> = {
+    pending: 'Contrato pendente',
+    ended: 'Contrato encerrado'
+};
 
-function suspensionText({ status, reasons, contractEndsOn, contractStartsOn }: Suspension): string {
-  if (status === 'pending' || reasons.includes('contract_pending'))
-    return contractStartsOn
-      ? `O contrato com a Elo Digital começa em ${dayLabel(contractStartsOn)}. Até lá, o painel e o cardápio dos clientes ficam fora do ar.`
-      : 'Ainda não há contrato registrado com a Elo Digital. Fale com a Elo Digital para liberar o acesso; o cardápio dos clientes também fica fora do ar até lá.';
-  if (status === 'ended' || reasons.includes('contract_ended'))
-    return `Contrato encerrado${contractEndsOn ? ` em ${dayLabel(contractEndsOn)}` : ''}. Fale com a Elo Digital para renovar. O cardápio dos clientes fica fora do ar até a renovação.`;
-  if (reasons.includes('manual')) return 'O acesso foi suspenso pela Elo Digital. Fale com a Elo Digital para reativar. O cardápio dos clientes continua disponível.';
-  return 'O pagamento da assinatura não foi confirmado. Fale com a Elo Digital para reativar o acesso. O cardápio dos clientes continua disponível.';
+function suspensionText({
+    status,
+    reasons,
+    contractEndsOn,
+    contractStartsOn
+}: Suspension): string {
+    if (status === 'pending' || reasons.includes('contract_pending'))
+        return contractStartsOn
+            ? `O contrato com a Elo Digital começa em ${dayLabel(contractStartsOn)}. Até lá, o painel e o cardápio dos clientes ficam fora do ar.`
+            : 'Ainda não há contrato registrado com a Elo Digital. Fale com a Elo Digital para liberar o acesso; o cardápio dos clientes também fica fora do ar até lá.';
+    if (status === 'ended' || reasons.includes('contract_ended'))
+        return `Contrato encerrado${contractEndsOn ? ` em ${dayLabel(contractEndsOn)}` : ''}. Fale com a Elo Digital para renovar. O cardápio dos clientes fica fora do ar até a renovação.`;
+    if (reasons.includes('manual'))
+        return 'O acesso foi suspenso pela Elo Digital. Fale com a Elo Digital para reativar. O cardápio dos clientes continua disponível.';
+    return 'O pagamento da assinatura não foi confirmado. Fale com a Elo Digital para reativar o acesso. O cardápio dos clientes continua disponível.';
 }
 
-const rolesLabel = (roles: string[]) => roles.map((r) => ROLE_LABEL[r as Role] ?? r).join(' · ');
+const rolesLabel = (roles: string[]) =>
+    roles.map((r) => ROLE_LABEL[r as Role] ?? r).join(' · ');
 
 /**
  * The panel around every tab: sign-in, restaurant data, live connection, alerts
@@ -141,231 +188,346 @@ const rolesLabel = (roles: string[]) => roles.map((r) => ROLE_LABEL[r as Role] ?
  * between tabs; each page only says which roles may open it.
  */
 export function PanelShell({ children }: { children: ReactNode }) {
-  const router = useRouter();
-  const { slug } = useParams<{ slug: string }>();
-  const base = `/r/${slug}`;
-  const pathname = usePathname();
-  /** Where signing out leads: Elo support goes back to the restaurant in the Elo panel, not to this login. */
-  const leavingTo = useRef<string | null>(null);
-  const { token, user, ready, setToken, renew, logout } = useAuth(slug);
-  const [me, setMe] = useState<Me | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [suspended, setSuspended] = useState<Suspension | null>(null);
-  const [failed, setFailed] = useState(false);
-  const live = useRealtimeStatus(token, !!me);
-  const roleList = user?.roles ?? [];
-  const alerts = useAlertsControl({ token, slug, roles: roleList });
-  useStaffAlerts({ token, roles: roleList, base, push: alerts.push, enabled: !!me && alerts.enabled });
-
-  // An administrator changed this member's roles or name: swap the token so menus and screens follow, without signing in again.
-  useRealtime(
-    {
-      'staff.updated': (p: { id: string }) => {
-        if (!token || p.id !== user?.sub || user?.impersonatedBy) return;
-        void renew();
-        api<{ avatarUrl: string | null }>('/api/me', { token }).then((r) => setAvatarUrl(r.avatarUrl)).catch(() => undefined);
-      },
-      'restaurant.availability': (a: Availability) => setMe((m) => (m ? { ...m, availability: a } : m)),
-    },
-    token,
-    !!me,
-  );
-
-  useEffect(() => {
-    if (!token || user?.impersonatedBy) return setAvatarUrl(null);
-    api<{ avatarUrl: string | null }>('/api/me', { token }).then((r) => setAvatarUrl(r.avatarUrl)).catch(() => undefined);
-  }, [token, user?.impersonatedBy]);
-
-  // Opening hours change on their own: fetch the status again right after the next change.
-  const changesAt = me?.availability.changesAt;
-  useEffect(() => {
-    if (!changesAt || !token) return;
-    const wait = new Date(changesAt).getTime() - Date.now() + 1000;
-    if (wait > 2 ** 31 - 1) return;
-    const timer = setTimeout(() => {
-      api<Me>('/api/restaurant/me', { token }).then(setMe).catch(() => undefined);
-    }, Math.max(wait, 1000));
-    return () => clearTimeout(timer);
-  }, [changesAt, token]);
-
-  useEffect(() => {
-    if (!ready) return;
-    if (!token || !user) return void router.replace(leavingTo.current ?? `${base}/login`);
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    const load = (attempt: number) =>
-      api<Me>('/api/restaurant/me', { token })
-        .then((data) => {
-          // O token precisa ser do restaurante deste endereço.
-          if (data.slug !== slug) {
-            // The restaurant's link changed: same panel under the current link; a token of another restaurant signs out.
-            if (data.id === user.restaurantId) return router.replace(`/r/${data.slug}${window.location.pathname.slice(base.length)}`);
-            return setToken(null);
-          }
-          // Elo support whose pass runs out goes back to the restaurant in the Elo panel.
-          if (user.impersonatedBy) leavingTo.current = `/admin/restaurants/${data.id}`;
-          setMe(data);
-        })
-        .catch((e) => {
-          if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
-          // A refused token is renewed from the session (useAuth hears the 401); only an ended session signs out.
-          else if (e instanceof ApiError && e.status === 401) return;
-          // Limite de requisições ou queda passageira: tenta de novo sem deslogar.
-          else if (attempt < 4) retry = setTimeout(() => void load(attempt + 1), 1500 * (attempt + 1));
-          else setFailed(true);
-        });
-    void load(0);
-    return () => clearTimeout(retry);
-    // Depende de role/sub, não do objeto `user`.
-  }, [ready, token, user?.roles.join(','), user?.sub, router, setToken, slug, base]);
-
-  // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
-  useEffect(() => {
-    if (live !== 'rejected' || !token) return;
-    api<Me>('/api/restaurant/me', { token }).catch((e) => {
-      if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
+    const router = useRouter();
+    const { slug } = useParams<{ slug: string }>();
+    const base = `/r/${slug}`;
+    const pathname = usePathname();
+    /** Where signing out leads: Elo support goes back to the restaurant in the Elo panel, not to this login. */
+    const leavingTo = useRef<string | null>(null);
+    const { token, user, ready, setToken, renew, logout } = useAuth(slug);
+    const [me, setMe] = useState<Me | null>(null);
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+    const [suspended, setSuspended] = useState<Suspension | null>(null);
+    const [failed, setFailed] = useState(false);
+    const live = useRealtimeStatus(token, !!me);
+    const roleList = user?.roles ?? [];
+    const alerts = useAlertsControl({ token, slug, roles: roleList });
+    useStaffAlerts({
+        token,
+        roles: roleList,
+        base,
+        push: alerts.push,
+        enabled: !!me && alerts.enabled
     });
-  }, [live, token]);
 
-  if (suspended)
-    return (
-      <main className="relative grid min-h-dvh place-items-center p-4">
-        <Aurora />
-        <GlassCard strong className="w-full max-w-md space-y-4 p-8 text-center">
-          <span className="mx-auto grid shrink-0 h-16 w-16 place-items-center rounded-pill bg-warning/20 text-warning">
-            <ShieldAlert size={30} />
-          </span>
-          <h1 className="text-2xl font-bold">{SUSPENSION_TITLE[suspended.status] ?? 'Acesso suspenso'}</h1>
-          <p className="text-muted">{suspensionText(suspended)}</p>
-          <Button variant="ghost" onClick={() => void logout()}>
-            Sair
-          </Button>
-        </GlassCard>
-      </main>
+    // An administrator changed this member's roles or name: swap the token so menus and screens follow, without signing in again.
+    useRealtime(
+        {
+            'staff.updated': (p: { id: string }) => {
+                if (!token || p.id !== user?.sub || user?.impersonatedBy) return;
+                void renew();
+                api<{ avatarUrl: string | null }>('/api/me', { token })
+                    .then((r) => setAvatarUrl(r.avatarUrl))
+                    .catch(() => undefined);
+            },
+            'restaurant.availability': (a: Availability) =>
+                setMe((m) => (m ? { ...m, availability: a } : m))
+        },
+        token,
+        !!me
     );
 
-  if (failed)
-    return (
-      <main className="relative grid min-h-dvh place-items-center p-4">
-        <Aurora />
-        <ErrorState title="Não foi possível conectar" action={<Button onClick={() => location.reload()}>Tentar de novo</Button>}>
-          Verifique sua internet e tente novamente.
-        </ErrorState>
-      </main>
-    );
+    useEffect(() => {
+        if (!token || user?.impersonatedBy) return setAvatarUrl(null);
+        api<{ avatarUrl: string | null }>('/api/me', { token })
+            .then((r) => setAvatarUrl(r.avatarUrl))
+            .catch(() => undefined);
+    }, [token, user?.impersonatedBy]);
 
-  if (!token || !user || !me)
-    return (
-      <main className="relative min-h-dvh p-6">
-        <Aurora />
-        <div className="mx-auto max-w-5xl pt-16">
-          <SkeletonCards count={3} />
-        </div>
-      </main>
-    );
+    // Opening hours change on their own: fetch the status again right after the next change.
+    const changesAt = me?.availability.changesAt;
+    useEffect(() => {
+        if (!changesAt || !token) return;
+        const wait = new Date(changesAt).getTime() - Date.now() + 1000;
+        if (wait > 2 ** 31 - 1) return;
+        const timer = setTimeout(
+            () => {
+                api<Me>('/api/restaurant/me', { token })
+                    .then(setMe)
+                    .catch(() => undefined);
+            },
+            Math.max(wait, 1000)
+        );
+        return () => clearTimeout(timer);
+    }, [changesAt, token]);
 
-  const warn = me.subscription.warning;
-  const contract = me.subscription.contract;
-  const manages = user.roles.some((r) => r === 'restaurant_admin' || r === 'manager');
-  return (
-    <Ctx.Provider value={{ token, roles: user.roles, sub: user.sub, impersonated: !!user.impersonatedBy, me, setMe, name: user.name ?? me.name, avatarUrl, setAvatarUrl }}>
-      <AppShell
-        brandSub={me.name}
-        nav={navFor(base, user.roles, !!user.impersonatedBy)}
-        user={{ name: user.name ?? me.name, role: user.impersonatedBy ? 'Suporte Elo Digital' : rolesLabel(user.roles), avatarUrl }}
-        onLogout={() => {
-          // This device stops getting the team's alerts before the next person signs in.
-          void alerts.leave();
-          void logout();
-        }}
-        defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
-        headerExtra={
-          <span className="flex min-w-0 items-center gap-1">
-            <LiveIndicator status={live} />
-            <span className="ml-auto">{alerts.bell}</span>
-          </span>
-        }
-        links={[{ href: `/${me.slug}`, label: 'Cardápio dos clientes', icon: BookOpen, external: true }]}
-        banner={
-          <>
-          {user.impersonatedBy ? (
-            <GlassCard className="mb-5 flex items-start gap-3 border-brand/40 px-4 py-3 text-sm sm:items-center sm:px-5">
-              <ShieldAlert size={20} className="shrink-0 text-brand" />
-              <span>
-                Você está no painel de {me.name} como equipe Elo Digital: pode ver tudo e corrigir cardápio, mesas, equipe e configurações. Pedidos, chamados, mesas em uso e contas ficam com a equipe do restaurante. Use <strong>Sair</strong> para voltar ao painel Elo; o acesso termina em 45 minutos.
-              </span>
-            </GlassCard>
-          ) : warn ? (
-            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
-              <BellRing size={20} className="shrink-0 text-warning" />
-              <span>
-                Pagamento vencido em {new Date(me.subscription.dueDate).toLocaleDateString('pt-BR')}. Regularize até{' '}
-                <strong>{new Date(me.subscription.graceEndsAt).toLocaleDateString('pt-BR')}</strong> para não suspender o acesso.
-              </span>
-            </GlassCard>
-          ) : null}
-          {!user.impersonatedBy && manages && contract.state === 'active' && contract.daysLeft !== null && contract.daysLeft <= CONTRACT_LIMITS.warnDays && contract.endsOn && (
-            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
-              <FileClock size={20} className="shrink-0 text-warning" />
-              <span>
-                O contrato com a Elo Digital termina em <strong>{dayLabel(contract.endsOn)}</strong>
-                {contract.daysLeft === 0 ? ' (hoje)' : ` (${contract.daysLeft} ${contract.daysLeft === 1 ? 'dia' : 'dias'})`}. Fale com a Elo Digital para renovar; sem renovação, o painel e o cardápio saem do ar.
-              </span>
-            </GlassCard>
-          )}
-          {!me.availability.open && (
-            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
-              <Clock size={20} className="shrink-0 text-warning" />
-              <span>
-                <strong>{me.availability.label}</strong>
-                {me.availability.pauseReason && <> · {me.availability.pauseReason}</>}. Nenhuma mesa nova abre; as mesas e os pedidos em andamento seguem normalmente.
-                {manages && pathname !== `${base}/dashboard/hours` && (
-                  <>
-                    {' '}
-                    {me.availability.reason === 'hours' && (
-                      <><Link href={`${base}/dashboard/hours?abrir=1`} className="font-semibold text-brand underline-offset-2 hover:underline">Abrir fora do horário</Link> · </>
-                    )}
-                    <Link href={`${base}/dashboard/hours`} className="font-semibold text-brand underline-offset-2 hover:underline">Ver funcionamento</Link>
-                  </>
-                )}
-              </span>
-            </GlassCard>
-          )}
-          {alerts.prompt}
-          </>
-        }
-      >
-        {children}
-      </AppShell>
-    </Ctx.Provider>
-  );
+    useEffect(() => {
+        if (!ready) return;
+        if (!token || !user)
+            return void router.replace(leavingTo.current ?? `${base}/login`);
+        let retry: ReturnType<typeof setTimeout> | undefined;
+        const load = (attempt: number) =>
+            api<Me>('/api/restaurant/me', { token })
+                .then((data) => {
+                    // O token precisa ser do restaurante deste endereço.
+                    if (data.slug !== slug) {
+                        // The restaurant's link changed: same panel under the current link; a token of another restaurant signs out.
+                        if (data.id === user.restaurantId)
+                            return router.replace(
+                                `/r/${data.slug}${window.location.pathname.slice(base.length)}`
+                            );
+                        return setToken(null);
+                    }
+                    // Elo support whose pass runs out goes back to the restaurant in the Elo panel.
+                    if (user.impersonatedBy)
+                        leavingTo.current = `/admin/restaurants/${data.id}`;
+                    setMe(data);
+                })
+                .catch((e) => {
+                    if (e instanceof ApiError && e.status === 403)
+                        setSuspended(suspensionOf(e));
+                    // A refused token is renewed from the session (useAuth hears the 401); only an ended session signs out.
+                    else if (e instanceof ApiError && e.status === 401) return;
+                    // Limite de requisições ou queda passageira: tenta de novo sem deslogar.
+                    else if (attempt < 4)
+                        retry = setTimeout(
+                            () => void load(attempt + 1),
+                            1500 * (attempt + 1)
+                        );
+                    else setFailed(true);
+                });
+        void load(0);
+        return () => clearTimeout(retry);
+        // Depende de role/sub, não do objeto `user`.
+    }, [ready, token, user?.roles.join(','), user?.sub, router, setToken, slug, base]);
+
+    // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
+    useEffect(() => {
+        if (live !== 'rejected' || !token) return;
+        api<Me>('/api/restaurant/me', { token }).catch((e) => {
+            if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
+        });
+    }, [live, token]);
+
+    if (suspended)
+        return (
+            <main className="relative grid min-h-dvh place-items-center p-4">
+                <Aurora />
+                <GlassCard strong className="w-full max-w-md space-y-4 p-8 text-center">
+                    <span className="mx-auto grid shrink-0 h-16 w-16 place-items-center rounded-pill bg-warning/20 text-warning">
+                        <ShieldAlert size={30} />
+                    </span>
+                    <h1 className="text-2xl font-bold">
+                        {SUSPENSION_TITLE[suspended.status] ?? 'Acesso suspenso'}
+                    </h1>
+                    <p className="text-muted">{suspensionText(suspended)}</p>
+                    <Button variant="ghost" onClick={() => void logout()}>
+                        Sair
+                    </Button>
+                </GlassCard>
+            </main>
+        );
+
+    if (failed)
+        return (
+            <main className="relative grid min-h-dvh place-items-center p-4">
+                <Aurora />
+                <ErrorState
+                    title="Não foi possível conectar"
+                    action={
+                        <Button onClick={() => location.reload()}>Tentar de novo</Button>
+                    }
+                >
+                    Verifique sua internet e tente novamente.
+                </ErrorState>
+            </main>
+        );
+
+    if (!token || !user || !me)
+        return (
+            <main className="relative min-h-dvh p-6">
+                <Aurora />
+                <div className="mx-auto max-w-5xl pt-16">
+                    <SkeletonCards count={3} />
+                </div>
+            </main>
+        );
+
+    const warn = me.subscription.warning;
+    const contract = me.subscription.contract;
+    const manages = user.roles.some((r) => r === 'restaurant_admin' || r === 'manager');
+    return (
+        <Ctx.Provider
+            value={{
+                token,
+                roles: user.roles,
+                sub: user.sub,
+                impersonated: !!user.impersonatedBy,
+                me,
+                setMe,
+                name: user.name ?? me.name,
+                avatarUrl,
+                setAvatarUrl
+            }}
+        >
+            <AppShell
+                brandSub={me.name}
+                nav={navFor(base, user.roles, !!user.impersonatedBy)}
+                user={{
+                    name: user.name ?? me.name,
+                    role: user.impersonatedBy
+                        ? 'Suporte Elo Digital'
+                        : rolesLabel(user.roles),
+                    avatarUrl
+                }}
+                onLogout={() => {
+                    // This device stops getting the team's alerts before the next person signs in.
+                    void alerts.leave();
+                    void logout();
+                }}
+                defaultCollapsed={user.roles.length === 1 && user.roles[0] === 'kitchen'}
+                headerExtra={
+                    <span className="flex min-w-0 items-center gap-1">
+                        <LiveIndicator status={live} />
+                        <span className="ml-auto">{alerts.bell}</span>
+                    </span>
+                }
+                links={[
+                    {
+                        href: `/${me.slug}`,
+                        label: 'Cardápio dos clientes',
+                        icon: BookOpen,
+                        external: true
+                    }
+                ]}
+                banner={
+                    <>
+                        {user.impersonatedBy ? (
+                            <GlassCard className="mb-5 flex items-start gap-3 border-brand/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+                                <ShieldAlert size={20} className="shrink-0 text-brand" />
+                                <span>
+                                    Você está no painel de {me.name} como equipe Elo
+                                    Digital: pode ver tudo e corrigir cardápio, mesas,
+                                    equipe e configurações. Pedidos, chamados, mesas em
+                                    uso e contas ficam com a equipe do restaurante. Use{' '}
+                                    <strong>Sair</strong> para voltar ao painel Elo; o
+                                    acesso termina em 45 minutos.
+                                </span>
+                            </GlassCard>
+                        ) : warn ? (
+                            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+                                <BellRing size={20} className="shrink-0 text-warning" />
+                                <span>
+                                    Pagamento vencido em{' '}
+                                    {new Date(me.subscription.dueDate).toLocaleDateString(
+                                        'pt-BR'
+                                    )}
+                                    . Regularize até{' '}
+                                    <strong>
+                                        {new Date(
+                                            me.subscription.graceEndsAt
+                                        ).toLocaleDateString('pt-BR')}
+                                    </strong>{' '}
+                                    para não suspender o acesso.
+                                </span>
+                            </GlassCard>
+                        ) : null}
+                        {!user.impersonatedBy &&
+                            manages &&
+                            contract.state === 'active' &&
+                            contract.daysLeft !== null &&
+                            contract.daysLeft <= CONTRACT_LIMITS.warnDays &&
+                            contract.endsOn && (
+                                <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+                                    <FileClock
+                                        size={20}
+                                        className="shrink-0 text-warning"
+                                    />
+                                    <span>
+                                        O contrato com a Elo Digital termina em{' '}
+                                        <strong>{dayLabel(contract.endsOn)}</strong>
+                                        {contract.daysLeft === 0
+                                            ? ' (hoje)'
+                                            : ` (${contract.daysLeft} ${contract.daysLeft === 1 ? 'dia' : 'dias'})`}
+                                        . Fale com a Elo Digital para renovar; sem
+                                        renovação, o painel e o cardápio saem do ar.
+                                    </span>
+                                </GlassCard>
+                            )}
+                        {!me.availability.open && (
+                            <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
+                                <Clock size={20} className="shrink-0 text-warning" />
+                                <span>
+                                    <strong>{me.availability.label}</strong>
+                                    {me.availability.pauseReason && (
+                                        <> · {me.availability.pauseReason}</>
+                                    )}
+                                    . Nenhuma mesa nova abre; as mesas e os pedidos em
+                                    andamento seguem normalmente.
+                                    {manages &&
+                                        pathname !== `${base}/dashboard/hours` && (
+                                            <>
+                                                {' '}
+                                                {me.availability.reason === 'hours' && (
+                                                    <>
+                                                        <Link
+                                                            href={`${base}/dashboard/hours?abrir=1`}
+                                                            className="font-semibold text-brand underline-offset-2 hover:underline"
+                                                        >
+                                                            Abrir fora do horário
+                                                        </Link>{' '}
+                                                        ·{' '}
+                                                    </>
+                                                )}
+                                                <Link
+                                                    href={`${base}/dashboard/hours`}
+                                                    className="font-semibold text-brand underline-offset-2 hover:underline"
+                                                >
+                                                    Ver funcionamento
+                                                </Link>
+                                            </>
+                                        )}
+                                </span>
+                            </GlassCard>
+                        )}
+                        {alerts.prompt}
+                    </>
+                }
+            >
+                {children}
+            </AppShell>
+        </Ctx.Provider>
+    );
 }
 
 /** Opens the page only for the given roles; anyone else goes to their own first tab. */
-export function RequireRoles({ roles, children }: { roles: string[]; children: ReactNode }) {
-  const ctx = useContext(Ctx);
-  const router = useRouter();
-  const allowed = !!ctx && ctx.roles.some((r) => roles.includes(r));
-  useEffect(() => {
-    if (ctx && !allowed) router.replace(homeOf(ctx.me.slug, ctx.roles));
-  }, [ctx, allowed, router]);
-  return allowed ? <>{children}</> : <PageLoading />;
+export function RequireRoles({
+    roles,
+    children
+}: {
+    roles: string[];
+    children: ReactNode;
+}) {
+    const ctx = useContext(Ctx);
+    const router = useRouter();
+    const allowed = !!ctx && ctx.roles.some((r) => roles.includes(r));
+    useEffect(() => {
+        if (ctx && !allowed) router.replace(homeOf(ctx.me.slug, ctx.roles));
+    }, [ctx, allowed, router]);
+    return allowed ? <>{children}</> : <PageLoading />;
 }
 
 const LIVE: Record<RealtimeStatus, { label: string; dot: string }> = {
-  connected: { label: 'Ao vivo', dot: 'pulse-dot' },
-  connecting: { label: 'Conectando…', dot: 'h-2.5 w-2.5 rounded-pill bg-warning' },
-  reconnecting: { label: 'Reconectando…', dot: 'h-2.5 w-2.5 animate-pulse rounded-pill bg-warning' },
-  offline: { label: 'Sem internet', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
-  rejected: { label: 'Desconectado', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
+    connected: { label: 'Ao vivo', dot: 'pulse-dot' },
+    connecting: { label: 'Conectando…', dot: 'h-2.5 w-2.5 rounded-pill bg-warning' },
+    reconnecting: {
+        label: 'Reconectando…',
+        dot: 'h-2.5 w-2.5 animate-pulse rounded-pill bg-warning'
+    },
+    offline: { label: 'Sem internet', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
+    rejected: { label: 'Desconectado', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' }
 };
 
 function LiveIndicator({ status }: { status: RealtimeStatus }) {
-  const { label, dot } = LIVE[status];
-  const ok = status === 'connected';
-  return (
-    <span role="status" className={`flex items-center gap-2 pl-2 text-sm ${ok ? 'text-muted' : 'font-medium text-warning'}`}>
-      <span className={`shrink-0 ${dot}`} aria-hidden />
-      <span className={ok ? 'sr-only sm:not-sr-only' : 'truncate'}>{label}</span>
-    </span>
-  );
+    const { label, dot } = LIVE[status];
+    const ok = status === 'connected';
+    return (
+        <span
+            role="status"
+            className={`flex items-center gap-2 pl-2 text-sm ${ok ? 'text-muted' : 'font-medium text-warning'}`}
+        >
+            <span className={`shrink-0 ${dot}`} aria-hidden />
+            <span className={ok ? 'sr-only sm:not-sr-only' : 'truncate'}>{label}</span>
+        </span>
+    );
 }

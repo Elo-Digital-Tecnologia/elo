@@ -11,8 +11,14 @@ import { TableTicketsService } from './table-tickets.service';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([TableSession]), RestaurantsModule, StaffModule, SessionsModule, PushModule],
-  providers: [RealtimeService, RealtimeGateway, TableTicketsService],
-  exports: [RealtimeService, TableTicketsService],
+    imports: [
+        TypeOrmModule.forFeature([TableSession]),
+        RestaurantsModule,
+        StaffModule,
+        SessionsModule,
+        PushModule
+    ],
+    providers: [RealtimeService, RealtimeGateway, TableTicketsService],
+    exports: [RealtimeService, TableTicketsService]
 })
 export class RealtimeModule {}

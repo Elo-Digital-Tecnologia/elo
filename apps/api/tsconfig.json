@@ -1,15 +1,15 @@
 {
-  "extends": "@elo/config/tsconfig.base.json",
-  "compilerOptions": {
-    "module": "CommonJS",
-    "outDir": "dist",
-    "rootDir": "src",
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "strictPropertyInitialization": false,
-    "declaration": false,
-    "incremental": true,
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
-  },
-  "include": ["src"]
+    "extends": "@elo/config/tsconfig.base.json",
+    "compilerOptions": {
+        "module": "CommonJS",
+        "outDir": "dist",
+        "rootDir": "src",
+        "emitDecoratorMetadata": true,
+        "experimentalDecorators": true,
+        "strictPropertyInitialization": false,
+        "declaration": false,
+        "incremental": true,
+        "tsBuildInfoFile": "dist/.tsbuildinfo"
+    },
+    "include": ["src"]
 }

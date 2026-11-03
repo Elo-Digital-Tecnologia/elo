@@ -9,7 +9,7 @@ When something is missing or unclear, ask instead of inventing.
 pnpm workspaces + Turborepo, TypeScript everywhere (Node >= 22).
 
 | Path | Description |
-|---|---|
+| --- | --- |
 | `apps/api` | NestJS 10 + TypeORM + PostgreSQL. REST, WebSockets (Socket.IO), Swagger, throttling |
 | `apps/web` | Next.js 14 (App Router) + Tailwind. Public menu, restaurant dashboard (waiter, kitchen, cashier, admin) and Elo Digital admin (`/admin`) in a single app |
 | `packages/core` | Shared domain code: roles, permissions, API types, money, bill, order and table state, subscription rules, slug |

@@ -6,9 +6,9 @@ import { ReviewsController } from './reviews.controller';
 import { ReviewsService } from './reviews.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Review]), TablesModule],
-  controllers: [ReviewsController],
-  providers: [ReviewsService],
-  exports: [ReviewsService],
+    imports: [TypeOrmModule.forFeature([Review]), TablesModule],
+    controllers: [ReviewsController],
+    providers: [ReviewsService],
+    exports: [ReviewsService]
 })
 export class ReviewsModule {}

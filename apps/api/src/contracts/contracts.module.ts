@@ -6,8 +6,8 @@ import { ContractsController } from './contracts.controller';
 import { ContractsService } from './contracts.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Contract, Restaurant, Payment]), DocumentsModule],
-  controllers: [ContractsController],
-  providers: [ContractsService],
+    imports: [TypeOrmModule.forFeature([Contract, Restaurant, Payment]), DocumentsModule],
+    controllers: [ContractsController],
+    providers: [ContractsService]
 })
 export class ContractsModule {}

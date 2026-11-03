@@ -1,6 +1,6 @@
-import { createParamDecorator, ExecutionContext, SetMetadata } from '@nestjs/common';
-import { Permission, Role } from '@elo/core';
 import type { JwtUser } from './auth-types';
+import { ExecutionContext, SetMetadata, createParamDecorator } from '@nestjs/common';
+import { Permission, Role } from '@elo/core';
 
 export const IS_PUBLIC = 'isPublic';
 export const ROLES = 'roles';
@@ -20,12 +20,14 @@ export const AllowSuspended = () => SetMetadata(ALLOW_SUSPENDED, true);
 export const NoImpersonation = () => SetMetadata(NO_IMPERSONATION, true);
 
 export const CurrentUser = createParamDecorator(
-  (_: unknown, ctx: ExecutionContext): JwtUser => ctx.switchToHttp().getRequest().user,
+    (_: unknown, ctx: ExecutionContext): JwtUser => ctx.switchToHttp().getRequest().user
 );
 
 /** restaurantId do usuário logado; falha se for equipe Elo. */
-export const TenantId = createParamDecorator((_: unknown, ctx: ExecutionContext): string => {
-  const user: JwtUser = ctx.switchToHttp().getRequest().user;
-  if (!user.restaurantId) throw new Error('route requires restaurant user');
-  return user.restaurantId;
-});
+export const TenantId = createParamDecorator(
+    (_: unknown, ctx: ExecutionContext): string => {
+        const user: JwtUser = ctx.switchToHttp().getRequest().user;
+        if (!user.restaurantId) throw new Error('route requires restaurant user');
+        return user.restaurantId;
+    }
+);

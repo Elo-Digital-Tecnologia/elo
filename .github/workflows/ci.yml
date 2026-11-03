@@ -1,50 +1,50 @@
 name: CI
 
 on:
-  push:
-    branches: [develop]
-  pull_request:
-    branches: [develop]
+    push:
+        branches: [develop]
+    pull_request:
+        branches: [develop]
 
 # Read-only token: the workflow only checks the code, it never writes to the repository.
 permissions:
-  contents: read
+    contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:16-alpine
+    check:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        services:
+            postgres:
+                image: postgres:16-alpine
+                env:
+                    POSTGRES_USER: elo
+                    POSTGRES_PASSWORD: elo
+                    POSTGRES_DB: elo_digital
+                ports: ['5432:5432']
+                options: >-
+                    --health-cmd "pg_isready -U elo" --health-interval 5s --health-timeout 5s --health-retries 10
         env:
-          POSTGRES_USER: elo
-          POSTGRES_PASSWORD: elo
-          POSTGRES_DB: elo_digital
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U elo" --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      # Throwaway values for this run only; no repository secret is used.
-      DATABASE_URL: postgres://elo:elo@localhost:5432/elo_digital
-      DATABASE_URL_TEST: postgres://elo:elo@localhost:5432/elo_digital_test
-      JWT_SECRET: ci-only-jwt-secret-used-nowhere-else
-      SUPERADMIN_KEY: ci-only-superadmin-key-used-nowhere-else
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec turbo run lint build
-      - run: pnpm --filter @elo/core test
-      - run: pnpm --filter @elo/api db:test:prepare
-      - run: pnpm --filter @elo/api test
+            # Throwaway values for this run only; no repository secret is used.
+            DATABASE_URL: postgres://elo:elo@localhost:5432/elo_digital
+            DATABASE_URL_TEST: postgres://elo:elo@localhost:5432/elo_digital_test
+            JWT_SECRET: ci-only-jwt-secret-used-nowhere-else
+            SUPERADMIN_KEY: ci-only-superadmin-key-used-nowhere-else
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+            - uses: pnpm/action-setup@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm exec turbo run lint build
+            - run: pnpm --filter @elo/core test
+            - run: pnpm --filter @elo/api db:test:prepare
+            - run: pnpm --filter @elo/api test

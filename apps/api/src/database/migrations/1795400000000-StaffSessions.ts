@@ -2,10 +2,10 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /** Staff sessions that outlive a tab and a closed browser, ended by inactivity, sign-out or a new password. */
 export class StaffSessions1795400000000 implements MigrationInterface {
-  name = 'StaffSessions1795400000000';
+    name = 'StaffSessions1795400000000';
 
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
       CREATE TABLE "staff_sessions" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "user_id" uuid,
@@ -22,11 +22,15 @@ export class StaffSessions1795400000000 implements MigrationInterface {
         CONSTRAINT "FK_staff_sessions_user" FOREIGN KEY ("user_id") REFERENCES "staff_users"("id") ON DELETE CASCADE
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_staff_sessions_user_id" ON "staff_sessions" ("user_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_staff_sessions_expires_at" ON "staff_sessions" ("expires_at")`);
-  }
+        await queryRunner.query(
+            `CREATE INDEX "IDX_staff_sessions_user_id" ON "staff_sessions" ("user_id")`
+        );
+        await queryRunner.query(
+            `CREATE INDEX "IDX_staff_sessions_expires_at" ON "staff_sessions" ("expires_at")`
+        );
+    }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`DROP TABLE "staff_sessions"`);
-  }
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TABLE "staff_sessions"`);
+    }
 }

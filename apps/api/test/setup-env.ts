@@ -14,6 +14,9 @@ for (const [key, value] of Object.entries(file)) process.env[key] ??= value;
 
 const dev = process.env.DATABASE_URL;
 const test = process.env.DATABASE_URL_TEST;
-if (test && test === dev) throw new Error('DATABASE_URL_TEST must point to a different database than DATABASE_URL');
+if (test && test === dev)
+    throw new Error(
+        'DATABASE_URL_TEST must point to a different database than DATABASE_URL'
+    );
 if (test) process.env.DATABASE_URL = test;
 else delete process.env.DATABASE_URL;

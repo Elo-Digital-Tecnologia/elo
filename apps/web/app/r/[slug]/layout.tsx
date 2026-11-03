@@ -6,10 +6,10 @@ import { CurrentLink } from './_components/current-link';
 export const metadata: Metadata = { title: 'Equipe · Elo Digital' };
 
 export default function RestaurantLayout({ children }: { children: ReactNode }) {
-  return (
-    <AlertsRoot>
-      <CurrentLink />
-      {children}
-    </AlertsRoot>
-  );
+    return (
+        <AlertsRoot>
+            <CurrentLink />
+            {children}
+        </AlertsRoot>
+    );
 }

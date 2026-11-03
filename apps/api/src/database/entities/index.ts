@@ -1,23 +1,23 @@
-import { Restaurant } from './restaurant.entity';
-import { StaffUser } from './staff-user.entity';
-import { Payment } from './payment.entity';
-import { Category } from './category.entity';
-import { Product } from './product.entity';
-import { DiningTable } from './dining-table.entity';
-import { TableSession } from './table-session.entity';
-import { Order } from './order.entity';
-import { WaiterCall } from './waiter-call.entity';
 import { AuditLog } from './audit-log.entity';
-import { Media } from './media.entity';
-import { Review } from './review.entity';
-import { PushSubscription } from './push-subscription.entity';
-import { Plan } from './plan.entity';
-import { GuestPushSubscription } from './guest-push-subscription.entity';
-import { RestaurantPause } from './restaurant-pause.entity';
-import { Document } from './document.entity';
+import { Category } from './category.entity';
 import { Contract } from './contract.entity';
-import { StaffSession } from './staff-session.entity';
+import { DiningTable } from './dining-table.entity';
+import { Document } from './document.entity';
+import { GuestPushSubscription } from './guest-push-subscription.entity';
+import { Media } from './media.entity';
+import { Order } from './order.entity';
+import { Payment } from './payment.entity';
+import { Plan } from './plan.entity';
+import { Product } from './product.entity';
+import { PushSubscription } from './push-subscription.entity';
+import { RestaurantPause } from './restaurant-pause.entity';
 import { RestaurantSlugAlias } from './restaurant-slug-alias.entity';
+import { Restaurant } from './restaurant.entity';
+import { Review } from './review.entity';
+import { StaffSession } from './staff-session.entity';
+import { StaffUser } from './staff-user.entity';
+import { TableSession } from './table-session.entity';
+import { WaiterCall } from './waiter-call.entity';
 
 export * from './restaurant.entity';
 export * from './staff-user.entity';
@@ -41,24 +41,24 @@ export * from './staff-session.entity';
 export * from './restaurant-slug-alias.entity';
 
 export const ENTITIES = [
-  Restaurant,
-  StaffUser,
-  Payment,
-  Category,
-  Product,
-  DiningTable,
-  TableSession,
-  Order,
-  WaiterCall,
-  AuditLog,
-  Media,
-  Review,
-  PushSubscription,
-  Plan,
-  GuestPushSubscription,
-  RestaurantPause,
-  Document,
-  Contract,
-  StaffSession,
-  RestaurantSlugAlias,
+    Restaurant,
+    StaffUser,
+    Payment,
+    Category,
+    Product,
+    DiningTable,
+    TableSession,
+    Order,
+    WaiterCall,
+    AuditLog,
+    Media,
+    Review,
+    PushSubscription,
+    Plan,
+    GuestPushSubscription,
+    RestaurantPause,
+    Document,
+    Contract,
+    StaffSession,
+    RestaurantSlugAlias
 ];

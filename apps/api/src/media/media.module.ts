@@ -7,8 +7,8 @@ import { MediaAdminController, MediaPublicController } from './media.controller'
 import { MediaService } from './media.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Media, Product, Restaurant]), StaffModule],
-  controllers: [MediaAdminController, MediaPublicController, AvatarController],
-  providers: [MediaService],
+    imports: [TypeOrmModule.forFeature([Media, Product, Restaurant]), StaffModule],
+    controllers: [MediaAdminController, MediaPublicController, AvatarController],
+    providers: [MediaService]
 })
 export class MediaModule {}

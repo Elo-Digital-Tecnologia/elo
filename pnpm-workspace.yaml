@@ -1,7 +1,7 @@
 packages:
-  - apps/*
-  - packages/*
+    - apps/*
+    - packages/*
 
 # Install scripts are opt-in. @nestjs/core only prints a funding notice.
 allowBuilds:
-  '@nestjs/core': false
+    '@nestjs/core': false

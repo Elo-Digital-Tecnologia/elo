@@ -13,3 +13,6 @@ log.
 
 # VSCode
 .vscode
+
+# LLMs
+.claude
