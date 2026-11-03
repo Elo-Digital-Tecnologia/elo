@@ -97,6 +97,8 @@ export interface SessionStateView {
   table: { name: string; state: TableState; waiterName: string | null };
   orders: OrderView[];
   menu: CategoryView[];
+  /** Credential for the live feed: the socket's origin may not receive the session cookie. */
+  realtimeTicket: string;
 }
 
 export interface SubscriptionView {

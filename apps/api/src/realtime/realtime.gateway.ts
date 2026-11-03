@@ -1,4 +1,4 @@
-import { OnGatewayConnection, OnGatewayInit, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { OnGatewayConnection, OnGatewayInit, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import type { Server, Socket } from 'socket.io';
@@ -11,6 +11,7 @@ import { SessionsService } from '../sessions/sessions.service';
 import { StaffService } from '../staff/staff.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
 import { RealtimeService, staffRoom, tableRoom, memberRoom } from './realtime.service';
+import { TableTicketsService } from './table-tickets.service';
 
 export const TABLE_COOKIE = 'elo_table';
 
@@ -40,6 +41,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly staff: StaffService,
     @InjectRepository(TableSession) private readonly sessions: Repository<TableSession>,
     private readonly staffSessions: SessionsService,
+    private readonly tickets: TableTicketsService,
   ) {}
 
   afterInit(server: Server) {
@@ -47,8 +49,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
   }
 
   /**
-   * Funcionário: JWT em `auth.token`. Cliente: cookie de sessão da mesa.
-   * Mecanismos separados; sem credencial válida, a conexão cai.
+   * Staff: JWT in `auth.token`. Table guest: the session ticket in `auth.ticket`,
+   * or the session cookie when the page and the API share a host. Without a
+   * valid credential the connection drops. `ready` follows the room join: events
+   * before it may have been missed, so the client reloads its screen on it.
    */
   async handleConnection(client: Socket) {
     const reject = (reason: AuthError) => {
@@ -71,11 +75,19 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
       // A deactivated or archived member keeps a valid token for hours; the live feed stops at once.
       if (!user.impersonatedBy && !(await this.staff.access(user.sub).catch(() => null))) return reject('invalid');
       await client.join([staffRoom(user.restaurantId), memberRoom(user.sub)]);
+      client.emit('ready');
       return;
     }
-    const sessionId = parseCookie(client.handshake.headers.cookie, TABLE_COOKIE);
-    const session = sessionId ? await this.sessions.findOne({ where: { id: sessionId } }).catch(() => null) : null;
+    const sessionId = (await this.tickets.sessionOf(client.handshake.auth?.ticket)) ?? parseCookie(client.handshake.headers.cookie, TABLE_COOKIE);
+    const session = sessionId && /^[0-9a-f-]{36}$/.test(sessionId) ? await this.sessions.findOne({ where: { id: sessionId } }).catch(() => null) : null;
     if (!session || session.closedAt || session.expiresAt.getTime() < Date.now()) return reject('session');
     await client.join(tableRoom(session.tableId));
+    client.emit('ready');
+  }
+
+  /** Answers the client's liveness check: a socket that cannot answer is dead even if it looks connected. */
+  @SubscribeMessage('alive')
+  alive() {
+    return true;
   }
 }

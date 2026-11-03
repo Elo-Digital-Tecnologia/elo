@@ -46,6 +46,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const res = await fetch(path, {
     method: opts.method ?? (opts.body ? 'POST' : 'GET'),
     credentials: 'include',
+    cache: 'no-store',
     headers: {
       ...(opts.body ? { 'content-type': 'application/json' } : {}),
       ...(opts.token ? { authorization: `Bearer ${opts.token}` } : {}),

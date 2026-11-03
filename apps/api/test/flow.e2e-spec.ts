@@ -210,6 +210,37 @@ suite('fluxo da mesa (e2e)', () => {
     staff.close();
   });
 
+  it('realtime: a guest joins with the session ticket alone, and tickets and staff tokens never pass for each other', async () => {
+    const started = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
+    const ticket = started.body.realtimeTicket as string;
+    expect(typeof ticket).toBe('string');
+    await http().post('/public/session/open').set('Cookie', cookieOf(started)).expect(201);
+
+    // no cookie: another host than the API's, or a browser that keeps it from the socket
+    const guest = io(url, { auth: { ticket }, transports: ['websocket'] });
+    await waitFor(guest, 'ready');
+    expect(await guest.timeout(2000).emitWithAck('alive')).toBe(true);
+    const opened = waitFor(guest, 'table.updated');
+    await http().post(`/tables/${tableId}/validate-open`).set('Authorization', `Bearer ${waiter}`).expect(201);
+    expect(((await opened) as { state: string }).state).toBe('open');
+
+    for (const [opts, reason] of [
+      [{ auth: { ticket: waiter } }, 'session'],
+      [{ auth: { token: ticket } }, 'invalid'],
+    ] as const) {
+      const s = io(url, { ...opts, transports: ['websocket'], reconnection: false });
+      expect(await waitFor(s, 'auth_error')).toBe(reason);
+      s.close();
+    }
+    await http().get('/restaurant/me').set('Authorization', `Bearer ${ticket}`).expect(401);
+
+    await http().post(`/tables/${tableId}/close`).set('Authorization', `Bearer ${waiter}`).expect(201);
+    guest.close();
+    const late = io(url, { auth: { ticket }, transports: ['websocket'], reconnection: false });
+    expect(await waitFor(late, 'auth_error')).toBe('session');
+    late.close();
+  });
+
   it('waiter cancel needs reason and own table; customer cannot cancel in preparation', async () => {
     const s = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
     const cookie = cookieOf(s);

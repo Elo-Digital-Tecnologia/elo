@@ -16,6 +16,7 @@ import { OrdersService } from '../orders/orders.service';
 import { SubscribeDto, UnsubscribeDto } from '../push/push.controller';
 import { PushService } from '../push/push.service';
 import { TABLE_COOKIE } from '../realtime/realtime.gateway';
+import { TableTicketsService } from '../realtime/table-tickets.service';
 import { ReviewDto } from '../reviews/reviews.dto';
 import { ReviewsService } from '../reviews/reviews.service';
 import { RestaurantsService } from '../restaurants/restaurants.service';
@@ -51,6 +52,7 @@ export class PublicController {
     private readonly reviews: ReviewsService,
     private readonly push: PushService,
     private readonly config: ConfigService<Env, true>,
+    private readonly tickets: TableTicketsService,
   ) {}
 
   /** The restaurant's current link, for screens opened from an old one (also while its menu is off the air). */
@@ -208,6 +210,7 @@ export class PublicController {
       table: { name: table.name, state: table.state, waiterName: await this.tables.waiterNameOf(table) },
       orders,
       menu: await this.catalog.publicMenu(ctx.restaurantId),
+      realtimeTicket: this.tickets.sign(ctx.sessionId),
     };
   }
 

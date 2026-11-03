@@ -1,9 +1,9 @@
 'use client';
 
 import { BellRing, Check, DoorClosed, Lock, Minus, Plus, Smartphone, Store, Timer, Trash2, WifiOff } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, useRealtime } from '@elo/client';
-import { canRequestBill, type FieldError, fieldMessage, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
+import { canRequestBill, type FieldError, ORDER_IN_PROGRESS, fieldMessage, formatBRL, type ProductView, type SessionStateView } from '@elo/core';
 import { AlertsProvider, AnimatePresence, Button, Sheet, unlockAlertSound } from '@elo/ui';
 import { BillPanel } from '../../_components/bill-panel';
 import { MenuFooter } from '../../_components/menu-chrome';
@@ -64,6 +64,11 @@ function orderProblem(e: ApiError, cart: CartLine[]): string | null {
 const phaseFor = (code: string): Phase =>
   code === 'session_taken_over' ? 'taken' : code === 'session_rejected' ? 'rejected' : code === 'session_expired' ? 'expired' : 'ended';
 
+/** While the guest waits on the team, the screen also checks over HTTP at this pace, in case an event never arrives. */
+const WAITING_POLL_MS = 30_000;
+/** A short drop is not worth a banner. */
+const LINK_NOTICE_AFTER_MS = 3000;
+
 const ACTION = 'rounded-[18px] bg-white/95 px-5 py-3 text-sm font-bold text-leaf-700 shadow-sm transition active:scale-95 disabled:opacity-60';
 
 export default function TableMenu({ params }: { params: { slug: string; token: string } }) {
@@ -92,9 +97,13 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
   const cartKey = `elo.cart.${params.slug}.${params.token}`;
   const [cartLoaded, setCartLoaded] = useState(false);
 
+  /** Number of the latest state request: an older answer arriving late never overwrites a newer one. */
+  const latest = useRef(0);
   const refresh = useCallback(async () => {
+    const call = ++latest.current;
     try {
-      setState(await api<SessionStateView>('/api/public/session'));
+      const next = await api<SessionStateView>('/api/public/session');
+      if (call === latest.current) setState(next);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
     }
@@ -129,7 +138,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
     return () => window.removeEventListener('pointerdown', unlock);
   }, []);
 
-  useRealtime(
+  const link = useRealtime(
     {
       'table.updated': (p: unknown) => {
         void refresh();
@@ -152,12 +161,31 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
     null,
     phase === 'ready',
     {
+      ticket: state?.realtimeTicket,
       onResync: () => {
         void refresh();
         setBillVersion((v) => v + 1);
       },
     },
   );
+
+  const [linkDown, setLinkDown] = useState(false);
+  useEffect(() => {
+    if (link === 'connected') return setLinkDown(false);
+    const timer = setTimeout(() => setLinkDown(true), LINK_NOTICE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [link]);
+
+  // Waiting on the waiter or the kitchen: a slow HTTP check backs up the live feed.
+  const waiting =
+    state?.table.state === 'pending_open' || state?.table.state === 'pending_close' || !!state?.orders.some((o) => ORDER_IN_PROGRESS.includes(o.status));
+  useEffect(() => {
+    if (!waiting || phase !== 'ready') return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void refresh();
+    }, WAITING_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waiting, phase, refresh]);
 
   // Garçom encerrou a mesa: a sessão cai e o estado volta a falhar com 401.
   useEffect(() => {
@@ -340,6 +368,12 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
       <RestaurantInfo profile={state.restaurant} />
 
+      {linkDown && (
+        <p role="status" className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-warning/10 px-4 py-3 text-sm font-medium text-warning">
+          <WifiOff size={18} className="shrink-0" aria-hidden />
+          {link === 'offline' ? 'Sem internet. A tela se atualiza quando a conexão voltar.' : 'Reconectando… A tela continua se atualizando enquanto isso.'}
+        </p>
+      )}
       {message && !cartOpen && <p role="alert" className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">{message}</p>}
       {coming && (
         <p role="status" className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-success/10 px-4 py-3 text-sm font-medium text-success">

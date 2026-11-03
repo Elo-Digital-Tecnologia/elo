@@ -5,8 +5,9 @@ import { serviceOrigin } from './origin';
 export type RealtimeHandlers = Record<string, (payload: never) => void>;
 
 /**
- * `rejected`: the server refused the credential (expired token, suspended
- * restaurant, closed table session). The socket stops retrying.
+ * `connected` means the server has put the socket in its rooms (`ready`), not
+ * just that the transport is up. `rejected`: the server refused the credential
+ * (expired token, suspended restaurant, closed table session).
  */
 export type RealtimeStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'rejected';
 
@@ -19,38 +20,47 @@ interface Connection {
   rejection: RealtimeRejection | null;
   statusListeners: Set<() => void>;
   resyncListeners: Set<() => void>;
+  setTicket: (ticket: string | null | undefined) => void;
   dispose: () => void;
 }
 
-/** A tab hidden for longer than this may have missed events while frozen, even if the socket looks alive. */
-const STALE_AFTER_HIDDEN_MS = 15_000;
+/** How long the server has to answer a liveness check before the socket counts as dead. */
+const ALIVE_TIMEOUT_MS = 4000;
+/** Liveness checks while the page is in view: a half-open socket otherwise looks alive for over a minute. */
+const ALIVE_EVERY_MS = 20_000;
+/** A refused table session is tried again this many times, in case the refusal came from a stale credential. */
+const SESSION_RETRIES = 3;
+const DEFAULT_POLL_MS = 10_000;
 const connections = new Map<string, Connection>();
 
 /**
- * One socket per credential, shared by every hook on the page. It keeps the
- * screen consistent across drops: every reconnect, return to the tab or
- * return of the network triggers a resync, since events sent while the
- * socket was down are lost.
+ * One socket per credential, shared by every hook on the page. Events sent
+ * while the socket is not in its rooms are lost, so the screen reloads its
+ * data whenever the server confirms the socket is in (`ready`), on every
+ * return to the page, and the socket is checked for life while in view.
  */
-function acquire(token: string | null | undefined): Connection {
+function acquire(token: string | null | undefined, ticket: string | null | undefined): Connection {
   const key = token ?? 'table';
   const existing = connections.get(key);
   if (existing) {
     existing.refs++;
+    existing.setTicket(ticket);
     return existing;
   }
 
+  let currentTicket = ticket ?? null;
   const socket = io(serviceOrigin(3001, process.env.NEXT_PUBLIC_API_URL), {
     withCredentials: true,
-    auth: token ? { token } : {},
+    auth: (cb) => cb(token ? { token } : currentTicket ? { ticket: currentTicket } : {}),
     reconnectionDelay: 1000,
     reconnectionDelayMax: 10_000,
   });
 
-  let everConnected = false;
   let manualRetry: ReturnType<typeof setTimeout> | undefined;
   let manualAttempts = 0;
-  let hiddenAt: number | null = null;
+  let sessionRetry: ReturnType<typeof setTimeout> | undefined;
+  let sessionAttempts = 0;
+  let probing = false;
 
   const conn: Connection = {
     socket,
@@ -59,6 +69,9 @@ function acquire(token: string | null | undefined): Connection {
     rejection: null,
     statusListeners: new Set(),
     resyncListeners: new Set(),
+    setTicket: (t) => {
+      currentTicket = t ?? null;
+    },
     dispose: () => undefined,
   };
 
@@ -75,18 +88,44 @@ function acquire(token: string | null | undefined): Connection {
     socket.connect();
   };
 
+  /** Asks the server for an answer; no answer in time means the socket is dead, so it starts over. */
+  const probe = () => {
+    if (conn.status === 'rejected') return;
+    if (!socket.connected) return reconnectNow();
+    if (probing) return;
+    probing = true;
+    socket.timeout(ALIVE_TIMEOUT_MS).emit('alive', (err: Error | null) => {
+      probing = false;
+      if (!err || !socket.connected) return;
+      socket.disconnect();
+      setStatus('reconnecting');
+      socket.connect();
+    });
+  };
+
   socket.on('connect', () => {
     clearTimeout(manualRetry);
     manualAttempts = 0;
+  });
+
+  socket.on('ready', () => {
+    sessionAttempts = 0;
     setStatus('connected');
-    if (everConnected) resync();
-    everConnected = true;
+    resync();
   });
 
   socket.on('auth_error', (reason: RealtimeRejection) => {
     conn.rejection = reason;
     setStatus('rejected');
     resync();
+    // The page reloads its session on the resync: a session still alive hands over a fresh ticket for the next try.
+    if (!token && reason === 'session' && sessionAttempts < SESSION_RETRIES) {
+      sessionRetry = setTimeout(() => {
+        conn.rejection = null;
+        setStatus('reconnecting');
+        socket.connect();
+      }, 2000 * 2 ** sessionAttempts++);
+    }
   });
 
   socket.on('disconnect', (reason) => {
@@ -104,29 +143,34 @@ function acquire(token: string | null | undefined): Connection {
   });
 
   const onOnline = () => {
+    if (socket.connected) return probe();
     setStatus('reconnecting');
     reconnectNow();
   };
   const onOffline = () => setStatus('offline');
   const onVisibility = () => {
-    if (document.visibilityState === 'hidden') {
-      hiddenAt = Date.now();
-      return;
-    }
-    const wasHiddenFor = hiddenAt === null ? 0 : Date.now() - hiddenAt;
-    hiddenAt = null;
-    if (!socket.connected) reconnectNow();
-    else if (wasHiddenFor > STALE_AFTER_HIDDEN_MS) resync();
+    if (document.visibilityState !== 'visible') return;
+    if (!socket.connected) return reconnectNow();
+    probe();
+    // A phone freezes hidden pages: events may have been missed even with the socket alive.
+    resync();
   };
+  const heartbeat = setInterval(() => {
+    if (document.visibilityState === 'visible') probe();
+  }, ALIVE_EVERY_MS);
 
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
+  window.addEventListener('focus', probe);
   document.addEventListener('visibilitychange', onVisibility);
 
   conn.dispose = () => {
     clearTimeout(manualRetry);
+    clearTimeout(sessionRetry);
+    clearInterval(heartbeat);
     window.removeEventListener('online', onOnline);
     window.removeEventListener('offline', onOffline);
+    window.removeEventListener('focus', probe);
     document.removeEventListener('visibilitychange', onVisibility);
     socket.disconnect();
     connections.delete(key);
@@ -143,11 +187,19 @@ function release(conn: Connection) {
 export interface RealtimeOptions {
   /** Reloads the screen's data after a gap in which events may have been lost. */
   onResync?: () => void;
+  /** Table guest credential for the socket, from the session state. */
+  ticket?: string | null;
+  /**
+   * While the socket is not connected, `onResync` runs at this interval (ms), so
+   * the screen keeps up over plain HTTP. Defaults to 10 s when `onResync` is
+   * given; 0 turns it off.
+   */
+  pollWhileDown?: number;
 }
 
 /**
  * Subscribes to API events. Staff pass `token` (JWT); a table guest passes
- * nothing and authenticates with the session cookie.
+ * nothing and authenticates with `options.ticket` (or the session cookie).
  */
 export function useRealtime(
   handlers: RealtimeHandlers,
@@ -159,11 +211,16 @@ export function useRealtime(
   ref.current = handlers;
   const resyncRef = useRef(options.onResync);
   resyncRef.current = options.onResync;
+  const ticketRef = useRef(options.ticket);
+  ticketRef.current = options.ticket;
+  const connRef = useRef<Connection | null>(null);
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
+  const poll = options.pollWhileDown ?? (options.onResync ? DEFAULT_POLL_MS : 0);
 
   useEffect(() => {
     if (!enabled) return;
-    const conn = acquire(token);
+    const conn = acquire(token, ticketRef.current);
+    connRef.current = conn;
     const bound = Object.keys(ref.current).map((ev) => {
       const fn = (p: unknown) => ref.current[ev]?.(p as never);
       conn.socket.on(ev, fn);
@@ -178,9 +235,22 @@ export function useRealtime(
       for (const [ev, fn] of bound) conn.socket.off(ev, fn);
       conn.statusListeners.delete(onStatus);
       conn.resyncListeners.delete(onResync);
+      connRef.current = null;
       release(conn);
     };
   }, [token, enabled]);
+
+  useEffect(() => {
+    connRef.current?.setTicket(options.ticket);
+  }, [options.ticket]);
+
+  useEffect(() => {
+    if (!enabled || !poll || status === 'connected') return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') resyncRef.current?.();
+    }, poll);
+    return () => clearInterval(timer);
+  }, [enabled, poll, status]);
 
   return status;
 }
