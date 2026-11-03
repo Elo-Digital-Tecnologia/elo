@@ -1,0 +1,30 @@
+{
+    "$schema": "https://www.schemastore.org/prettierrc.json",
+    "printWidth": 90,
+    "tabWidth": 4,
+    "useTabs": false,
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "none",
+    "bracketSpacing": true,
+    "arrowParens": "always",
+    "endOfLine": "lf",
+    "quoteProps": "consistent",
+    "proseWrap": "never",
+    "plugins": ["@ianvs/prettier-plugin-sort-imports"],
+
+    "importOrder": [
+        "",
+        "<TYPES>",
+        "<TYPES>^#.+",
+        "<TYPES>^[.]",
+        "<TYPES>^(node:)",
+        "^@nestjs/(.*)$",
+        "<THIRD_PARTY_MODULES>",
+        "^#.+",
+        "^[.]",
+        "<BUILTIN_MODULES>"
+    ],
+    "importOrderParserPlugins": ["typescript", "jsx", "decorators-legacy"],
+    "importOrderCaseSensitive": true
+}
