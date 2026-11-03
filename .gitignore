@@ -1,14 +1,62 @@
-node_modules
-dist
+# Compiled output
+dist/
+node_modules/
+build/
 .next
 .next-*
 .turbo
-.env
 *.tsbuildinfo
-uploads
-
-# docs internas (não vão para o GitHub)
-PENDENCIAS.md
-REFERENCE.md
-NOTES.txt
 next-env.d.ts
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# environment variable files
+.env*
+!.env.example
+
+# temp directory
+.temp
+.tmp
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# LLM notes
+REFERENCE.*
+NOTES.*
+
+# API uploads
+uploads/

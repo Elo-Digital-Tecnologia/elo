@@ -1,5 +1,15 @@
-node_modules
-dist
-.next
-.turbo
-pnpm-lock.yaml
+# Build
+**/build
+**/dist
+**/coverage
+
+# Logs
+logs
+log.
+
+# Dependencies
+**/node_modules
+*-lock.*
+
+# VSCode
+.vscode
