@@ -24,8 +24,9 @@ interface Connection {
   dispose: () => void;
 }
 
-/** How long the server has to answer a liveness check before the socket counts as dead. */
-const ALIVE_TIMEOUT_MS = 4000;
+/** How long the server has to answer a liveness check; two misses in a row mean the socket is dead. */
+const ALIVE_TIMEOUT_MS = 8000;
+const ALIVE_MISSES = 2;
 /** Liveness checks while the page is in view: a half-open socket otherwise looks alive for over a minute. */
 const ALIVE_EVERY_MS = 20_000;
 /** A refused table session is tried again this many times, in case the refusal came from a stale credential. */
@@ -61,6 +62,7 @@ function acquire(token: string | null | undefined, ticket: string | null | undef
   let sessionRetry: ReturnType<typeof setTimeout> | undefined;
   let sessionAttempts = 0;
   let probing = false;
+  let misses = 0;
 
   const conn: Connection = {
     socket,
@@ -88,7 +90,7 @@ function acquire(token: string | null | undefined, ticket: string | null | undef
     socket.connect();
   };
 
-  /** Asks the server for an answer; no answer in time means the socket is dead, so it starts over. */
+  /** Asks the server for an answer; a slow link may miss one, but repeated silence means the socket is dead, so it starts over. */
   const probe = () => {
     if (conn.status === 'rejected') return;
     if (!socket.connected) return reconnectNow();
@@ -96,7 +98,9 @@ function acquire(token: string | null | undefined, ticket: string | null | undef
     probing = true;
     socket.timeout(ALIVE_TIMEOUT_MS).emit('alive', (err: Error | null) => {
       probing = false;
-      if (!err || !socket.connected) return;
+      if (!err) misses = 0;
+      if (!err || !socket.connected || ++misses < ALIVE_MISSES) return;
+      misses = 0;
       socket.disconnect();
       setStatus('reconnecting');
       socket.connect();
