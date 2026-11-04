@@ -7,10 +7,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { TableState } from '@elo/core/tables/table-state';
 import { canTransitionTable, canWaiterClose } from '@elo/core/tables/table-transitions';
 import QRCode from 'qrcode';
-import { EntityManager, In, IsNull, Repository } from 'typeorm';
+import { EntityManager, In, IsNull, MoreThan, Repository } from 'typeorm';
 import { UUID_PATTERN } from '#/common/constants.js';
 import { TenantRepository } from '#/common/database/tenant.repository.js';
 import { InvariantViolationException } from '#/common/exceptions/invariant-violation.exception.js';
+import { RateLimitExceededException } from '#/common/exceptions/rate-limit-exceeded.exception.js';
 import { AuditLogService } from '#/modules/audit-logs/audit-log.service.js';
 import { PauseService } from '#/modules/pauses/pause.service.js';
 import { GuestPushSubscriptionEntity } from '#/modules/push/entities/guest-push-subscription.entity.js';
@@ -29,7 +30,11 @@ import { SessionInvalidException } from './exceptions/session-invalid.exception.
 import { TableInUseException } from './exceptions/table-in-use.exception.js';
 import { TableNotFoundException } from './exceptions/table-not-found.exception.js';
 import { TableNotOpenException } from './exceptions/table-not-open.exception.js';
-import { QR_CODE, TABLE_TOKEN_BYTES } from './table.constants.js';
+import {
+    QR_CODE,
+    TABLE_SESSION_START_LIMIT,
+    TABLE_TOKEN_BYTES
+} from './table.constants.js';
 import { sessionClosedException } from './utils/session-closed-exception.js';
 import { randomBytes } from 'node:crypto';
 
@@ -249,7 +254,8 @@ export class TableService {
     /**
      * Opens (or resumes) the table session from the link. An invalid token and a token of
      * another restaurant answer the same: not found. One active session per table; other
-     * devices are blocked while it exists.
+     * devices are blocked while it exists. Each table accepts only a few new sessions per
+     * window, so a leaked link cannot keep opening them.
      */
     public async startSession(slug: string, token: string, cookieSessionId?: string) {
         const restaurant = await restaurantBySlug(this.restaurants.manager, slug);
@@ -265,8 +271,19 @@ export class TableService {
             // Table still closed: an abandoned session (the guest only scanned). A new scan takes over.
             // While the table is opening, open or closing, other devices are blocked.
             if (table.state !== TableState.CLOSED) throw new TableInUseException();
-            await this.closeSessions(table.id, 'taken_over');
         }
+        const recent = await this.sessions.count({
+            where: {
+                restaurantId: restaurant.id,
+                tableId: table.id,
+                createdAt: MoreThan(
+                    new Date(Date.now() - TABLE_SESSION_START_LIMIT.windowMs)
+                )
+            }
+        });
+        if (recent >= TABLE_SESSION_START_LIMIT.max)
+            throw new RateLimitExceededException();
+        if (active) await this.closeSessions(table.id, 'taken_over');
         const expiresInMs = this.configService.getOrThrow('session.tableExpiresInMs', {
             infer: true
         });
