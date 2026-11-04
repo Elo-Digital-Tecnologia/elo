@@ -1,21 +1,25 @@
 'use client';
 
-import type { OrderView, TableView, WaiterCallView } from '@elo/core';
-import { ApiError, api, upsertOrder, useRealtime } from '@elo/client';
-import { FIELD_RULES, ORDER_IN_PROGRESS } from '@elo/core';
-import {
-    AnimatePresence,
-    Badge,
-    Button,
-    ConfirmModal,
-    EmptyState,
-    Field,
-    GlassCard,
-    Modal,
-    PageHeader,
-    Textarea,
-    motion
-} from '@elo/ui';
+import type { OrderView } from '@elo/core/api/views/order.view';
+import type { TableView, WaiterCallView } from '@elo/core/api/views/table.view';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { upsertOrder } from '@elo/client/realtime/order-events';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { ORDER_IN_PROGRESS } from '@elo/core/orders/order-status';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { EmptyState } from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Textarea } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { AnimatePresence, motion } from '@elo/ui/components/motion/motion';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
+import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import {
     BellRing,
     CheckCheck,
@@ -92,7 +96,7 @@ function Panel() {
         load().catch(() => setError('Não foi possível carregar o salão.'));
     }, [load]);
 
-    // Rajada de eventos vira uma única recarga; falha de rede não derruba a tela.
+    // A burst of events becomes a single reload; a network failure does not take the screen down.
     const timer = useRef<ReturnType<typeof setTimeout>>();
     const reload = useCallback(() => {
         clearTimeout(timer.current);
@@ -100,7 +104,7 @@ function Panel() {
     }, [load]);
     useEffect(() => () => clearTimeout(timer.current), []);
 
-    // Pedidos entram no estado pelo próprio evento; mesas e chamados são listas pequenas.
+    // Orders enter the state through the event itself; tables and calls are small lists.
     const onOrder = useCallback(
         (o: OrderView) =>
             setOrders((list) => upsertOrder(list, o, (x) => ACTIVE.includes(x.status))),
@@ -133,20 +137,29 @@ function Panel() {
             await load();
         } catch (e) {
             if (onFields?.(e)) return false;
-            if (e instanceof ApiError && e.code === 'already_handled' && lostText) {
+            if (
+                e instanceof ApiError &&
+                e.code === ApiErrorCode.ALREADY_HANDLED &&
+                lostText
+            ) {
                 setNotice(
-                    lostText(typeof e.data.by === 'string' ? e.data.by : 'outro garçom')
+                    lostText(
+                        e.detailsOf(ApiErrorCode.ALREADY_HANDLED)[0]?.by ?? 'outro garçom'
+                    )
                 );
                 await load().catch(() => undefined);
-            } else if (e instanceof ApiError && e.code === 'restaurant_closed') {
+            } else if (
+                e instanceof ApiError &&
+                e.code === ApiErrorCode.RESTAURANT_CLOSED
+            ) {
                 setError(
                     'O restaurante está fechado agora: recuse o pedido de abertura e avise o cliente.'
                 );
-            } else if (e instanceof ApiError && e.code === 'not_your_table') {
+            } else if (e instanceof ApiError && e.code === ApiErrorCode.NOT_YOUR_TABLE) {
                 setError(
                     'Só quem atende a mesa pode cancelar ou devolver pedidos. Use "Assumir" para ficar com ela.'
                 );
-            } else if (e instanceof ApiError && e.status === 409) {
+            } else if (e instanceof ApiError && e.status === HTTP_STATUS.CONFLICT) {
                 setNotice('Esta mesa mudou em outro aparelho. A lista foi atualizada.');
                 await load().catch(() => undefined);
             } else {
@@ -562,7 +575,7 @@ function Item({ children, fresh }: { children: React.ReactNode; fresh?: boolean 
             initial={{ opacity: 0, x: -24 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 24 }}
-            transition={{ type: 'spring', stiffness: 360, damping: 30 }}
+            transition={{ ...MOTION_SPRINGS.panel }}
         >
             <GlassCard
                 className={`flex items-center justify-between gap-3 p-4 ${fresh ? 'flash-new' : ''}`}

@@ -1,11 +1,14 @@
 'use client';
 
-import type { Permission } from '@elo/core';
-import type { NavItem } from '@elo/ui';
+import type { Permission } from '@elo/core/roles/permissions';
+import type { NavItem } from '@elo/ui/components/layout/app-shell';
 import type { ReactNode } from 'react';
-import { useAuth, useServiceOrigin } from '@elo/client';
-import { upgradePermissions } from '@elo/core';
-import { AppShell, Aurora, SkeletonCards } from '@elo/ui';
+import { useServiceOrigin } from '@elo/client/origin/service-origin';
+import { useAuth } from '@elo/client/session/auth';
+import { upgradePermissions } from '@elo/core/roles/permissions';
+import { SkeletonCards } from '@elo/ui/components/feedback/states';
+import { AppShell } from '@elo/ui/components/layout/app-shell';
+import { Aurora } from '@elo/ui/components/motion/aurora';
 import { BookOpen, Building2, Layers, LayoutDashboard, UsersRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect } from 'react';
@@ -36,7 +39,7 @@ const NAV: (NavItem & { perm?: Permission })[] = [
 /** The hosted API may keep its docs closed (`API_DOCS`); the web build then hides the link. */
 const API_DOCS = process.env.NEXT_PUBLIC_API_DOCS !== 'false';
 
-/** Exige login de equipe Elo Digital; itens do menu seguem as permissões. Fica no layout e não remonta entre as abas. */
+/** Requires an Elo Digital team sign-in; menu items follow the permissions. Lives in the layout and does not remount between tabs. */
 export function AdminShell({ children }: { children: ReactNode }) {
     const router = useRouter();
     const { token, user, ready, logout } = useAuth('admin');

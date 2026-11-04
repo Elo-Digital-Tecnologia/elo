@@ -1,0 +1,80 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import { AnimatePresence, m as motion, useReducedMotion } from 'framer-motion';
+import { usePathname } from 'next/navigation';
+import { MOTION_DURATIONS, MOTION_EASE } from '../../theme/motion';
+
+/**
+ * Route transition: the new page rises and fades in (transform and opacity only).
+ * There is no exit animation on purpose: the shell stays mounted between tabs, and
+ * waiting for the old page to leave could hold the new one back, leaving it blank.
+ */
+export function PageTransition({ children }: { children: ReactNode }) {
+    const path = usePathname();
+    const reduce = useReducedMotion();
+    return (
+        <motion.div
+            key={path}
+            initial={reduce ? false : { opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: MOTION_DURATIONS.page, ease: MOTION_EASE }}
+        >
+            {children}
+        </motion.div>
+    );
+}
+
+/** List that enters in cascade. Children must be <StaggerItem>. */
+export function Stagger({
+    children,
+    className = '',
+    gap = 0.06
+}: {
+    children: ReactNode;
+    className?: string;
+    gap?: number;
+}) {
+    return (
+        <motion.div
+            className={className}
+            initial="hidden"
+            animate="show"
+            variants={{ show: { transition: { staggerChildren: gap } } }}
+        >
+            {children}
+        </motion.div>
+    );
+}
+
+export function StaggerItem({
+    children,
+    className = ''
+}: {
+    children: ReactNode;
+    className?: string;
+}) {
+    return (
+        <motion.div
+            className={`min-w-0 ${className}`}
+            variants={{
+                hidden: { opacity: 0, y: 22, scale: 0.97 },
+                show: {
+                    opacity: 1,
+                    y: 0,
+                    scale: 1,
+                    transition: { duration: MOTION_DURATIONS.reveal, ease: MOTION_EASE }
+                }
+            }}
+            exit={{
+                opacity: 0,
+                scale: 0.94,
+                transition: { duration: MOTION_DURATIONS.quick }
+            }}
+        >
+            {children}
+        </motion.div>
+    );
+}
+
+export { AnimatePresence, motion };

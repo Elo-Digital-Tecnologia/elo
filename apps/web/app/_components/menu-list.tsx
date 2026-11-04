@@ -1,14 +1,18 @@
 'use client';
 
-import type { CategoryView, ProductTag, ProductView } from '@elo/core';
-import { PRODUCT_TAG_LABEL, formatBRL } from '@elo/core';
-import { Input, motion } from '@elo/ui';
+import type { CategoryView, ProductView } from '@elo/core/api/views/catalog.view';
+import type { ProductTag } from '@elo/core/catalog/product-tags';
+import { formatBRL } from '@elo/core/money/cents';
+import { Input } from '@elo/ui/components/forms/fields';
+import { motion } from '@elo/ui/components/motion/motion';
+import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import { Plus, Search, Star, UtensilsCrossed, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
 
 const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-/** Filtra por nome ou descrição, sem diferenciar acento nem maiúscula. Categorias sem resultado saem. */
+/** Filters by name or description, ignoring accents and case. Categories without results are dropped. */
 export function filterMenu(menu: CategoryView[], query: string): CategoryView[] {
     const q = plain(query.trim());
     if (!q) return menu;
@@ -22,7 +26,7 @@ export function filterMenu(menu: CategoryView[], query: string): CategoryView[] 
         .filter((c) => c.products.length > 0);
 }
 
-/** Campo de busca do cardápio. */
+/** Menu search field. */
 export function MenuSearch({
     value,
     onChange
@@ -72,7 +76,7 @@ export function TagChips({ tags }: { tags: ProductTag[] }) {
     );
 }
 
-/** Carrossel dos produtos marcados como destaque. */
+/** Carousel of the products marked as featured. */
 export function Highlights({
     menu,
     onPick
@@ -144,7 +148,7 @@ export function Highlights({
     );
 }
 
-/** Abas de categoria presas ao topo. A aba ativa acompanha a rolagem; tocar leva à seção. */
+/** Category tabs pinned to the top. The active tab follows the scroll; tapping goes to the section. */
 export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
     const [active, setActive] = useState(menu[0]?.id);
     const bar = useRef<HTMLDivElement>(null);
@@ -168,7 +172,7 @@ export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
         return () => io.disconnect();
     }, [menu]);
 
-    // Mantém a aba ativa à vista dentro da barra, sem mexer na rolagem da página.
+    // Keeps the active tab in view inside the bar, without moving the page scroll.
     useEffect(() => {
         const tab = bar.current?.querySelector<HTMLElement>(`[data-cat="${active}"]`);
         if (tab && bar.current)
@@ -199,9 +203,7 @@ export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
                                 layoutId="tab-line"
                                 className="absolute inset-x-3 bottom-0 h-[3px] rounded-t-full bg-brand"
                                 transition={{
-                                    type: 'spring',
-                                    stiffness: 500,
-                                    damping: 40
+                                    ...MOTION_SPRINGS.list
                                 }}
                             />
                         )}
@@ -231,7 +233,7 @@ export function ProductPlaceholder({
 }
 
 function Photo({ product }: { product: ProductView }) {
-    // Banco de imagens: a lista usa a miniatura; links externos seguem como estão.
+    // Image library: the list uses the thumbnail; external links stay as they are.
     const src = product.imageUrl!.startsWith('/api/media/')
         ? product.imageUrl!.replace(/\.webp$/, '-sm.webp')
         : product.imageUrl!;
@@ -305,7 +307,7 @@ function Row({
     );
 }
 
-/** Lista do cardápio em linhas. Sem `onPick`, é somente consulta (link fixo). */
+/** Menu list in rows. Without `onPick`, it is read-only (fixed link). */
 export function MenuList({
     menu,
     onPick,

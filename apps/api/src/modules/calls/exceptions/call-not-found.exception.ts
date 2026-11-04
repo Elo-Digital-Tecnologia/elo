@@ -1,0 +1,14 @@
+import { HttpStatus } from '@nestjs/common';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { ApiHttpException } from '#/common/exceptions/api.exception.js';
+
+export class CallNotFoundException extends ApiHttpException<ApiErrorCode.CALL_NOT_FOUND> {
+    constructor() {
+        super({
+            code: ApiErrorCode.CALL_NOT_FOUND,
+            message: 'Call not found',
+            details: [],
+            status: HttpStatus.NOT_FOUND
+        });
+    }
+}

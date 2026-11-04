@@ -1,11 +1,18 @@
 'use client';
 
-import type { PushState } from '@elo/client';
-import { api, enableGuestPush, pushState, pushSupported } from '@elo/client';
-import { guestAlertOf } from '@elo/core';
-import { Button, unlockAlertSound, useAlerts } from '@elo/ui';
+import type { PushState } from '@elo/client/push/push-subscription';
+import { api } from '@elo/client/http/api-client';
+import {
+    enableGuestPush,
+    pushState,
+    pushSupported
+} from '@elo/client/push/push-subscription';
+import { guestAlertOf } from '@elo/core/alerts/alerts';
+import { unlockAlertSound, useAlerts } from '@elo/ui/components/feedback/alerts';
+import { Button } from '@elo/ui/components/forms/button';
 import { BellRing, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { guestAlertText } from '#/_lib/messages/alerts';
 
 const DISMISS_KEY = (token: string) => `elo.guest-alerts.${token}`;
 
@@ -22,7 +29,7 @@ export function useGuestAlertHandlers(push: PushState, quiet: (kind: string) => 
             if (!alert || quiet(alert.kind)) return;
             const background = document.visibilityState === 'hidden';
             notify(
-                { title: alert.title, body: alert.body, tag: alert.tag },
+                { ...guestAlertText(alert), tag: alert.tag },
                 { silent: background && push === 'on' }
             );
         },

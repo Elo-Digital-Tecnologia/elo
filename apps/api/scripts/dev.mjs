@@ -1,5 +1,5 @@
-// Dev da API: recompila em modo watch e reinicia o servidor quando a API ou o @elo/core mudam.
-// (O core é lido do dist; sem isso, mudar o core exigia rodar o build à mão.)
+// API dev: rebuilds in watch mode and restarts the server when the API or @elo/core change.
+// (core is read from dist; without this, changing core required a manual build.)
 
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc');
 const run = (args) => spawn(process.execPath, args, { stdio: 'inherit' });
 
-// Primeira compilação completa: o servidor precisa de dist/main.js.
+// First full build: the server needs dist/main.js.
 const first = run([tsc, '-p', 'tsconfig.build.json']);
 first.on('exit', (code) => {
     if (code !== 0) process.exit(code ?? 1);

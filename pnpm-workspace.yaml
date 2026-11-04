@@ -5,3 +5,5 @@ packages:
 # Install scripts are opt-in. @nestjs/core only prints a funding notice.
 allowBuilds:
     '@nestjs/core': false
+    # The platform binary comes from an optional dependency; its install script is not needed.
+    '@swc/core': false

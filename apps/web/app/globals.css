@@ -1,6 +1,6 @@
-@import '@elo/ui/fonts.css';
-@import '@elo/ui/theme.css';
-@import '@elo/ui/glass.css';
+@import '@elo/ui/styles/fonts.css';
+@import '@elo/ui/styles/theme.css';
+@import '@elo/ui/styles/glass.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -1,29 +1,27 @@
 'use client';
 
-import type { Permission } from '@elo/core';
-import { ApiError, api } from '@elo/client';
+import type { Permission } from '@elo/core/roles/permissions';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { upgradePermissions, withRequired } from '@elo/core/roles/permissions';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    FIELD_RULES,
-    PERMISSION_GROUPS,
-    upgradePermissions,
-    withRequired
-} from '@elo/core';
-import {
-    ActionMenu,
-    Badge,
-    Button,
-    DataTable,
     EmptyState,
     ErrorState,
-    Field,
-    Input,
-    Modal,
-    PageHeader,
-    PasswordInput,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, PasswordInput } from '@elo/ui/components/forms/fields';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { ActionMenu } from '@elo/ui/components/overlays/action-menu';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { KeyRound, Power, ShieldCheck, Trash2, UserPlus, UsersRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { ELO_TEAM_ERRORS } from '#/_lib/messages/errors';
+import { LABELED_PERMISSION_GROUPS } from '#/_lib/messages/permissions';
 import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
 
@@ -43,20 +41,14 @@ const CHECKS = {
 };
 const RESET_CHECKS = { password: rule(FIELD_RULES.password) };
 
-const ERRORS: Record<string, string> = {
-    username_taken: 'Esse usuário já existe na equipe Elo.',
-    cannot_grant: 'Você marcou uma permissão que não pode conceder.',
-    self: 'Você não pode alterar a própria conta por aqui.'
-};
-
 /** A known refusal from the API in words, or the honest "something failed". */
 const messageOf = (e: unknown) =>
-    (e instanceof ApiError && ERRORS[e.code]) || unexpected(e);
+    (e instanceof ApiError && ELO_TEAM_ERRORS[e.code]) || unexpected(e);
 
 /** "Restaurantes: Ver, Cadastrar" per group, so a member with many permissions still fits in a row. */
 function summary(perms: string[]) {
     const held = upgradePermissions(perms);
-    return PERMISSION_GROUPS.map((g) => ({
+    return LABELED_PERMISSION_GROUPS.map((g) => ({
         label: g.label,
         items: g.items.filter((i) => held.includes(i.permission)).map((i) => i.label)
     })).filter((g) => g.items.length);
@@ -82,7 +74,7 @@ function PermissionPicker({
             <legend className="mb-1 text-sm font-medium">
                 O que esta pessoa pode fazer
             </legend>
-            {PERMISSION_GROUPS.map((g) => (
+            {LABELED_PERMISSION_GROUPS.map((g) => (
                 <div key={g.label}>
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                         {g.label}
@@ -135,7 +127,9 @@ function View() {
     const [list, setList] = useState<Member[] | null>(null);
     const [failed, setFailed] = useState(false);
     const [open, setOpen] = useState(false);
-    const form = useForm(EMPTY, CHECKS, { username_taken: ERRORS.username_taken });
+    const form = useForm(EMPTY, CHECKS, {
+        [ApiErrorCode.USERNAME_TAKEN]: ELO_TEAM_ERRORS[ApiErrorCode.USERNAME_TAKEN]
+    });
     const [perms, setPerms] = useState<Permission[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [listError, setListError] = useState<string | null>(null);

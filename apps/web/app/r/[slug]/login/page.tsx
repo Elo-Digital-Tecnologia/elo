@@ -1,8 +1,16 @@
 'use client';
 
-import type { FieldError, PublicMenuView } from '@elo/core';
-import { ApiError, api, useAuth } from '@elo/client';
-import { AuthLayout, Button, Field, Input, PasswordInput } from '@elo/ui';
+import type { PublicMenuView } from '@elo/core/api/views/restaurant.view';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { useAuth } from '@elo/client/session/auth';
+import { CREDENTIAL_INPUT_LIMITS } from '@elo/core/fields/field-rules';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, PasswordInput } from '@elo/ui/components/forms/fields';
+import { AuthLayout } from '@elo/ui/components/layout/auth-layout';
+import { Field } from '@elo/ui/components/layout/section';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { unexpected, useForm } from '../../../_lib/use-form';
@@ -27,7 +35,12 @@ export default function Login() {
     useEffect(() => {
         api<PublicMenuView>(`/api/public/${slug}/menu`)
             .then((r) => setName(r.restaurant.name))
-            .catch((e) => e instanceof ApiError && e.status === 404 && setMissing(true));
+            .catch(
+                (e) =>
+                    e instanceof ApiError &&
+                    e.status === HTTP_STATUS.NOT_FOUND &&
+                    setMissing(true)
+            );
     }, [slug]);
 
     useEffect(() => {
@@ -47,7 +60,7 @@ export default function Login() {
             setToken(res.accessToken);
         } catch (err) {
             setError(
-                err instanceof ApiError && err.status === 401
+                err instanceof ApiError && err.status === HTTP_STATUS.UNAUTHORIZED
                     ? 'Usuário ou senha incorretos.'
                     : unexpected(err)
             );
@@ -81,7 +94,7 @@ export default function Login() {
                 <Field label="Senha" error={form.errors.password}>
                     <PasswordInput
                         {...form.bind('password')}
-                        maxLength={128}
+                        maxLength={CREDENTIAL_INPUT_LIMITS.password}
                         autoComplete="current-password"
                     />
                 </Field>

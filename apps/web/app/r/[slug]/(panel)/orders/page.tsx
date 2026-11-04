@@ -1,39 +1,38 @@
 'use client';
 
-import type {
-    OrderHistoryItem,
-    OrderHistoryPage,
-    OrderStatus,
-    TableView
-} from '@elo/core';
-import { api } from '@elo/client';
-import { ORDER_HISTORY_FLOOR_DAYS, dayError, formatBRL } from '@elo/core';
+import type { OrderHistoryItem, OrderHistoryPage } from '@elo/core/api/views/order.view';
+import type { TableView } from '@elo/core/api/views/table.view';
+import type { OrderStatus } from '@elo/core/orders/order-status';
+import { api } from '@elo/client/http/api-client';
+import { dayError } from '@elo/core/fields/field-rules';
+import { formatBRL } from '@elo/core/money/cents';
+import { ORDER_HISTORY_FLOOR_DAYS } from '@elo/core/orders/order-status';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    Badge,
-    Button,
-    DateInput,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    PageHeader,
-    Pagination,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { DateInput } from '@elo/ui/components/forms/date-fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Pagination } from '@elo/ui/components/navigation/pagination';
 import { ChevronDown, ClipboardList } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { ORDER_HISTORY_STATUS_TEXTS } from '#/_lib/messages/orders';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 const STATUS: Record<
     OrderStatus,
     { label: string; tone: 'neutral' | 'info' | 'warning' | 'success' | 'danger' }
 > = {
-    sent: { label: 'Enviado', tone: 'info' },
-    received: { label: 'Recebido', tone: 'info' },
-    preparing: { label: 'Em preparo', tone: 'warning' },
-    ready: { label: 'Pronto', tone: 'success' },
-    cancelled: { label: 'Cancelado', tone: 'danger' },
-    returned: { label: 'Devolvido', tone: 'neutral' }
+    sent: { label: ORDER_HISTORY_STATUS_TEXTS.sent.label, tone: 'info' },
+    received: { label: ORDER_HISTORY_STATUS_TEXTS.received.label, tone: 'info' },
+    preparing: { label: ORDER_HISTORY_STATUS_TEXTS.preparing.label, tone: 'warning' },
+    ready: { label: ORDER_HISTORY_STATUS_TEXTS.ready.label, tone: 'success' },
+    cancelled: { label: ORDER_HISTORY_STATUS_TEXTS.cancelled.label, tone: 'danger' },
+    returned: { label: ORDER_HISTORY_STATUS_TEXTS.returned.label, tone: 'neutral' }
 };
 
 const ymd = (d: Date) => d.toLocaleDateString('sv-SE');

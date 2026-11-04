@@ -1,6 +1,6 @@
 'use client';
 
-import { api } from '@elo/client';
+import { api } from '@elo/client/http/api-client';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 

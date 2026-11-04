@@ -1,30 +1,28 @@
 'use client';
 
-import type { PlanView } from '@elo/core';
-import { ApiError, api } from '@elo/client';
+import type { PlanView } from '@elo/core/billing/billing';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { BILLING_LIMITS } from '@elo/core/billing/billing';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { formatBRL, parseCents } from '@elo/core/money/cents';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    BILLING_LIMITS,
-    FIELD_RULES,
-    cycleLabel,
-    formatBRL,
-    parseCents
-} from '@elo/core';
-import {
-    Badge,
-    Button,
-    ConfirmModal,
-    DataTable,
     EmptyState,
     ErrorState,
-    Field,
-    Input,
-    Modal,
-    MoneyInput,
-    PageHeader,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, MoneyInput } from '@elo/ui/components/forms/fields';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { Layers, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { centsToInput } from '#/_lib/format';
+import { cycleLabel } from '#/_lib/messages/billing';
 import { money, rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
 
@@ -38,7 +36,7 @@ const CHECKS = {
 
 const toForm = (p: PlanView): Form => ({
     name: p.name,
-    price: (p.priceCents / 100).toFixed(2).replace('.', ','),
+    price: centsToInput(p.priceCents),
     cycleMonths: String(p.cycleMonths),
     active: p.active
 });
@@ -111,7 +109,7 @@ function View() {
             await load();
         } catch (e) {
             setError(
-                e instanceof ApiError && e.code === 'plan_in_use'
+                e instanceof ApiError && e.code === ApiErrorCode.PLAN_IN_USE
                     ? 'Há restaurantes neste plano. Desative-o em vez de excluir.'
                     : 'Não foi possível excluir.'
             );

@@ -1,4 +1,4 @@
-import { api } from '@elo/client';
+import { api } from '@elo/client/http/api-client';
 
 /** Saves the restaurant's exported data as a JSON file on the viewer's device. */
 export async function downloadExport(id: string, slug: string, token: string | null) {

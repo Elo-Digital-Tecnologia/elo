@@ -5,10 +5,26 @@
             "dependsOn": ["^build"],
             "inputs": ["$TURBO_DEFAULT$", ".env*"],
             "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
-            "env": ["API_URL", "NEXT_PUBLIC_*", "NEXT_OUTPUT", "NEXT_DIST_DIR"]
+            "env": [
+                "API_URL",
+                "NEXT_PUBLIC_*",
+                "NEXT_OUTPUT",
+                "NEXT_DIST_DIR",
+                "API_PREFIX"
+            ]
         },
-        "dev": { "dependsOn": ["^build"], "cache": false, "persistent": true },
-        "lint": { "dependsOn": ["^build"] },
-        "test": { "dependsOn": ["^build"] }
-    }
+        "dev": {
+            "dependsOn": ["^build"],
+            "cache": false,
+            "persistent": true
+        },
+        "lint": {
+            "dependsOn": ["^build"]
+        },
+        "test": {
+            "dependsOn": ["^build"]
+        }
+    },
+    "globalEnv": ["NODE_ENV"],
+    "globalDependencies": [".env"]
 }

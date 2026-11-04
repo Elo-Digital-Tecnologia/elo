@@ -1,15 +1,15 @@
 'use client';
 
-import type { ReviewSummaryView } from '@elo/core';
-import { api } from '@elo/client';
+import type { ReviewSummaryView } from '@elo/core/api/views/review.view';
+import { api } from '@elo/client/http/api-client';
 import {
-    Button,
     EmptyState,
     ErrorState,
-    GlassCard,
-    PageHeader,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
 import { MessageSquareText, Star } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { RequireRoles, useStaff } from '../../../_components/shell';

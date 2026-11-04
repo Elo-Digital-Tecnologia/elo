@@ -1,50 +1,38 @@
 # Elo Digital
 
-Startup project offering digital products and services. The first product is **Elo Cardápio**: a subscription-based digital menu for restaurants, pizzerias, burger joints, etc. Guests scan a QR code / NFC tag on their table, build an order, and the waiter, kitchen and cashier handle it in real time. Payments are not processed by the system.
-
-When something is missing or unclear, ask instead of inventing.
+Startup offering digital products. First product, **Elo Cardápio**: a subscription digital menu for restaurants. Guests scan a QR code / NFC tag, order, and waiter, kitchen and cashier handle it in real time. Payments are not processed by the system. When something is missing or unclear, ask instead of inventing.
 
 ## Monorepo
 
-pnpm workspaces + Turborepo, TypeScript everywhere (Node >= 22).
+pnpm + Turborepo, TypeScript ESM, Node >= 26.
 
-| Path | Description |
+| Path | What |
 | --- | --- |
-| `apps/api` | NestJS 10 + TypeORM + PostgreSQL. REST, WebSockets (Socket.IO), Swagger, throttling |
-| `apps/web` | Next.js 14 (App Router) + Tailwind. Public menu, restaurant dashboard (waiter, kitchen, cashier, admin) and Elo Digital admin (`/admin`) in a single app |
-| `packages/core` | Shared domain code: roles, permissions, API types, money, bill, order and table state, subscription rules, slug |
-| `packages/client` | Frontend API client, realtime and session helpers |
-| `packages/ui` | Design system: theme tokens, liquid glass styles, shared components |
-| `packages/config` | Shared tsconfig and ESLint config |
+| `apps/api` | NestJS + TypeORM (Postgres). See `apps/api/CLAUDE.md` |
+| `apps/web` | Next.js (App Router) + Tailwind: public menu, restaurant panels, Elo admin |
+| `packages/core` | Shared domain logic and API types, by domain (`@elo/core/<domain>/<file>`) |
+| `packages/client` | API client, realtime and session (`@elo/client/<area>/<file>`) |
+| `packages/ui` | Design system: tokens, styles, components (`@elo/ui/components/<group>/<file>`) |
+| `packages/config` | Shared tsconfig and ESLint |
 
-## Commands
+`dev`, `build`, `lint`, `test` run from the root (Turborepo). `NODE_ENV` lives in the root `.env`; each app has its own `.env` (see `.env.example`). Never commit secrets.
 
-```sh
-pnpm --filter @elo/api migration:run
-pnpm --filter @elo/api migration:generate
-```
+## Domain
 
-Other scripts (`dev`, `build`, `lint`, `test`, `format`) run through Turborepo from the root. Each app keeps its env vars in its own `.env` (`apps/api/.env`, `apps/web/.env`; see the `.env.example` next to it). Never commit secrets.
+- Roles: `superadmin`, `elo_admin`; `restaurant_admin`, `manager`, `waiter`, `kitchen`, `cashier`.
+- Table link `/<slug>/<table-token>` (permanent random token); `/<slug>` is the read-only menu.
+- Guest opens the menu, asks to open the table, the waiter validates, orders go to the kitchen, the guest asks for the bill, only the waiter closes the table. Guests use a short cookie session, not the staff JWT.
+- Subscription: manual payments, 7-day grace, then staff access is suspended (menu stays up).
+- Every restaurant-owned row carries the restaurant id and every query filters by it on the server.
+- LGPD: only the manager's name and contact; no guest personal data.
 
-## Domain essentials
+## Rules
 
-- **Roles**: `superadmin`, `elo_admin` (platform staff); `restaurant_admin`, `waiter`, `kitchen`, `cashier` (restaurant staff). RBAC via guards.
-- **Table URL**: `/<restaurant-slug>/<table-token>`. The token is long, random, permanent and server-generated. The fixed link `/<slug>` is menu-only (read-only).
-- **Table flow**: guest opens the menu, requests to open the table, the waiter validates it, the guest sends the order to the kitchen, the kitchen updates the status, the guest requests the bill, and only the waiter closes the table (which also ends the guest session). One shared order per table.
-- **Guest session**: separate cookie-based session bound to the table, short-lived. It is not the JWT used by staff.
-- **Orders**: statuses sent, received, preparing, ready. Cancellation rules depend on the role and on the status (see `packages/core`).
-- **Subscription**: manual payments, 7-day grace period after the due date, then staff access is suspended (the public menu stays up).
-- **Multi-tenancy**: every restaurant-owned entity carries the restaurant id and every query is filtered by it on the server.
-- **Privacy (LGPD)**: only collect the restaurant manager's name and contact. Never collect personal data from guests.
-
-## Principles
-
-- TypeORM migrations are mandatory. `synchronize` stays off outside local development.
-- Shared logic, types and validation go in `packages/core`. Check `core` and `@elo/ui` for an existing equivalent before creating something new.
-- UI: theme values come from the tokens in `@elo/ui`, never hardcoded in components.
-
-## Code Style
-
-- Every documentation text should be written in English, even the comments.
-- Avoid using comments; the code should speak for itself. However, for important sections that are difficult to understand without additional documentation, always use TSDoc (for TypeScript files).
-- Well-structured code is essential. Always consider the best way to organize files and directories to avoid having "loose" files that make it difficult to understand the context in which they belong.
+- English for code, comments and docs. Few comments; TSDoc only where the code cannot explain itself.
+- No magic values: name them in a constants file of their module, in core when shared, or in the env when they vary by deployment.
+- UI text lives only in `apps/web/app/_lib/messages/`. Core, client, ui and the API send codes and data, never text (`@elo/ui` reads its texts from `UiTextsProvider`).
+- Shared logic and types go to `packages/core`; check core and `@elo/ui` before writing something new. Theme values come from `@elo/ui` tokens.
+- Folders by subject; one class/component per file; import each file directly (no barrels).
+- Naming: `camelCase` values, `PascalCase` types, `UPPER_SNAKE_CASE` constants and enum members, `kebab-case` files. `interface` for shapes, `type` for unions. `import type` for type-only imports.
+- The database schema synchronizes in development; generate the first migration only before the first production deploy.
+- Commits: Conventional Commits, lowercase message.

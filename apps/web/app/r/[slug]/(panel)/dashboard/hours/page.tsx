@@ -1,23 +1,28 @@
 'use client';
 
-import type { FieldError, PauseList, PauseProblem, PauseView } from '@elo/core';
-import { ApiError, api, useRealtime } from '@elo/client';
-import { FIELD_RULES, PAUSE_LIMITS, availability } from '@elo/core';
+import type { PauseList, PauseView } from '@elo/core/api/views/pause.view';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { availability } from '@elo/core/opening-hours/open-status';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    Badge,
-    Button,
-    ConfirmModal,
-    DateTimeInput,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    Modal,
-    PageHeader,
-    Pagination,
-    SkeletonCards,
-    Textarea
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { DateTimeInput } from '@elo/ui/components/forms/date-fields';
+import { Textarea } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Pagination } from '@elo/ui/components/navigation/pagination';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import {
     CalendarClock,
     CalendarX2,
@@ -29,31 +34,20 @@ import {
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
+import { ACTOR_FALLBACK_LABELS } from '#/_lib/messages/activity';
+import { lasted } from '#/_lib/messages/duration';
+import {
+    ALWAYS_OPEN,
+    EXTRA_OPENING_DURATIONS,
+    EXTRA_OPENING_FORM_MESSAGES,
+    PAUSE_FORM_MESSAGES,
+    PAUSE_PROBLEMS,
+    PAUSE_QUICK_DURATIONS,
+    availabilityText
+} from '#/_lib/messages/opening-hours';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 import { WeekPreview } from '../../../_components/week-preview';
-
-const PROBLEM: Record<PauseProblem, string> = {
-    ends_before_start: 'O fim precisa ser depois do início.',
-    starts_in_past: 'O início não pode estar no passado.',
-    too_far_ahead: `Agende com no máximo ${PAUSE_LIMITS.aheadDays} dias de antecedência.`,
-    overlaps: 'Já existe uma parada nesse período. Encerre ou ajuste a outra antes.',
-    opening_needs_end: 'Informe até quando o restaurante fica aberto.',
-    opening_too_long: `A abertura fora do horário dura no máximo ${PAUSE_LIMITS.openingMaxHours} horas.`
-};
-
-const OPEN_FOR: [string, number][] = [
-    ['1 hora', 60],
-    ['2 horas', 120],
-    ['3 horas', 180]
-];
-
-const QUICK: [string, number][] = [
-    ['1 hora', 60],
-    ['3 horas', 180],
-    ['1 dia', 1440],
-    ['1 semana', 10080]
-];
 
 const when = (iso: string) =>
     new Date(iso).toLocaleString('pt-BR', {
@@ -74,14 +68,10 @@ interface Draft {
     reason: string;
 }
 
-/** Codes only this form raises, each with its own sentence in `MESSAGES`. */
-const own = (code: 'start_missing' | 'end_missing') =>
-    ({ code }) as unknown as FieldError;
+/** Codes only this form raises, each with its own sentence in `PAUSE_FORM_MESSAGES`. */
+type OwnCode = 'start_missing' | 'end_missing';
 
-const MESSAGES = {
-    start_missing: 'Informe quando a parada começa.',
-    end_missing: 'Informe quando a parada termina, ou marque "Até reabrir".'
-};
+const own = (code: OwnCode) => ({ code }) as unknown as FieldError;
 
 const dateError = (v: string, missing: FieldError): FieldError | null =>
     !v ? missing : Number.isNaN(new Date(v).getTime()) ? { code: 'invalid_date' } : null;
@@ -93,8 +83,6 @@ const DRAFT_CHECKS = {
         all.untilReopen ? null : dateError(v, own('end_missing')),
     reason: rule(FIELD_RULES.pauseReason)
 };
-
-const OPENING_MESSAGES = { end_missing: 'Informe até quando o restaurante fica aberto.' };
 const OPENING_CHECKS = {
     end: (v: string) => dateError(v, own('end_missing')),
     reason: rule(FIELD_RULES.pauseReason)
@@ -113,18 +101,6 @@ function period(p: PauseView) {
     return end
         ? `${when(p.startsAt)} até ${when(end)}`
         : `Desde ${when(p.startsAt)}, até reabrir`;
-}
-
-/** "2 dias e 3 h", "5 h 30 min", "45 min". */
-function lasted(ms: number) {
-    const minutes = Math.max(1, Math.round(ms / 60_000));
-    const days = Math.floor(minutes / 1440);
-    const hours = Math.floor((minutes % 1440) / 60);
-    const rest = minutes % 60;
-    if (days)
-        return `${days} ${days === 1 ? 'dia' : 'dias'}${hours ? ` e ${hours} h` : ''}`;
-    if (hours) return `${hours} h${rest ? ` ${String(rest).padStart(2, '0')} min` : ''}`;
-    return `${rest} min`;
 }
 
 const dayOf = (iso: string) =>
@@ -181,7 +157,9 @@ function PastPause({ pause }: { pause: PauseView }) {
                         {pause.kind === 'opening' ? 'Encerrada antes' : 'Reaberto antes'}
                     </Badge>
                 )}
-                <span className="text-muted">por {pause.createdByName}</span>
+                <span className="text-muted">
+                    por {pause.createdByName ?? ACTOR_FALLBACK_LABELS.staff}
+                </span>
             </div>
         </div>
     );
@@ -192,11 +170,19 @@ function View() {
     const [data, setData] = useState<PauseList | null>(null);
     const [failed, setFailed] = useState(false);
     const [composing, setComposing] = useState(false);
-    const form = useForm<Draft>(freshDraft(true), DRAFT_CHECKS, MESSAGES);
+    const form = useForm<Draft, OwnCode>(
+        freshDraft(true),
+        DRAFT_CHECKS,
+        PAUSE_FORM_MESSAGES
+    );
     const draft = composing ? form.values : null;
     const [ending, setEnding] = useState<PauseView | null>(null);
     const [opening, setOpening] = useState(false);
-    const openForm = useForm({ end: '', reason: '' }, OPENING_CHECKS, OPENING_MESSAGES);
+    const openForm = useForm<{ end: string; reason: string }, OwnCode>(
+        { end: '', reason: '' },
+        OPENING_CHECKS,
+        EXTRA_OPENING_FORM_MESSAGES
+    );
     const params = useSearchParams();
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -262,12 +248,14 @@ function View() {
         } catch (err) {
             if (form.fromServer(err, { startsAt: 'start', endsAt: 'end' })) return;
             const problems =
-                err instanceof ApiError && Array.isArray(err.data.problems)
-                    ? (err.data.problems as PauseProblem[])
+                err instanceof ApiError
+                    ? err
+                          .detailsOf(ApiErrorCode.INVALID_PAUSE)
+                          .map((detail) => detail.code)
                     : [];
             setError(
                 problems.length
-                    ? problems.map((p) => PROBLEM[p]).join(' ')
+                    ? problems.map((p) => PAUSE_PROBLEMS[p]).join(' ')
                     : unexpected(err)
             );
         } finally {
@@ -309,12 +297,14 @@ function View() {
         } catch (err) {
             if (openForm.fromServer(err, { endsAt: 'end' })) return;
             const problems =
-                err instanceof ApiError && Array.isArray(err.data.problems)
-                    ? (err.data.problems as PauseProblem[])
+                err instanceof ApiError
+                    ? err
+                          .detailsOf(ApiErrorCode.INVALID_PAUSE)
+                          .map((detail) => detail.code)
                     : [];
             setError(
                 problems.length
-                    ? problems.map((p) => PROBLEM[p]).join(' ')
+                    ? problems.map((p) => PAUSE_PROBLEMS[p]).join(' ')
                     : unexpected(err)
             );
         } finally {
@@ -335,7 +325,7 @@ function View() {
             setEnding(null);
             await load();
         } catch (err) {
-            if (err instanceof ApiError && err.status === 404) {
+            if (err instanceof ApiError && err.status === HTTP_STATUS.NOT_FOUND) {
                 setEnding(null);
                 await load();
             } else setError('Não foi possível encerrar a parada. Tente de novo.');
@@ -389,8 +379,7 @@ function View() {
                                 {a.open ? 'Aberto' : 'Fechado'}
                             </Badge>
                             <p className="mt-1 font-semibold">
-                                {a.label ??
-                                    'Sem horário cadastrado: o restaurante fica sempre aberto.'}
+                                {availabilityText(a) ?? ALWAYS_OPEN}
                             </p>
                             {a.pauseReason && (
                                 <p className="text-sm text-muted">
@@ -506,7 +495,9 @@ function View() {
                                                     {p.reason
                                                         ? `Motivo: ${p.reason}`
                                                         : 'Sem motivo informado'}{' '}
-                                                    · por {p.createdByName}
+                                                    · por{' '}
+                                                    {p.createdByName ??
+                                                        ACTOR_FALLBACK_LABELS.staff}
                                                 </p>
                                             </div>
                                             <Button
@@ -613,7 +604,7 @@ function View() {
                                 </p>
                             )}
                             <div className="flex flex-wrap gap-2 pt-1">
-                                {QUICK.map(([label, minutes]) => (
+                                {PAUSE_QUICK_DURATIONS.map(([label, minutes]) => (
                                     <button
                                         key={label}
                                         type="button"
@@ -642,7 +633,7 @@ function View() {
                                 <span className="block text-xs text-muted">
                                     O cliente vai ver
                                 </span>
-                                <strong>{preview.label}</strong>
+                                <strong>{availabilityText(preview)}</strong>
                                 {preview.pauseReason && (
                                     <span className="text-muted">
                                         {' '}
@@ -729,7 +720,7 @@ function View() {
                             />
                         </Field>
                         <div className="flex flex-wrap gap-2">
-                            {OPEN_FOR.map(([label, minutes]) => (
+                            {EXTRA_OPENING_DURATIONS.map(([label, minutes]) => (
                                 <button
                                     key={label}
                                     type="button"

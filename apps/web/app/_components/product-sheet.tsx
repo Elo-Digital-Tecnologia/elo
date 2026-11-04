@@ -1,8 +1,11 @@
 'use client';
 
-import type { ProductView } from '@elo/core';
-import { FIELD_RULES, formatBRL } from '@elo/core';
-import { Button, Sheet, Textarea } from '@elo/ui';
+import type { ProductView } from '@elo/core/api/views/catalog.view';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { formatBRL } from '@elo/core/money/cents';
+import { Button } from '@elo/ui/components/forms/button';
+import { Textarea } from '@elo/ui/components/forms/fields';
+import { Sheet } from '@elo/ui/components/overlays/sheet';
 import { Minus, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { rule, useForm } from '../_lib/use-form';
@@ -27,12 +30,12 @@ interface SheetProps {
     blocked?: string | null;
 }
 
-/** Detalhe do produto: foto, opções, observação e quantidade. */
+/** Product detail: photo, options, note and quantity. */
 export function ProductSheet({
     product,
     ...rest
 }: SheetProps & { product: ProductView | null }) {
-    // O corpo remonta por produto para zerar quantidade e escolhas.
+    // The body remounts per product to reset quantity and choices.
     return product ? <Body key={product.id} product={product} {...rest} /> : null;
 }
 

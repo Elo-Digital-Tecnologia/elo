@@ -1,35 +1,36 @@
 'use client';
 
-import type { CategoryView, FieldError, ProductTag, ProductView } from '@elo/core';
+import type { CategoryView, ProductView } from '@elo/core/api/views/catalog.view';
+import type { ProductTag } from '@elo/core/catalog/product-tags';
+import type { FieldError } from '@elo/core/fields/field-rules';
 import type { DraftGroup, GroupErrors } from './options-editor';
-import { ApiError, api } from '@elo/client';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { PRODUCT_TAGS } from '@elo/core/catalog/product-tags';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { formatBRL, parseCents } from '@elo/core/money/cents';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    FIELD_RULES,
-    PRODUCT_TAGS,
-    PRODUCT_TAG_LABEL,
-    formatBRL,
-    parseCents
-} from '@elo/core';
-import {
-    ActionMenu,
-    Badge,
-    Button,
-    ConfirmModal,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import {
     Input,
-    Modal,
     MoneyInput,
-    PageHeader,
     Select,
-    SkeletonCards,
-    Stagger,
-    StaggerItem,
     Switch,
     Textarea
-} from '@elo/ui';
+} from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
+import { ActionMenu } from '@elo/ui/components/overlays/action-menu';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import {
     ChevronDown,
     ChevronUp,
@@ -43,6 +44,9 @@ import {
     UtensilsCrossed
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { centsToInput } from '#/_lib/format';
+import { PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
+import { MENU_ERRORS, PRODUCT_FORM_MESSAGES } from '#/_lib/messages/errors';
 import { ImagePicker } from '../../../../../_components/image-picker';
 import { money, rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
@@ -77,21 +81,13 @@ const EMPTY: Form = {
     tags: [],
     options: []
 };
-const priceText = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
-
-const ERRORS: Record<string, string> = {
-    category_not_empty:
-        'Esta categoria ainda tem produtos. Mova ou remova os produtos primeiro.',
-    invalid_category: 'Essa categoria não existe mais. Escolha outra na etapa Dados.',
-    invalid_order:
-        'O cardápio mudou em outro aparelho. Atualize a página e tente de novo.'
-};
+const priceText = centsToInput;
 
 /** A known refusal from the API in words, or the honest "something failed". */
 const messageOf = (e: unknown) =>
     (e instanceof ApiError &&
-        (ERRORS[e.code] ??
-            (e.status === 404
+        (MENU_ERRORS[e.code] ??
+            (e.status === HTTP_STATUS.NOT_FOUND
                 ? 'Este item não existe mais. Atualize a página.'
                 : null))) ||
     unexpected(e);
@@ -106,8 +102,6 @@ const PRODUCT_CHECKS = {
     imageUrl: rule(FIELD_RULES.imageUrl)
 };
 type Checked = keyof typeof PRODUCT_CHECKS;
-
-const PRODUCT_MESSAGES = { invalid_option: 'Escolha uma categoria.' };
 
 /** The step that holds each field: the photo is on the second, option groups on the third. */
 const stepOf = (field: string) =>
@@ -128,7 +122,7 @@ function View() {
     const catForm = useForm({ name: '' }, CATEGORY_CHECKS);
     const [editCat, setEditCat] = useState<string | null>(null);
     const [editProd, setEditProd] = useState<string | null>(null);
-    const form = useForm<Form>(EMPTY, PRODUCT_CHECKS, PRODUCT_MESSAGES);
+    const form = useForm<Form>(EMPTY, PRODUCT_CHECKS, PRODUCT_FORM_MESSAGES);
     const [submitted, setSubmitted] = useState(false);
     /** A typed image link held back by the picker for not passing the rule. */
     const [linkBad, setLinkBad] = useState(false);
@@ -246,7 +240,7 @@ function View() {
                 .map((p) => (p === 'priceCents' ? 'price' : p))
                 .find((p) => p in form.values) ?? firstInvalid(options);
         if (field) goTo(field);
-        else if (err.code === 'invalid_category') goTo('categoryId');
+        else if (err.code === ApiErrorCode.INVALID_CATEGORY) goTo('categoryId');
         return landed || !!options;
     };
 
@@ -282,7 +276,7 @@ function View() {
         }
     };
 
-    // Troca o item com o vizinho e grava a lista inteira na nova ordem.
+    // Swaps the item with its neighbor and saves the whole list in the new order.
     const move = <T extends { id: string }>(list: T[], id: string, dir: -1 | 1) => {
         const ids = list.map((x) => x.id);
         const from = ids.indexOf(id);

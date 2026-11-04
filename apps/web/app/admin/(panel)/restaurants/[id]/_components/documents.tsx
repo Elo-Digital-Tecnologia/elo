@@ -1,23 +1,17 @@
 'use client';
 
-import type { DocumentView } from '@elo/core';
-import { ApiError, apiBlob, apiUpload } from '@elo/client';
-import { DOCUMENT_LIMITS } from '@elo/core';
-import { Button, Spinner } from '@elo/ui';
+import type { DocumentView } from '@elo/core/billing/billing';
+import { apiBlob, apiUpload } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { DOCUMENT_LIMITS } from '@elo/core/billing/billing';
+import { Button } from '@elo/ui/components/forms/button';
+import { Spinner } from '@elo/ui/components/forms/fields';
 import { ExternalLink, FileText, Paperclip, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { fileSize } from '#/_lib/format';
+import { DOCUMENT_UPLOAD_ERRORS } from '#/_lib/messages/errors';
 import { unexpected } from '../../../../../_lib/use-form';
-
-const UPLOAD_ERRORS: Record<string, string> = {
-    unsupported_document: 'Envie um PDF ou uma foto (JPG, PNG ou WebP).',
-    file_too_large: 'O arquivo pode ter até 10 MB.',
-    file_required: 'Escolha um arquivo.'
-};
-
-export const fileSize = (bytes: number) =>
-    bytes < 1024 * 1024
-        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
-        : `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
 
 /**
  * The private file behind a document, fetched with the team's token (it is never
@@ -117,9 +111,11 @@ export function DocumentPicker({
     const send = async (file: File) => {
         setError(null);
         if (file.size > DOCUMENT_LIMITS.maxBytes)
-            return setError(UPLOAD_ERRORS.file_too_large);
+            return setError(DOCUMENT_UPLOAD_ERRORS[ApiErrorCode.FILE_TOO_LARGE] ?? null);
         if (!(DOCUMENT_LIMITS.types as readonly string[]).includes(file.type))
-            return setError(UPLOAD_ERRORS.unsupported_document);
+            return setError(
+                DOCUMENT_UPLOAD_ERRORS[ApiErrorCode.UNSUPPORTED_DOCUMENT] ?? null
+            );
         setBusy(true);
         try {
             onChange(
@@ -133,7 +129,7 @@ export function DocumentPicker({
         } catch (e) {
             setError(
                 e instanceof ApiError
-                    ? (UPLOAD_ERRORS[e.code] ?? unexpected(e))
+                    ? (DOCUMENT_UPLOAD_ERRORS[e.code] ?? unexpected(e))
                     : unexpected(e)
             );
         } finally {

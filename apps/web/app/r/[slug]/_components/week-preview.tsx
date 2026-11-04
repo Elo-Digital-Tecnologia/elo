@@ -1,8 +1,9 @@
-import type { OpeningHours, ShiftPiece } from '@elo/core';
-import { WEEKDAYS, overnightLabel, weekShifts } from '@elo/core';
+import type { OpeningHours, ShiftPiece } from '@elo/core/opening-hours/open-status';
+import { overnightEnd, weekShifts } from '@elo/core/opening-hours/open-status';
+import { MINUTES_PER_DAY } from '@elo/core/time/time-units';
+import { WEEKDAYS, WEEKDAY_SHORT } from '#/_lib/messages/opening-hours';
 
-const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-const pct = (min: number) => `${(min / 1440) * 100}%`;
+const pct = (min: number) => `${(min / MINUTES_PER_DAY) * 100}%`;
 const hhmm = (min: number) =>
     `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 
@@ -13,7 +14,7 @@ function dayText(hours: OpeningHours, day: number, pieces: ShiftPiece[]): string
     const own = shifts
         .map(
             (h, k) =>
-                `${h.open}–${h.close}${k === shifts.length - 1 && overnightLabel(day, shifts) ? ` (${WEEKDAYS[(day + 1) % 7]})` : ''}`
+                `${h.open}–${h.close}${k === shifts.length - 1 && overnightEnd(day, shifts) ? ` (${WEEKDAYS[(day + 1) % 7]})` : ''}`
         )
         .join(' · ');
     return (
@@ -37,7 +38,7 @@ export function WeekPreview({ hours, today }: { hours: OpeningHours; today?: num
                     <span
                         className={`w-9 shrink-0 font-semibold ${day === today ? 'text-brand' : 'text-muted'}`}
                     >
-                        {DAY_NAMES[day]}
+                        {WEEKDAY_SHORT[day]}
                     </span>
                     <div className="relative h-6 flex-1 overflow-hidden rounded-pill bg-leaf-100/50">
                         {pieces.map((p) => (
@@ -46,7 +47,7 @@ export function WeekPreview({ hours, today }: { hours: OpeningHours; today?: num
                                 title={
                                     p.spill
                                         ? `Madrugada do turno de ${WEEKDAYS[p.day]}: até ${hhmm(p.to)}`
-                                        : `${hhmm(p.from)} às ${p.to === 1440 ? '24:00' : hhmm(p.to)}`
+                                        : `${hhmm(p.from)} às ${p.to === MINUTES_PER_DAY ? '24:00' : hhmm(p.to)}`
                                 }
                                 className={`absolute inset-y-0 ${p.spill ? 'bg-brand/45' : 'bg-brand'}`}
                                 style={{

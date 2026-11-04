@@ -1,38 +1,41 @@
 'use client';
 
-import type { OrderView, ReportView, TableView, WaiterCallView } from '@elo/core';
-import { api, useRealtime } from '@elo/client';
-import { formatBRL } from '@elo/core';
+import type { OrderView } from '@elo/core/api/views/order.view';
+import type { ReportView } from '@elo/core/api/views/report.view';
+import type { TableView, WaiterCallView } from '@elo/core/api/views/table.view';
+import { api } from '@elo/client/http/api-client';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { formatBRL } from '@elo/core/money/cents';
+import { AreaChart, BarList, Donut } from '@elo/ui/components/data/charts';
+import { Stat } from '@elo/ui/components/data/stat';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    AreaChart,
-    Badge,
-    BarList,
-    Donut,
     EmptyState,
     ErrorState,
-    GlassCard,
-    PageHeader,
-    SkeletonCards,
-    Stagger,
-    StaggerItem,
-    Stat
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
 import { BellRing, ClipboardList, Star, Table2, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEBOUNCE_MS } from '#/_lib/constants/timing';
+import { centsToReais, reaisToCents } from '#/_lib/format';
+import { ORDER_STATUS_TEXTS } from '#/_lib/messages/orders';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 const STATUS: Record<
     string,
     { label: string; tone: 'info' | 'brand' | 'warning' | 'success' | 'danger' }
 > = {
-    sent: { label: 'Enviado', tone: 'info' },
-    received: { label: 'Recebido', tone: 'brand' },
-    preparing: { label: 'Em preparo', tone: 'warning' },
-    ready: { label: 'Pronto', tone: 'success' },
-    cancelled: { label: 'Cancelado', tone: 'danger' },
-    returned: { label: 'Devolvido', tone: 'danger' }
+    sent: { label: ORDER_STATUS_TEXTS.sent.label, tone: 'info' },
+    received: { label: ORDER_STATUS_TEXTS.received.label, tone: 'brand' },
+    preparing: { label: ORDER_STATUS_TEXTS.preparing.label, tone: 'warning' },
+    ready: { label: ORDER_STATUS_TEXTS.ready.label, tone: 'success' },
+    cancelled: { label: ORDER_STATUS_TEXTS.cancelled.label, tone: 'danger' },
+    returned: { label: ORDER_STATUS_TEXTS.returned.label, tone: 'danger' }
 };
 
 /** Dia local no formato da API. */
@@ -51,7 +54,7 @@ function Overview() {
     const load = useCallback(async () => {
         try {
             const day = today();
-            // Os números vêm agregados do servidor; só os pedidos recentes vão para o navegador.
+            // Numbers come aggregated from the server; only recent orders reach the browser.
             const [r, o, c, t] = await Promise.all([
                 api<ReportView>(`/api/reports?from=${day}&to=${day}`, { token }),
                 api<OrderView[]>('/api/orders?limit=30', { token }),
@@ -78,11 +81,11 @@ function Overview() {
             .catch(() => undefined);
     }, [token]);
 
-    // Vários eventos seguidos viram uma única atualização.
+    // Several events in a row become a single update.
     const timer = useRef<ReturnType<typeof setTimeout>>();
     const soon = useCallback(() => {
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => void load(), 1200);
+        timer.current = setTimeout(() => void load(), DEBOUNCE_MS.reload);
     }, [load]);
     useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -181,8 +184,8 @@ function Overview() {
                 <StaggerItem>
                     <Stat
                         label="Faturamento hoje"
-                        value={view.revenue / 100}
-                        format={(n) => formatBRL(n * 100)}
+                        value={centsToReais(view.revenue)}
+                        format={(n) => formatBRL(reaisToCents(n))}
                         icon={Wallet}
                         hint="Sem cancelados e devolvidos"
                     />

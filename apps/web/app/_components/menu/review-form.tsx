@@ -1,22 +1,21 @@
 'use client';
 
-import type { ReviewView } from '@elo/core';
+import type { ReviewView } from '@elo/core/api/views/review.view';
 import type { ReactNode } from 'react';
-import { ApiError, api } from '@elo/client';
-import { FIELD_RULES } from '@elo/core';
-import { Button, Textarea } from '@elo/ui';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { Button } from '@elo/ui/components/forms/button';
+import { Textarea } from '@elo/ui/components/forms/fields';
 import { Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { REVIEW_ERRORS } from '#/_lib/messages/errors';
 import { rule, unexpected, useForm } from '../../_lib/use-form';
 
 const CHECKS = { comment: rule(FIELD_RULES.reviewComment) };
 
-const ERRORS: Record<string, string> = {
-    table_not_open: 'A avaliação fica disponível enquanto a mesa estiver aberta.'
-};
-
 /**
- * Avaliação do atendimento: de 1 a 5 estrelas e um comentário opcional. Pode ser corrigida enquanto a mesa estiver aberta.
+ * Service review: 1 to 5 stars and an optional comment. It can be changed while the table is open.
  * `footer` goes inside the same block, below a divider (the Google invitation).
  */
 export function ReviewForm({
@@ -59,7 +58,8 @@ export function ReviewForm({
         } catch (err) {
             if (!form.fromServer(err))
                 setError(
-                    (err instanceof ApiError && ERRORS[err.code]) || unexpected(err)
+                    (err instanceof ApiError && REVIEW_ERRORS[err.code]) ||
+                        unexpected(err)
                 );
         } finally {
             setBusy(false);

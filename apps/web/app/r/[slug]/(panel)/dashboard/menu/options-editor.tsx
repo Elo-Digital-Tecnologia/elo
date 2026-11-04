@@ -1,12 +1,18 @@
 'use client';
 
-import type { FieldError, OptionGroup } from '@elo/core';
-import { FIELD_RULES, fieldError, fieldMessage, moneyError, parseCents } from '@elo/core';
-import { Button, Field, Input, MoneyInput, Switch } from '@elo/ui';
+import type { OptionGroup } from '@elo/core/api/views/catalog.view';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { FIELD_RULES, fieldError, moneyError } from '@elo/core/fields/field-rules';
+import { parseCents } from '@elo/core/money/cents';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, MoneyInput, Switch } from '@elo/ui/components/forms/fields';
+import { Field } from '@elo/ui/components/layout/section';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { centsToInput } from '#/_lib/format';
+import { fieldMessage } from '#/_lib/messages/fields';
 
-/** Grupo em edição: o preço fica como texto digitado até salvar. */
+/** Group being edited: the price stays as typed text until saving. */
 export interface DraftGroup {
     name: string;
     required: boolean;
@@ -24,8 +30,7 @@ export interface GroupErrors {
 const MAX_GROUPS = 20;
 const MAX_CHOICES = 40;
 
-const priceText = (cents: number) =>
-    cents ? (cents / 100).toFixed(2).replace('.', ',') : '';
+const priceText = (cents: number) => (cents ? centsToInput(cents) : '');
 
 export const toDraft = (groups: OptionGroup[]): DraftGroup[] =>
     groups.map((g) => ({
@@ -134,7 +139,7 @@ const choicesMessage = (e: FieldError) =>
     e.code === 'too_few' ? 'Dê nome a pelo menos uma escolha.' : fieldMessage(e);
 
 /**
- * Editor de grupos de opções (tamanho, adicionais, ponto da carne...). Shows each
+ * Option groups editor (size, extras, doneness...). Shows each
  * problem under its own input once it was left, or all of them when `showAll`;
  * `server` holds what the API refused, until the next change.
  */

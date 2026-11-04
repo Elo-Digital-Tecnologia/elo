@@ -1,15 +1,18 @@
 'use client';
 
-import type { BillView } from '@elo/core';
+import type { BillView } from '@elo/core/api/views/bill.view';
 import type { ReactNode } from 'react';
-import { ApiError, api } from '@elo/client';
-import { formatBRL } from '@elo/core';
-import { Button } from '@elo/ui';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { formatBRL } from '@elo/core/money/cents';
+import { Button } from '@elo/ui/components/forms/button';
 import { Percent } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { bpsToPercent } from '#/_lib/format';
 import { unexpected } from '../_lib/use-form';
 
-/** Conta da mesa vista pelo cliente. Quando o restaurante permite, ele mesmo recusa a taxa de serviço. */
+/** Table bill as the guest sees it. When the restaurant allows it, the guest refuses the service fee. */
 export function BillPanel({
     active,
     version,
@@ -46,7 +49,7 @@ export function BillPanel({
             );
         } catch (e) {
             setFeeError(
-                e instanceof ApiError && e.code === 'fee_refusal_disabled'
+                e instanceof ApiError && e.code === ApiErrorCode.FEE_REFUSAL_DISABLED
                     ? 'Este restaurante não permite retirar a taxa de serviço por aqui. Fale com o garçom.'
                     : unexpected(e)
             );
@@ -97,7 +100,7 @@ export function BillPanel({
                         {bill.serviceFeeBps > 0 && (
                             <div className="flex justify-between">
                                 <dt className="text-muted">
-                                    Taxa de serviço ({bill.serviceFeeBps / 100}%)
+                                    Taxa de serviço ({bpsToPercent(bill.serviceFeeBps)}%)
                                 </dt>
                                 <dd
                                     className={`tabular-nums ${bill.feeWaivedBy ? 'text-muted line-through' : ''}`}

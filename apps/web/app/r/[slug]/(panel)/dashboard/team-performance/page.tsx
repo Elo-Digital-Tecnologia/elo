@@ -1,24 +1,26 @@
 'use client';
 
-import type { StaffPerformanceRow, StaffReportView } from '@elo/core';
-import { api } from '@elo/client';
-import { formatDuration } from '@elo/core';
+import type {
+    StaffPerformanceRow,
+    StaffReportView
+} from '@elo/core/api/views/report.view';
+import { api } from '@elo/client/http/api-client';
+import { BarList } from '@elo/ui/components/data/charts';
+import { Stat } from '@elo/ui/components/data/stat';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    Badge,
-    BarList,
-    Button,
-    DataTable,
     EmptyState,
     ErrorState,
-    GlassCard,
-    PageHeader,
-    SkeletonCards,
-    Stagger,
-    StaggerItem,
-    Stat
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
 import { BellRing, DoorOpen, Timer, Trophy } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { formatDuration } from '#/_lib/messages/duration';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const ymd = (d: Date) => d.toLocaleDateString('sv-SE');

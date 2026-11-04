@@ -1,15 +1,12 @@
 'use client';
 
-import {
-    Aurora,
-    Badge,
-    GlassCard,
-    Logo,
-    Stagger,
-    StaggerItem,
-    ThemeToggle,
-    motion
-} from '@elo/ui';
+import { Logo } from '@elo/ui/components/brand/logo';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Aurora } from '@elo/ui/components/motion/aurora';
+import { Stagger, StaggerItem, motion } from '@elo/ui/components/motion/motion';
+import { MOTION_DELAYS, MOTION_DURATIONS, MOTION_EASE } from '@elo/ui/theme/motion';
+import { ThemeToggle } from '@elo/ui/theme/theme';
 import {
     BellRing,
     Check,
@@ -23,6 +20,7 @@ import {
     Timer
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { DEMO_STEP_MS } from '#/_lib/constants/timing';
 
 const STEPS = [
     {
@@ -54,11 +52,11 @@ const TRACK = [
     { label: 'Pronto', icon: Check }
 ];
 
-/** Mostra, em loop, o que o cliente vê depois de enviar a comanda. */
+/** Shows, in a loop, what the guest sees after sending the order. */
 function PhoneDemo() {
     const [step, setStep] = useState(0);
     useEffect(() => {
-        const t = setInterval(() => setStep((s) => (s + 1) % 5), 1900);
+        const t = setInterval(() => setStep((s) => (s + 1) % 5), DEMO_STEP_MS);
         return () => clearInterval(t);
     }, []);
     const at = Math.min(step, 3);
@@ -68,7 +66,11 @@ function PhoneDemo() {
             <motion.div
                 className="glass glass-strong !rounded-[44px] p-4"
                 animate={{ rotate: [-2, 1.5, -2] }}
-                transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
+                transition={{
+                    duration: MOTION_DURATIONS.floatLong,
+                    repeat: Infinity,
+                    ease: 'easeInOut'
+                }}
             >
                 <div className="rounded-[32px] bg-bg/60 p-4 backdrop-blur-md">
                     <div className="mb-3 flex items-center justify-between">
@@ -93,7 +95,10 @@ function PhoneDemo() {
                             <motion.span
                                 className="absolute left-[12.5%] top-[17px] h-1 rounded-pill bg-brand"
                                 animate={{ width: `${(at / 3) * 75}%` }}
-                                transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+                                transition={{
+                                    duration: MOTION_DURATIONS.slow,
+                                    ease: MOTION_EASE
+                                }}
                             />
                             {TRACK.map((s, i) => {
                                 const Icon = s.icon;
@@ -129,7 +134,11 @@ function PhoneDemo() {
             <motion.div
                 className="glass absolute -left-14 top-24 hidden w-44 !rounded-lg p-3 sm:block"
                 animate={{ y: [0, -10, 0] }}
-                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+                transition={{
+                    duration: MOTION_DURATIONS.floatShort,
+                    repeat: Infinity,
+                    ease: 'easeInOut'
+                }}
             >
                 <div className="flex items-center gap-2 text-xs">
                     <span className="pulse-dot" /> <b>Cozinha</b>
@@ -140,10 +149,10 @@ function PhoneDemo() {
                 className="glass absolute -right-10 bottom-16 hidden w-44 !rounded-lg p-3 sm:block"
                 animate={{ y: [0, 10, 0] }}
                 transition={{
-                    duration: 7,
+                    duration: MOTION_DURATIONS.floatMedium,
                     repeat: Infinity,
                     ease: 'easeInOut',
-                    delay: 1
+                    delay: MOTION_DELAYS.long
                 }}
             >
                 <div className="flex items-center gap-2 text-xs">
@@ -171,7 +180,10 @@ export default function Home() {
                             className="text-5xl font-extrabold leading-[0.98] sm:text-7xl"
                             initial={{ opacity: 0, y: 36 }}
                             animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                            transition={{
+                                duration: MOTION_DURATIONS.chart,
+                                ease: MOTION_EASE
+                            }}
                         >
                             Cardápio digital para o salão.
                         </motion.h1>
@@ -180,9 +192,9 @@ export default function Home() {
                             initial={{ opacity: 0, y: 24 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{
-                                duration: 0.9,
-                                delay: 0.15,
-                                ease: [0.22, 1, 0.36, 1]
+                                duration: MOTION_DURATIONS.chart,
+                                delay: MOTION_DELAYS.short,
+                                ease: MOTION_EASE
                             }}
                         >
                             O cliente pede pelo celular, o garçom confirma a mesa e a
@@ -193,7 +205,7 @@ export default function Home() {
                             className="mt-8 flex flex-wrap items-center gap-3"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            transition={{ delay: 0.4 }}
+                            transition={{ delay: MOTION_DELAYS.medium }}
                         >
                             <GlassCard className="inline-flex items-center gap-3 !rounded-pill py-2.5 pl-3 pr-6">
                                 <span className="btn-glass grid shrink-0 h-10 w-10 place-items-center rounded-pill">

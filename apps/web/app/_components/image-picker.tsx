@@ -1,10 +1,18 @@
 'use client';
 
-import { ApiError, api, apiUpload } from '@elo/client';
-import { FIELD_RULES, fieldError, fieldMessage } from '@elo/core';
-import { Input, Spinner } from '@elo/ui';
+import { api, apiUpload } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { FIELD_RULES, fieldError } from '@elo/core/fields/field-rules';
+import {
+    IMAGE_UPLOAD_MAX_BYTES,
+    IMAGE_UPLOAD_MAX_MB
+} from '@elo/core/media/media-limits';
+import { Input, Spinner } from '@elo/ui/components/forms/fields';
 import { ImagePlus, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fieldMessage } from '#/_lib/messages/fields';
 import { unexpected } from '../_lib/use-form';
 
 interface MediaItem {
@@ -14,14 +22,17 @@ interface MediaItem {
     name: string;
 }
 
-const MAX_MB = 5;
-
 const reason = (e: unknown) => {
     if (!(e instanceof ApiError)) return unexpected(e);
-    if (e.status === 413) return `A imagem passa de ${MAX_MB} MB.`;
-    if (e.code === 'invalid_image' || e.code === 'unsupported_image_type')
+    if (e.status === HTTP_STATUS.PAYLOAD_TOO_LARGE)
+        return `A imagem passa de ${IMAGE_UPLOAD_MAX_MB} MB.`;
+    if (
+        e.code === ApiErrorCode.INVALID_IMAGE ||
+        e.code === ApiErrorCode.UNSUPPORTED_IMAGE_TYPE
+    )
         return 'Use uma imagem JPG, PNG ou WebP.';
-    if (e.code === 'image_in_use') return 'Esta imagem está em uso por um produto.';
+    if (e.code === ApiErrorCode.IMAGE_IN_USE)
+        return 'Esta imagem está em uso por um produto.';
     return unexpected(e);
 };
 
@@ -40,7 +51,7 @@ interface PickerProps {
 }
 
 /**
- * Escolhe a foto do produto no banco de imagens do restaurante, ou envia uma nova.
+ * Picks the product photo from the restaurant's image library, or uploads a new one.
  * A typed link is applied only while it passes the API rule.
  */
 export function ImagePicker({
@@ -104,8 +115,8 @@ export function ImagePicker({
         setError(null);
         if (!file.type.startsWith('image/'))
             return setError('Escolha um arquivo de imagem.');
-        if (file.size > MAX_MB * 1024 * 1024)
-            return setError(`A imagem passa de ${MAX_MB} MB.`);
+        if (file.size > IMAGE_UPLOAD_MAX_BYTES)
+            return setError(`A imagem passa de ${IMAGE_UPLOAD_MAX_MB} MB.`);
         setBusy(true);
         try {
             const created = await apiUpload<MediaItem>('/api/catalog/media', file, token);
@@ -163,8 +174,8 @@ export function ImagePicker({
                             </button>
                         </p>
                         <p className="text-xs text-muted">
-                            JPG, PNG ou WebP, até {MAX_MB} MB. A imagem é reduzida
-                            automaticamente.
+                            JPG, PNG ou WebP, até {IMAGE_UPLOAD_MAX_MB} MB. A imagem é
+                            reduzida automaticamente.
                         </p>
                     </>
                 )}

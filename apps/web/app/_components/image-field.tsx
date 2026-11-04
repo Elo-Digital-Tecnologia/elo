@@ -1,11 +1,12 @@
 'use client';
 
-import { Button, Sheet } from '@elo/ui';
+import { Button } from '@elo/ui/components/forms/button';
+import { Sheet } from '@elo/ui/components/overlays/sheet';
 import { ImageIcon, X } from 'lucide-react';
 import { useState } from 'react';
 import { ImagePicker } from './image-picker';
 
-/** Campo de imagem do formulário: miniatura, botão para escolher no banco e botão para tirar. */
+/** Form image field: thumbnail, a button to pick from the library and a button to remove it. */
 export function ImageField({
     label,
     token,
@@ -57,7 +58,7 @@ export function ImageField({
                         value={value}
                         onChange={(url) => {
                             onChange(url);
-                            // Escolher no banco ou enviar fecha a janela; digitar um link não.
+                            // Picking from the library or uploading closes the window; typing a link does not.
                             if (url.startsWith('/api/media/')) setOpen(false);
                         }}
                     />

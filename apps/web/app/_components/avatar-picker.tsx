@@ -1,14 +1,16 @@
 'use client';
 
-import { ApiError, api, apiUpload } from '@elo/client';
-import { Avatar, Button } from '@elo/ui';
+import { api, apiUpload } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import {
+    IMAGE_UPLOAD_MAX_BYTES,
+    IMAGE_UPLOAD_MAX_MB
+} from '@elo/core/media/media-limits';
+import { Avatar } from '@elo/ui/components/data/avatar';
+import { Button } from '@elo/ui/components/forms/button';
 import { Camera, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-
-const ERRORS: Record<string, string> = {
-    invalid_image: 'O arquivo não é uma imagem válida.',
-    unsupported_image_type: 'Use uma foto em JPG, PNG ou WebP.'
-};
+import { AVATAR_ERRORS } from '#/_lib/messages/errors';
 
 /** Optional profile photo: the team sees it in lists and in the header, guests never do. */
 export function AvatarPicker({
@@ -30,7 +32,8 @@ export function AvatarPicker({
 
     const send = async (file: File) => {
         setError(null);
-        if (file.size > 5 * 1024 * 1024) return setError('A foto pode ter até 5 MB.');
+        if (file.size > IMAGE_UPLOAD_MAX_BYTES)
+            return setError(`A foto pode ter até ${IMAGE_UPLOAD_MAX_MB} MB.`);
         setBusy(true);
         try {
             onChange(
@@ -39,7 +42,8 @@ export function AvatarPicker({
         } catch (e) {
             setError(
                 e instanceof ApiError
-                    ? (ERRORS[e.code] ?? 'Não foi possível enviar a foto. Tente de novo.')
+                    ? (AVATAR_ERRORS[e.code] ??
+                          'Não foi possível enviar a foto. Tente de novo.')
                     : 'Falha de conexão. Tente de novo.'
             );
         } finally {

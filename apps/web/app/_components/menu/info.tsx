@@ -1,8 +1,10 @@
 'use client';
 
-import type { RestaurantProfileView } from '@elo/core';
+import type { RestaurantProfileView } from '@elo/core/api/views/restaurant.view';
 import { Check, Copy, Instagram, MapPin, Phone, Wifi } from 'lucide-react';
 import { useState } from 'react';
+import { FEEDBACK_MS } from '#/_lib/constants/timing';
+import { availabilityText } from '#/_lib/messages/opening-hours';
 import { GoogleReviewChip } from './google-review-card';
 
 type Profile = RestaurantProfileView & {
@@ -22,7 +24,7 @@ function CopyWifi({ password }: { password: string }) {
                     ?.writeText(password)
                     .then(() => {
                         setDone(true);
-                        setTimeout(() => setDone(false), 2000);
+                        setTimeout(() => setDone(false), FEEDBACK_MS.done);
                     })
                     .catch(() => undefined);
             }}
@@ -34,7 +36,7 @@ function CopyWifi({ password }: { password: string }) {
     );
 }
 
-/** Descrição, aberto/fechado, contatos e Wi-Fi. Não mostra nada que o restaurante não preencheu. */
+/** Description, open or closed, contacts and Wi-Fi. Shows nothing the restaurant left empty. */
 export function RestaurantInfo({ profile }: { profile: Profile }) {
     const {
         description,
@@ -46,7 +48,7 @@ export function RestaurantInfo({ profile }: { profile: Profile }) {
         googleReviewUrl
     } = profile;
     const handle = instagram?.replace(/^@/, '');
-    const status = availability.label;
+    const status = availabilityText(availability);
     if (
         !description &&
         !status &&

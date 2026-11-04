@@ -1,17 +1,21 @@
 'use client';
 
-import type { OrderStatus, OrderView } from '@elo/core';
-import { Badge, motion } from '@elo/ui';
+import type { OrderView } from '@elo/core/api/views/order.view';
+import type { OrderStatus } from '@elo/core/orders/order-status';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { motion } from '@elo/ui/components/motion/motion';
+import { MOTION_DURATIONS, MOTION_EASE } from '@elo/ui/theme/motion';
 import { Check, ChefHat, Send, Soup, X } from 'lucide-react';
+import { ORDER_TRACKER_TEXTS } from '#/_lib/messages/orders';
 
 const STEPS: { status: OrderStatus; label: string; icon: typeof Send }[] = [
-    { status: 'sent', label: 'Enviado', icon: Send },
-    { status: 'received', label: 'Recebido', icon: ChefHat },
-    { status: 'preparing', label: 'Em preparo', icon: Soup },
-    { status: 'ready', label: 'Pronto', icon: Check }
+    { status: 'sent', label: ORDER_TRACKER_TEXTS['0'].label, icon: Send },
+    { status: 'received', label: ORDER_TRACKER_TEXTS['1'].label, icon: ChefHat },
+    { status: 'preparing', label: ORDER_TRACKER_TEXTS['2'].label, icon: Soup },
+    { status: 'ready', label: ORDER_TRACKER_TEXTS['3'].label, icon: Check }
 ];
 
-/** Acompanhamento do pedido: o passo atual pulsa; os anteriores ficam preenchidos. */
+/** Order tracking: the current step pulses; previous ones stay filled. */
 export function OrderTracker({
     order,
     onCancel
@@ -76,7 +80,10 @@ export function OrderTracker({
                         aria-hidden
                         initial={{ width: 0 }}
                         animate={{ width: `${(current / 3) * 75}%` }}
-                        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+                        transition={{
+                            duration: MOTION_DURATIONS.slower,
+                            ease: MOTION_EASE
+                        }}
                     />
                     {STEPS.map((s, i) => {
                         const done = i < current;

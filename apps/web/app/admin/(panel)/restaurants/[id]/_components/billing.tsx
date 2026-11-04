@@ -1,37 +1,32 @@
 'use client';
 
+import type { SubscriptionView } from '@elo/core/api/views/restaurant.view';
 import type {
     BillingEntryView,
     DocumentView,
     PaymentPreview,
-    PaymentProblem,
-    PlanView,
-    SubscriptionView
-} from '@elo/core';
-import { ApiError, api } from '@elo/client';
-import {
-    BILLING_LIMITS,
-    FIELD_RULES,
-    cycleLabel,
-    dayError,
-    fieldError,
-    formatBRL,
-    parseCents
-} from '@elo/core';
-import {
-    Badge,
-    Button,
-    DataTable,
-    DateInput,
-    EmptyState,
-    Field,
-    Input,
-    Modal,
-    MoneyInput,
-    Textarea
-} from '@elo/ui';
+    PlanView
+} from '@elo/core/billing/billing';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { BILLING_LIMITS } from '@elo/core/billing/billing';
+import { FIELD_RULES, dayError, fieldError } from '@elo/core/fields/field-rules';
+import { formatBRL, parseCents } from '@elo/core/money/cents';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { EmptyState } from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { DateInput } from '@elo/ui/components/forms/date-fields';
+import { Input, MoneyInput, Textarea } from '@elo/ui/components/forms/fields';
+import { Field } from '@elo/ui/components/layout/section';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { CalendarCog, Paperclip, Pencil, Undo2, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { DEBOUNCE_MS } from '#/_lib/constants/timing';
+import { centsToInput } from '#/_lib/format';
+import { PAYMENT_PROBLEMS, cycleLabel } from '#/_lib/messages/billing';
+import { BILLING_ERRORS } from '#/_lib/messages/errors';
 import {
     money as moneyCheck,
     rule,
@@ -42,46 +37,16 @@ import { DocumentPicker, DocumentPreview } from './documents';
 
 const fmt = (d: string) => new Date(d).toLocaleDateString('pt-BR');
 const today = () => new Date().toISOString().slice(0, 10);
-const money = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');
-
-const PROBLEM: Record<PaymentProblem | 'due_in_past' | 'reason_required', string> = {
-    paid_in_future: 'A data do pagamento não pode ser no futuro.',
-    paid_before_creation: 'A data do pagamento é anterior ao cadastro do restaurante.',
-    cycles_out_of_range: `Escolha de 1 a ${BILLING_LIMITS.cyclesMax} ciclos.`,
-    amount_out_of_range: 'Valor fora do esperado para este plano.',
-    note_required:
-        'O valor é diferente do plano: explique na observação (por exemplo, um desconto).',
-    note_too_long: `A observação pode ter até ${BILLING_LIMITS.noteMax} caracteres.`,
-    receipt_required: 'Anexe o comprovante ou explique por que não há um.',
-    receipt_or_reason: 'Com o comprovante anexado, não é preciso explicar a falta dele.',
-    due_in_past: 'O vencimento não pode ser antes de hoje.',
-    reason_required: 'Informe o motivo.'
-};
-
-const CODE: Record<string, string> = {
-    no_plan:
-        'Nenhum contrato com plano está valendo. O plano vem com o contrato: registre ou renove o contrato.',
-    contract_pending:
-        'A cobrança começa com o contrato. Registre o contrato antes do pagamento.',
-    nothing_owed:
-        'O contrato terminou e não há dias cobertos em aberto. Registre a renovação para receber de novo.',
-    not_latest_entry: 'Só o lançamento mais recente pode ser estornado.',
-    already_voided: 'Este lançamento já foi estornado.',
-    plan_inactive: 'Este plano foi desativado. Escolha outro.',
-    invalid_date: 'Data inválida.',
-    plan_not_found: 'Este plano não existe mais. Escolha outro.',
-    not_a_payment:
-        'Só pagamentos podem ser corrigidos. Para um ajuste, estorne e faça de novo.',
-    receipt_in_use: 'Este comprovante já está em outro pagamento. Envie o arquivo certo.',
-    receipt_already_attached: 'Este pagamento já tem comprovante.',
-    invalid_document: 'O arquivo enviado não pertence a este restaurante. Envie de novo.'
-};
+const money = centsToInput;
 
 function explain(e: unknown): string {
     if (!(e instanceof ApiError)) return unexpected(e);
-    const problems = e.data.problems as (keyof typeof PROBLEM)[] | undefined;
-    if (problems?.length) return problems.map((p) => PROBLEM[p] ?? p).join(' ');
-    return CODE[e.code] ?? unexpected(e);
+    const problems = [
+        ...e.detailsOf(ApiErrorCode.INVALID_PAYMENT),
+        ...e.detailsOf(ApiErrorCode.INVALID_DUE_DATE)
+    ].map((detail) => detail.code);
+    if (problems.length) return problems.map((p) => PAYMENT_PROBLEMS[p] ?? p).join(' ');
+    return BILLING_ERRORS[e.code] ?? unexpected(e);
 }
 
 const NOTE_NEEDED = { code: 'invalid' } as const;
@@ -224,7 +189,7 @@ export function useBilling({
                     setError(null);
                 })
                 .catch((e) => live && (setPreview(null), setError(explain(e))));
-        }, 250);
+        }, DEBOUNCE_MS.preview);
         return () => {
             live = false;
             clearTimeout(t);

@@ -1,5 +1,5 @@
 # Build from the repository root: docker build -f apps/api/Dockerfile .
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
@@ -16,7 +16,7 @@ COPY packages/core/package.json packages/core/
 COPY packages/config/package.json packages/config/
 RUN pnpm install --frozen-lockfile --prod --filter @elo/api...
 
-FROM node:22-slim AS run
+FROM node:26-slim AS run
 ENV NODE_ENV=production UPLOAD_DIR=/data/uploads
 WORKDIR /repo
 COPY --from=deps /repo ./
@@ -26,5 +26,6 @@ RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 WORKDIR /repo/apps/api
 EXPOSE 3001
-# Pending migrations run before the API starts; with none, it starts at once.
-CMD ["sh", "-c", "node node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js && exec node dist/main.js"]
+# Before the first production deploy, generate the initial migration
+# (pnpm --filter @elo/api migration:generate) and run it here before starting.
+CMD ["node", "dist/main.js"]

@@ -1,22 +1,30 @@
 import 'reflect-metadata';
 
-import type { ContractKind } from '@elo/core';
-import type { ObjectLiteral } from 'typeorm';
-import type { JwtUser } from '../../common/auth-types';
-import type { OrderItem } from '../entities';
+import type { ContractKind } from '@elo/core/contracts/contracts';
+import type { ObjectLiteral, Repository } from 'typeorm';
+import type { JwtUser } from '#/common/types/jwt-user.type.js';
+import type { EnvConfig } from '#/config/env.js';
+import type { OrderItem } from '#/modules/orders/types/order-item.type.js';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { OrderStatus, ROLE_LABEL, Role, TableState, businessDay } from '@elo/core';
-import { Repository } from 'typeorm';
-import { AppModule } from '../../app.module';
-import { BillingService } from '../../billing/billing.service';
-import { CatalogService } from '../../catalog/catalog.service';
-import { ContractsService } from '../../contracts/contracts.service';
-import { DocumentsService } from '../../documents/documents.service';
-import { RestaurantsService } from '../../restaurants/restaurants.service';
-import { StaffService } from '../../staff/staff.service';
-import { newToken } from '../../tables/tables.service';
-import { DiningTable, Order, Restaurant, TableSession, WaiterCall } from '../entities';
+import { businessDay } from '@elo/core/contracts/contracts';
+import { OrderStatus } from '@elo/core/orders/order-status';
+import { Role } from '@elo/core/roles/roles';
+import { TableState } from '@elo/core/tables/table-state';
+import { AppModule } from '#/app.module.js';
+import { BillingService } from '#/modules/billing/billing.service.js';
+import { WaiterCallEntity } from '#/modules/calls/entities/waiter-call.entity.js';
+import { CatalogService } from '#/modules/catalog/catalog.service.js';
+import { ContractService } from '#/modules/contracts/contract.service.js';
+import { DocumentService } from '#/modules/documents/document.service.js';
+import { OrderEntity } from '#/modules/orders/entities/order.entity.js';
+import { RestaurantEntity } from '#/modules/restaurants/entities/restaurant.entity.js';
+import { RestaurantService } from '#/modules/restaurants/restaurant.service.js';
+import { StaffService } from '#/modules/staff/staff.service.js';
+import { DiningTableEntity } from '#/modules/tables/entities/dining-table.entity.js';
+import { TableSessionEntity } from '#/modules/tables/entities/table-session.entity.js';
+import { newToken } from '#/modules/tables/table.service.js';
 
 /**
  * Demo data for local development: two restaurants with menu, tables, a full team
@@ -163,7 +171,7 @@ function samplePdf(name: string): Buffer {
 
 const SEED_ACTOR: JwtUser = {
     sub: 'superadmin',
-    roles: [Role.Superadmin],
+    roles: [Role.SUPERADMIN],
     name: 'Dados de demonstração',
     restaurantId: null,
     permissions: []
@@ -174,49 +182,50 @@ const TEAM: { suffix: string; name: string; displayName: string; roles: Role[] }
         suffix: 'gerente',
         name: 'Gabriela Torres',
         displayName: 'Gabi',
-        roles: [Role.Manager]
+        roles: [Role.MANAGER]
     },
-    { suffix: 'garcom', name: 'Ana Souza', displayName: 'Ana', roles: [Role.Waiter] },
+    { suffix: 'garcom', name: 'Ana Souza', displayName: 'Ana', roles: [Role.WAITER] },
     {
         suffix: 'garcom2',
         name: 'Bruno Lima',
         displayName: 'Bruno',
-        roles: [Role.Waiter, Role.Cashier]
+        roles: [Role.WAITER, Role.CASHIER]
     },
     {
         suffix: 'cozinha',
         name: 'Carla Rocha',
         displayName: 'Carla',
-        roles: [Role.Kitchen]
+        roles: [Role.KITCHEN]
     },
-    { suffix: 'caixa', name: 'Davi Nunes', displayName: 'Davi', roles: [Role.Cashier] }
+    { suffix: 'caixa', name: 'Davi Nunes', displayName: 'Davi', roles: [Role.CASHIER] }
 ];
 
 async function main() {
     const force = process.argv.includes('--force');
-    if (process.env.NODE_ENV === 'production')
-        throw new Error('The demo seed never runs in production');
-
     const app = await NestFactory.createApplicationContext(AppModule, {
         logger: ['error', 'warn']
     });
     try {
+        const configService = app.get<ConfigService<EnvConfig, true>>(ConfigService);
+        if (configService.getOrThrow('app.isProduction', { infer: true }))
+            throw new Error('The demo seed never runs in production');
         const repo = <T extends ObjectLiteral>(entity: new () => T) =>
             app.get<Repository<T>>(getRepositoryToken(entity));
-        const restaurantsRepo = repo(Restaurant);
+        const restaurantsRepo = repo(RestaurantEntity);
         if (!force && (await restaurantsRepo.count({ withDeleted: true }))) {
             throw new Error(
                 'The database already has restaurants; pass --force to seed anyway'
             );
         }
-        const restaurants = app.get(RestaurantsService);
+        const restaurants = app.get(RestaurantService);
         const staff = app.get(StaffService);
         const catalog = app.get(CatalogService);
         const billing = app.get(BillingService);
-        const documents = app.get(DocumentsService);
-        const contracts = app.get(ContractsService);
+        const documents = app.get(DocumentService);
+        const contracts = app.get(ContractService);
         const credentials: string[] = [];
         const [plan] = await Promise.all(PLANS.map((p) => billing.createPlan(p)));
+        if (!plan) throw new Error('The demo needs at least one plan');
 
         for (const demo of RESTAURANTS) {
             const r = await restaurants.create({
@@ -280,7 +289,7 @@ async function main() {
                 );
             }
             credentials.push(
-                `/r/${r.slug}/login  ${demo.prefix}admin (${ROLE_LABEL[Role.RestaurantAdmin]})`
+                `/r/${r.slug}/login  ${demo.prefix}admin (${Role.RESTAURANT_ADMIN})`
             );
 
             const waiters: string[] = [];
@@ -293,9 +302,9 @@ async function main() {
                     displayName: member.displayName,
                     roles: member.roles
                 });
-                if (member.roles.includes(Role.Waiter)) waiters.push(created.id);
+                if (member.roles.includes(Role.WAITER)) waiters.push(created.id);
                 credentials.push(
-                    `/r/${r.slug}/login  ${demo.prefix}${member.suffix} (${member.roles.map((role) => ROLE_LABEL[role]).join(' + ')})`
+                    `/r/${r.slug}/login  ${demo.prefix}${member.suffix} (${member.roles.join(' + ')})`
                 );
             }
 
@@ -313,13 +322,13 @@ async function main() {
                     );
             }
 
-            const tables = await repo(DiningTable).save(
+            const tables = await repo(DiningTableEntity).save(
                 Array.from({ length: 6 }, (_, i) =>
-                    repo(DiningTable).create({
+                    repo(DiningTableEntity).create({
                         restaurantId: r.id,
                         name: `Mesa ${String(i + 1).padStart(2, '0')}`,
                         token: newToken(),
-                        state: TableState.Closed,
+                        state: TableState.CLOSED,
                         waiterId: null
                     })
                 )
@@ -338,14 +347,22 @@ async function main() {
 async function history(
     app: Awaited<ReturnType<typeof NestFactory.createApplicationContext>>,
     restaurantId: string,
-    tables: DiningTable[],
+    tables: DiningTableEntity[],
     products: { id: string; name: string; priceCents: number }[],
     waiters: string[]
 ) {
-    const sessions = app.get<Repository<TableSession>>(getRepositoryToken(TableSession));
-    const orders = app.get<Repository<Order>>(getRepositoryToken(Order));
-    const calls = app.get<Repository<WaiterCall>>(getRepositoryToken(WaiterCall));
-    const pick = <T>(list: T[]) => list[Math.floor(Math.random() * list.length)];
+    const sessions = app.get<Repository<TableSessionEntity>>(
+        getRepositoryToken(TableSessionEntity)
+    );
+    const orders = app.get<Repository<OrderEntity>>(getRepositoryToken(OrderEntity));
+    const calls = app.get<Repository<WaiterCallEntity>>(
+        getRepositoryToken(WaiterCallEntity)
+    );
+    const pick = <T>(list: T[]): T => {
+        const item = list[Math.floor(Math.random() * list.length)];
+        if (item === undefined) throw new Error('Nothing to pick from');
+        return item;
+    };
 
     for (let day = 30; day >= 1; day--) {
         for (let visit = 0; visit < 2 + Math.floor(Math.random() * 4); visit++) {
@@ -389,7 +406,7 @@ async function history(
                         restaurantId,
                         tableId: table.id,
                         sessionId: session.id,
-                        status: OrderStatus.Ready,
+                        status: OrderStatus.READY,
                         items,
                         createdAt: at(5 + round * 20)
                     })

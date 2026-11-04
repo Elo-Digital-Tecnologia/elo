@@ -1,9 +1,13 @@
 'use client';
 
-import type { RestaurantStatus, SubscriptionView } from '@elo/core';
+import type { SubscriptionView } from '@elo/core/api/views/restaurant.view';
+import type { RestaurantStatus } from '@elo/core/subscription/subscription';
 import type { LucideIcon } from 'lucide-react';
-import { CONTRACT_KIND_LABEL, GRACE_DAYS, cycleLabel, formatBRL } from '@elo/core';
-import { Badge, GlassCard, PageHeader } from '@elo/ui';
+import { formatBRL } from '@elo/core/money/cents';
+import { GRACE_DAYS } from '@elo/core/subscription/subscription';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
 import {
     Ban,
     CalendarClock,
@@ -16,6 +20,9 @@ import {
     ShieldAlert,
     TimerReset
 } from 'lucide-react';
+import { cycleLabel } from '#/_lib/messages/billing';
+import { CONTRACT_KIND_LABEL } from '#/_lib/messages/contracts';
+import { RESTAURANT_STATUS_TEXTS } from '#/_lib/messages/subscription';
 import { dayBR, plural, trialLine } from '../../../../../_lib/restaurant-status';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
@@ -29,34 +36,34 @@ const STATE: Record<
     }
 > = {
     active: {
-        label: 'Ativa',
+        label: RESTAURANT_STATUS_TEXTS.active.label,
         tone: 'success',
         icon: CircleCheck,
-        text: 'Tudo certo. Seu acesso está liberado.'
+        text: RESTAURANT_STATUS_TEXTS.active.text
     },
     grace: {
-        label: 'Vencida, em tolerância',
+        label: RESTAURANT_STATUS_TEXTS.grace.label,
         tone: 'warning',
         icon: TimerReset,
-        text: 'O sistema segue funcionando. Regularize o pagamento antes do fim do prazo.'
+        text: RESTAURANT_STATUS_TEXTS.grace.text
     },
     suspended: {
-        label: 'Suspensa',
+        label: RESTAURANT_STATUS_TEXTS.suspended.label,
         tone: 'danger',
         icon: ShieldAlert,
-        text: 'O acesso da equipe está bloqueado até a confirmação do pagamento.'
+        text: RESTAURANT_STATUS_TEXTS.suspended.text
     },
     pending: {
-        label: 'Contrato pendente',
+        label: RESTAURANT_STATUS_TEXTS.pending.label,
         tone: 'neutral',
         icon: FileClock,
-        text: 'O contrato com a Elo Digital ainda não está valendo.'
+        text: RESTAURANT_STATUS_TEXTS.pending.text
     },
     ended: {
-        label: 'Contrato encerrado',
+        label: RESTAURANT_STATUS_TEXTS.ended.label,
         tone: 'danger',
         icon: FileX,
-        text: 'O contrato com a Elo Digital terminou e não há renovação valendo.'
+        text: RESTAURANT_STATUS_TEXTS.ended.text
     }
 };
 

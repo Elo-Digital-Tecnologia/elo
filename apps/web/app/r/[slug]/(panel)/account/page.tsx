@@ -1,20 +1,24 @@
 'use client';
 
-import type { FieldError } from '@elo/core';
-import { ApiError, api } from '@elo/client';
-import { FIELD_RULES } from '@elo/core';
-import { Button, Field, GlassCard, PageHeader, PasswordInput } from '@elo/ui';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { Button } from '@elo/ui/components/forms/button';
+import { PasswordInput } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
 import { KeyRound } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { PASSWORD_CHANGE_MESSAGES } from '#/_lib/messages/errors';
 import { AvatarPicker } from '../../../../_components/avatar-picker';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
 const EMPTY = { current: '', next: '', again: '' };
-
-/** `invalid` only comes from the confirmation check: the API has no such rule for passwords. */
-const MESSAGES = { invalid: 'A confirmação não confere com a nova senha.' };
 
 function Account() {
     const { token, impersonated, name, avatarUrl, setAvatarUrl } = useStaff();
@@ -32,7 +36,7 @@ function Account() {
             again: (v: string, all) =>
                 !v ? { code: 'required' } : v !== all.next ? { code: 'invalid' } : null
         },
-        MESSAGES
+        PASSWORD_CHANGE_MESSAGES
     );
     const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
     const [loading, setLoading] = useState(false);
@@ -55,9 +59,10 @@ function Account() {
             setMsg({
                 ok: false,
                 text:
-                    err instanceof ApiError && err.status === 401
+                    err instanceof ApiError && err.status === HTTP_STATUS.UNAUTHORIZED
                         ? 'A senha atual está incorreta.'
-                        : err instanceof ApiError && err.code === 'same_password'
+                        : err instanceof ApiError &&
+                            err.code === ApiErrorCode.SAME_PASSWORD
                           ? 'Escolha uma senha diferente da atual.'
                           : unexpected(err)
             });

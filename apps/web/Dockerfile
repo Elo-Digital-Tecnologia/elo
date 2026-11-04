@@ -1,5 +1,5 @@
 # Build from the repository root: docker build -f apps/web/Dockerfile .
-FROM node:22-slim AS base
+FROM node:26-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
@@ -15,7 +15,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm exec turbo run build --filter=@elo/web...
 
-FROM node:22-slim AS run
+FROM node:26-slim AS run
 ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000 NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./

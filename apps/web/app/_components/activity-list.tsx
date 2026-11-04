@@ -3,26 +3,21 @@
 import type {
     ActivityCategory,
     ActivityPage,
-    ActivityView,
-    ContractKind,
-    Role
-} from '@elo/core';
-import { api } from '@elo/client';
+    ActivityView
+} from '@elo/core/activity/activity-actions';
+import type { ContractKind } from '@elo/core/contracts/contracts';
+import type { Role } from '@elo/core/roles/roles';
+import { api } from '@elo/client/http/api-client';
+import { ACTIVITY_ACTIONS } from '@elo/core/activity/activity-actions';
+import { formatBRL } from '@elo/core/money/cents';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    ACTIVITY_ACTIONS,
-    ACTIVITY_CATEGORIES,
-    CONTRACT_KIND_LABEL,
-    ROLE_LABEL,
-    formatBRL
-} from '@elo/core';
-import {
-    Badge,
-    Button,
     EmptyState,
     ErrorState,
-    Pagination,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Pagination } from '@elo/ui/components/navigation/pagination';
 import {
     CreditCard,
     History,
@@ -35,6 +30,14 @@ import {
     UtensilsCrossed
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ACTIVITY_ACTION_LABELS,
+    ACTIVITY_CATEGORY_LABELS,
+    ACTIVITY_FIELD_LABELS,
+    ACTOR_FALLBACK_LABELS
+} from '#/_lib/messages/activity';
+import { CONTRACT_KIND_LABEL } from '#/_lib/messages/contracts';
+import { ROLE_LABEL } from '#/_lib/messages/roles';
 
 const ICON: Record<ActivityCategory, typeof History> = {
     tables: Table2,
@@ -44,30 +47,6 @@ const ICON: Record<ActivityCategory, typeof History> = {
     settings: Settings,
     restaurant: Store,
     support: ShieldCheck
-};
-
-/** Field names as the settings screens call them. */
-const FIELD: Record<string, string> = {
-    name: 'nome',
-    managerName: 'responsável pelo contrato',
-    managerContact: 'contato do responsável',
-    serviceFeeBps: 'taxa de serviço',
-    guestFeeRefusal: 'recusa da taxa pelo cliente',
-    description: 'descrição',
-    logoUrl: 'logo',
-    coverUrl: 'capa',
-    address: 'endereço',
-    phone: 'telefone',
-    instagram: 'Instagram',
-    googleReviewUrl: 'link de avaliação do Google',
-    wifiName: 'nome do Wi-Fi',
-    wifiPassword: 'senha do Wi-Fi',
-    openingHours: 'horários',
-    amountCents: 'valor',
-    paidAt: 'data do pagamento',
-    note: 'observação',
-    receipt: 'comprovante',
-    noReceiptReason: 'motivo da falta de comprovante'
 };
 
 const day = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');
@@ -80,7 +59,7 @@ const roles = (v: unknown) =>
 function detail(a: ActivityView): string | null {
     const m = a.meta ?? {};
     if (Array.isArray(m.fields))
-        return `Alterou: ${(m.fields as string[]).map((f) => FIELD[f] ?? f).join(', ')}.`;
+        return `Alterou: ${(m.fields as string[]).map((f) => ACTIVITY_FIELD_LABELS[f] ?? f).join(', ')}.`;
     const reason = typeof m.reason === 'string' ? `Motivo: ${m.reason}` : null;
     if (a.action === 'due_date_adjusted' && typeof m.newDueDate === 'string') {
         const from = typeof m.from === 'string' ? `de ${day(m.from)} ` : '';
@@ -258,7 +237,7 @@ export function ActivityList({
 
     const chips: [ActivityCategory | '', string][] = [
         ['', 'Tudo'],
-        ...(Object.entries(ACTIVITY_CATEGORIES) as [ActivityCategory, string][])
+        ...(Object.entries(ACTIVITY_CATEGORY_LABELS) as [ActivityCategory, string][])
     ];
 
     return (
@@ -298,8 +277,8 @@ export function ActivityList({
                     aria-busy={busy}
                 >
                     {items.map((a) => {
-                        const spec = ACTIVITY_ACTIONS[a.action];
-                        const Icon = spec ? ICON[spec.category] : KeyRound;
+                        const category = ACTIVITY_ACTIONS[a.action];
+                        const Icon = category ? ICON[category] : KeyRound;
                         const extra = detail(a);
                         return (
                             <li key={a.id} className="surface flex gap-3 p-4">
@@ -309,7 +288,7 @@ export function ActivityList({
                                 <div className="min-w-0 flex-1">
                                     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                                         <p className="min-w-0 font-medium">
-                                            {spec?.label ?? a.action}
+                                            {ACTIVITY_ACTION_LABELS[a.action] ?? a.action}
                                             {a.target && (
                                                 <span className="text-muted">
                                                     {' '}
@@ -326,7 +305,9 @@ export function ActivityList({
                                     </div>
                                     <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-muted">
                                         <span className="truncate">
-                                            por {a.actorName}
+                                            por{' '}
+                                            {a.actorName ??
+                                                ACTOR_FALLBACK_LABELS[a.actorKind]}
                                         </span>
                                         {a.actorKind === 'elo' && (
                                             <Badge tone="info">Elo Digital</Badge>

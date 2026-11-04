@@ -1,18 +1,21 @@
 'use client';
 
-import type { PushState } from '@elo/client';
+import type { PushState } from '@elo/client/push/push-subscription';
 import {
     disablePush,
     enablePush,
     isStandalone,
     pushState,
-    pushSupported,
-    useRealtime
-} from '@elo/client';
-import { ALERTS, alertOf, alertsRole } from '@elo/core';
-import { Button, GlassCard, unlockAlertSound, useAlerts } from '@elo/ui';
+    pushSupported
+} from '@elo/client/push/push-subscription';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { ALERTS, alertOf, alertsRole } from '@elo/core/alerts/alerts';
+import { unlockAlertSound, useAlerts } from '@elo/ui/components/feedback/alerts';
+import { Button } from '@elo/ui/components/forms/button';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
 import { Bell, BellOff, BellRing } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { staffAlertText } from '#/_lib/messages/alerts';
 
 const ALERT_EVENTS = [
     'table.updated',
@@ -73,8 +76,7 @@ export function useStaffAlerts({
                 const background = document.visibilityState === 'hidden';
                 notify(
                     {
-                        title: spec.title(alert.table),
-                        body: spec.body,
+                        ...staffAlertText(alert),
                         href: base + spec.path,
                         tag: alert.tag
                     },

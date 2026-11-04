@@ -1,13 +1,16 @@
 'use client';
 
-import type { HoursProblemCode, OpeningHours } from '@elo/core';
-import { HOURS_LIMITS, WEEKDAYS, hoursProblems, isHHMM } from '@elo/core';
-import { Button, Modal, Select, Switch, TimeInput } from '@elo/ui';
+import type { OpeningHours } from '@elo/core/opening-hours/open-status';
+import { HOURS_LIMITS, hoursProblems, isHHMM } from '@elo/core/opening-hours/open-status';
+import { Button } from '@elo/ui/components/forms/button';
+import { TimeInput } from '@elo/ui/components/forms/date-fields';
+import { Select, Switch } from '@elo/ui/components/forms/fields';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { NEXT_SHIFT } from '#/_lib/constants/opening-hours';
+import { DAYS, HOURS_PROBLEMS } from '#/_lib/messages/opening-hours';
 import { WeekPreview } from './week-preview';
-
-const DAYS = WEEKDAYS.map((d) => d[0].toUpperCase() + d.slice(1));
 
 export interface ShiftDraft {
     from: string;
@@ -53,29 +56,15 @@ export const toOpeningHours = (days: DayDraft[]): OpeningHours =>
             : []
     );
 
-const PROBLEM: Record<HoursProblemCode, (day: number) => string> = {
-    not_a_week: () => 'Os horários da semana estão incompletos.',
-    too_many_shifts: () =>
-        `Use no máximo ${HOURS_LIMITS.maxShiftsPerDay} turnos por dia.`,
-    invalid_time: (d) => `Informe os horários de abrir e fechar de ${DAYS[d]}.`,
-    unordered: () => 'Coloque os turnos em ordem: cada um começa depois do anterior.',
-    overlap: () =>
-        'Os turnos se sobrepõem ou se encostam: deixe um intervalo entre o fechamento de um e a abertura do próximo.',
-    overnight_not_last: () =>
-        'Só o último turno do dia pode terminar depois da meia-noite.',
-    overlaps_next_day: (d) =>
-        `O turno termina na madrugada de ${WEEKDAYS[(d + 1) % 7]}, mas o primeiro turno desse dia abre antes disso.`
-};
-
 /** What is wrong with each day, in a sentence; null when the day makes sense. */
 export function hoursErrors(days: DayDraft[]): (string | null)[] {
     const out = days.map((d, i): string | null => {
         if (!d.open) return null;
         for (const [k, s] of d.shifts.entries()) {
             const which = d.shifts.length > 1 ? `Turno ${k + 1}: ` : '';
-            if (!isHHMM(s.from) || !isHHMM(s.to)) return PROBLEM.invalid_time(i);
+            if (!isHHMM(s.from) || !isHHMM(s.to)) return HOURS_PROBLEMS.invalid_time(i);
             if (k < d.shifts.length - 1 && crosses(s))
-                return `${which}${PROBLEM.overnight_not_last(i)}`;
+                return `${which}${HOURS_PROBLEMS.overnight_not_last(i)}`;
             if (!s.nextDay && crosses(s))
                 return `${which}fechando às ${s.to}, o turno termina depois da meia-noite: escolha "no dia seguinte".`;
             if (s.nextDay && !crosses(s))
@@ -85,16 +74,17 @@ export function hoursErrors(days: DayDraft[]): (string | null)[] {
     });
     const week = toOpeningHours(days.map((d, i) => (out[i] ? { ...d, open: false } : d)));
     for (const p of hoursProblems(week))
-        if (p.day !== null && !out[p.day]) out[p.day] = PROBLEM[p.code](p.day);
+        if (p.day !== null && !out[p.day]) out[p.day] = HOURS_PROBLEMS[p.code](p.day);
     return out;
 }
 
 /** The next shift of a day starts a few hours after the last one ends. */
 function nextShift(last: ShiftDraft): ShiftDraft {
-    const start = Math.min((isHHMM(last.to) ? toMinutes(last.to) : 900) + 180, 20 * 60);
+    const lastEnd = isHHMM(last.to) ? toMinutes(last.to) : NEXT_SHIFT.fallbackLastEnd;
+    const start = Math.min(lastEnd + NEXT_SHIFT.gapAfterLast, NEXT_SHIFT.latestStart);
     return {
         from: clock(start),
-        to: clock(Math.min(start + 240, 23 * 60 + 59)),
+        to: clock(Math.min(start + NEXT_SHIFT.length, NEXT_SHIFT.latestEnd)),
         nextDay: false
     };
 }

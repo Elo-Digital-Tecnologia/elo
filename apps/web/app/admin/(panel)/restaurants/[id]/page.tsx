@@ -1,35 +1,29 @@
 'use client';
 
-import type { ContractView, Role, SubscriptionView } from '@elo/core';
-import type { TabItem } from '@elo/ui';
-import { ApiError, api, storeToken } from '@elo/client';
+import type { SubscriptionView } from '@elo/core/api/views/restaurant.view';
+import type { ContractView } from '@elo/core/contracts/contracts';
+import type { Role } from '@elo/core/roles/roles';
+import type { TabItem } from '@elo/ui/components/navigation/tabs';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { storeToken } from '@elo/client/session/auth';
+import { CONTRACT_LIMITS, billingProblem } from '@elo/core/contracts/contracts';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { formatBRL } from '@elo/core/money/cents';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    CONTRACT_KIND_LABEL,
-    CONTRACT_LIMITS,
-    FIELD_RULES,
-    RESTAURANT_STATUS_LABEL,
-    billingProblem,
-    cycleLabel,
-    formatBRL
-} from '@elo/core';
-import {
-    Badge,
-    Button,
-    ConfirmModal,
-    DataTable,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    Input,
-    Modal,
-    PageHeader,
-    Select,
-    SkeletonCards,
-    TabPanel,
-    Tabs,
-    Textarea
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, Select, Textarea } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { TabPanel, Tabs } from '@elo/ui/components/navigation/tabs';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import {
     Ban,
     CalendarClock,
@@ -55,6 +49,10 @@ import {
 } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useState } from 'react';
+import { cycleLabel } from '#/_lib/messages/billing';
+import { CONTRACT_KIND_LABEL } from '#/_lib/messages/contracts';
+import { RESTAURANT_ADMIN_ERRORS, SLUG_CHANGE_ERRORS } from '#/_lib/messages/errors';
+import { RESTAURANT_STATUS_LABEL } from '#/_lib/messages/subscription';
 import { ActivityList } from '../../../../_components/activity-list';
 import { STATUS_TONE, dayBR, plural } from '../../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
@@ -120,13 +118,6 @@ function billingLink(
     };
 }
 
-const ERRORS: Record<string, string> = {
-    not_suspended: 'Suspenda o acesso antes de excluir.',
-    slug_mismatch: 'O link digitado não confere.',
-    restaurant_deleted: 'Este restaurante foi excluído.',
-    invalid_owner: 'Escolha alguém ativo da equipe.'
-};
-
 const EDIT_CHECKS = {
     name: rule(FIELD_RULES.restaurantName),
     managerName: rule(FIELD_RULES.personName),
@@ -135,10 +126,6 @@ const EDIT_CHECKS = {
 
 const OWNER_CHECKS = { reason: rule(FIELD_RULES.reason) };
 const SLUG_CHECKS = { slug: rule(FIELD_RULES.slug), reason: rule(FIELD_RULES.reason) };
-const SLUG_MESSAGES = {
-    slug_taken: 'Este endereço já é (ou já foi) de outro restaurante.',
-    slug_reserved: 'Este endereço é reservado pelo sistema. Escolha outro.'
-};
 
 type Tab = 'general' | 'contracts' | 'payments' | 'tables' | 'activity';
 
@@ -161,7 +148,7 @@ function View({ id }: { id: string }) {
     const [newLink, setNewLink] = useState<string | null>(null);
     const [editing, setEditing] = useState(false);
     const [changingSlug, setChangingSlug] = useState(false);
-    const slugForm = useForm({ slug: '', reason: '' }, SLUG_CHECKS, SLUG_MESSAGES);
+    const slugForm = useForm({ slug: '', reason: '' }, SLUG_CHECKS, SLUG_CHANGE_ERRORS);
     const editForm = useForm(
         { name: '', managerName: '', managerContact: '' },
         EDIT_CHECKS
@@ -226,7 +213,10 @@ function View({ id }: { id: string }) {
             return true;
         } catch (e) {
             if (!fields?.(e))
-                setError((e instanceof ApiError && ERRORS[e.code]) || unexpected(e));
+                setError(
+                    (e instanceof ApiError && RESTAURANT_ADMIN_ERRORS[e.code]) ||
+                        unexpected(e)
+                );
             return false;
         } finally {
             setSaving(false);

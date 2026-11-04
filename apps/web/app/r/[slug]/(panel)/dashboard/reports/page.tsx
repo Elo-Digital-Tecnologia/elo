@@ -1,29 +1,30 @@
 'use client';
 
-import type { ReportView } from '@elo/core';
-import { ApiError, api } from '@elo/client';
-import { dayError, formatBRL } from '@elo/core';
+import type { ReportView } from '@elo/core/api/views/report.view';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { dayError } from '@elo/core/fields/field-rules';
+import { formatBRL } from '@elo/core/money/cents';
+import { REPORT_MAX_DAYS } from '@elo/core/reports/report-limits';
+import { AreaChart, BarList, ColumnChart } from '@elo/ui/components/data/charts';
+import { Stat } from '@elo/ui/components/data/stat';
 import {
-    AreaChart,
-    BarList,
-    Button,
-    ColumnChart,
-    DateInput,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    PageHeader,
-    SkeletonCards,
-    Stagger,
-    StaggerItem,
-    Stat
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { DateInput } from '@elo/ui/components/forms/date-fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
 import { BarChart3, ClipboardList, Receipt, Undo2, Wallet } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { centsToReais, reaisToCents } from '#/_lib/format';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
-/** Dia do calendário local no formato da API. */
+/** Local calendar day in the API format. */
 const ymd = (d: Date) => d.toLocaleDateString('sv-SE');
 const daysAgo = (n: number) => ymd(new Date(Date.now() - n * 86_400_000));
 const short = (iso: string) => iso.slice(8) + '/' + iso.slice(5, 7);
@@ -45,9 +46,9 @@ function Reports() {
         } catch (e) {
             setData(null);
             setError(
-                e instanceof ApiError && e.code === 'period_too_long'
-                    ? 'O período máximo é de 366 dias.'
-                    : e instanceof ApiError && e.code === 'invalid_period'
+                e instanceof ApiError && e.code === ApiErrorCode.PERIOD_TOO_LONG
+                    ? `O período máximo é de ${REPORT_MAX_DAYS} dias.`
+                    : e instanceof ApiError && e.code === ApiErrorCode.INVALID_PERIOD
                       ? 'A data inicial deve ser anterior à final.'
                       : 'Não foi possível carregar o relatório.'
             );
@@ -121,8 +122,8 @@ function Reports() {
                             <StaggerItem>
                                 <Stat
                                     label="Faturamento"
-                                    value={data.totals.revenueCents / 100}
-                                    format={(n) => formatBRL(Math.round(n * 100))}
+                                    value={centsToReais(data.totals.revenueCents)}
+                                    format={(n) => formatBRL(reaisToCents(n))}
                                     icon={Wallet}
                                     trend={data.byDay.map((d) => d.revenueCents)}
                                     hint={`${data.totals.items} itens vendidos`}
@@ -139,8 +140,8 @@ function Reports() {
                             <StaggerItem>
                                 <Stat
                                     label="Ticket médio"
-                                    value={data.totals.averageTicketCents / 100}
-                                    format={(n) => formatBRL(Math.round(n * 100))}
+                                    value={centsToReais(data.totals.averageTicketCents)}
+                                    format={(n) => formatBRL(reaisToCents(n))}
                                     icon={Receipt}
                                     hint="Por pedido enviado"
                                 />

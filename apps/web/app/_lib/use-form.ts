@@ -1,9 +1,13 @@
 'use client';
 
-import type { FieldError, FieldRule } from '@elo/core';
-import { ApiError } from '@elo/client';
-import { fieldError, fieldMessage, moneyError } from '@elo/core';
+import type { FieldError, FieldErrorCode, FieldRule } from '@elo/core/fields/field-rules';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { fieldError, moneyError } from '@elo/core/fields/field-rules';
 import { useCallback, useMemo, useState } from 'react';
+import { GENERIC_MESSAGES } from '#/_lib/messages/errors';
+import { fieldMessage } from '#/_lib/messages/fields';
 
 /** Checks one value (with the whole form at hand, for fields that depend on others). */
 export type Check<V> = (value: never, all: V) => FieldError | null;
@@ -22,22 +26,48 @@ export const money =
 
 type Keys<V> = Extract<keyof V, string>;
 
+/** What field codes and API error codes mean on a given form. */
+export type FormMessages<C extends string = never> = Partial<
+    Record<FieldErrorCode | ApiErrorCode | C, string>
+>;
+
+/** An error under a field: a validation problem, or an API error about that field. */
+type FormError = FieldError | { code: ApiErrorCode | string };
+
+const isFieldError = (e: FormError): e is FieldError => typeof e.code === 'string';
+
+/**
+ * Some API codes about a field share their meaning with a field code
+ * (`ApiErrorCode.INVALID_SLUG` and `invalid_slug`), so they reuse its message.
+ */
+const defaultMessage = (e: FormError): string => {
+    if (isFieldError(e)) return fieldMessage(e);
+    const name = ApiErrorCode[e.code as ApiErrorCode]?.toLowerCase();
+    return name
+        ? fieldMessage({ code: name as FieldErrorCode })
+        : GENERIC_MESSAGES.invalidValue;
+};
+
 /**
  * Form state with live validation using the same rules as the API. A field shows
  * its error once the person leaves it (or tries to submit) and keeps it in sync
  * while they fix it; errors sent back by the API land on their own field.
  *
- * `messages` names what codes from the server mean here (`username_taken`).
+ * `messages` names what codes from the server mean here (`ApiErrorCode.USERNAME_TAKEN`).
  */
-export function useForm<V extends object>(
+/**
+ * `C` names extra codes produced by the form's own checks (`start_missing`), so a typo in
+ * `messages` is still caught.
+ */
+export function useForm<V extends object, C extends string = never>(
     initial: V,
     checks: { [K in keyof V]?: Check<V> },
-    messages: Record<string, string> = {}
+    messages: FormMessages<NoInfer<C>> = {}
 ) {
     const [values, setValues] = useState<V>(initial);
     const [touched, setTouched] = useState<Partial<Record<keyof V, boolean>>>({});
     const [submitted, setSubmitted] = useState(false);
-    const [server, setServer] = useState<Partial<Record<keyof V, FieldError>>>({});
+    const [server, setServer] = useState<Partial<Record<keyof V, FormError>>>({});
 
     const live = useCallback(
         (k: keyof V, all: V) =>
@@ -53,7 +83,8 @@ export function useForm<V extends object>(
         for (const k of Object.keys(values) as (keyof V)[]) {
             if (!touched[k] && !submitted && !server[k]) continue;
             const e = live(k, values) ?? server[k];
-            if (e) out[k] = messages[e.code] ?? fieldMessage(e);
+            if (e)
+                out[k] = messages[e.code as keyof typeof messages] ?? defaultMessage(e);
         }
         return out;
     }, [values, touched, submitted, server, live, messages]);
@@ -95,16 +126,16 @@ export function useForm<V extends object>(
      */
     const fromServer = (err: unknown, map: Record<string, Keys<V>> = {}) => {
         if (!(err instanceof ApiError)) return false;
-        const next: Partial<Record<keyof V, FieldError>> = {};
+        const next: Partial<Record<keyof V, FormError>> = {};
         for (const [path, e] of Object.entries(err.fields)) {
             const key = map[path] ?? (path in values ? (path as Keys<V>) : undefined);
-            if (key && !next[key]) next[key] = e as FieldError;
+            if (key && !next[key]) next[key] = e;
         }
         if (err.field) {
             const key =
                 map[err.field] ??
                 (err.field in values ? (err.field as Keys<V>) : undefined);
-            if (key) next[key] = { code: err.code as FieldError['code'] };
+            if (key) next[key] = { code: err.code };
         }
         if (!Object.keys(next).length) return false;
         setServer(next);
@@ -125,8 +156,8 @@ export function useForm<V extends object>(
 /** Message for an unexpected failure, when no field or known code explains it. */
 export function unexpected(err: unknown): string {
     if (err instanceof ApiError)
-        return err.status >= 500
-            ? 'O servidor não conseguiu concluir agora. Tente de novo em instantes.'
-            : 'Não foi possível concluir. Tente de novo.';
-    return 'Falha de conexão. Confira a internet e tente de novo.';
+        return err.status >= HTTP_STATUS.INTERNAL_SERVER_ERROR
+            ? GENERIC_MESSAGES.serverFailure
+            : GENERIC_MESSAGES.requestFailure;
+    return GENERIC_MESSAGES.connectionFailure;
 }

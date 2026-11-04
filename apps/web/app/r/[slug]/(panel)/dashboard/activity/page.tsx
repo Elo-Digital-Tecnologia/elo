@@ -1,6 +1,6 @@
 'use client';
 
-import { PageHeader } from '@elo/ui';
+import { PageHeader } from '@elo/ui/components/layout/section';
 import { ActivityList } from '../../../../../_components/activity-list';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 

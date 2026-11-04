@@ -1,25 +1,30 @@
 'use client';
 
-import type { RealtimeStatus } from '@elo/client';
+import type { RealtimeStatus } from '@elo/client/realtime/use-realtime';
 import type {
-    Availability,
     RestaurantSettingsView,
-    Role,
     SubscriptionView
-} from '@elo/core';
-import type { NavItem } from '@elo/ui';
+} from '@elo/core/api/views/restaurant.view';
+import type { Availability } from '@elo/core/opening-hours/open-status';
+import type { Role } from '@elo/core/roles/roles';
+import type { NavItem } from '@elo/ui/components/layout/app-shell';
 import type { ReactNode } from 'react';
-import { ApiError, api, useAuth, useRealtime, useRealtimeStatus } from '@elo/client';
-import { CONTRACT_LIMITS, ROLE_LABEL } from '@elo/core';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { useRealtime, useRealtimeStatus } from '@elo/client/realtime/use-realtime';
+import { useAuth } from '@elo/client/session/auth';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { CONTRACT_LIMITS } from '@elo/core/contracts/contracts';
 import {
-    AppShell,
-    Aurora,
-    Button,
     ErrorState,
-    GlassCard,
     PageLoading,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { AppShell } from '@elo/ui/components/layout/app-shell';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Aurora } from '@elo/ui/components/motion/aurora';
 import {
     BarChart3,
     BellRing,
@@ -46,6 +51,11 @@ import {
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { LOAD_RETRY, STATUS_CHANGE_MARGIN_MS } from '#/_lib/constants/timing';
+import { availabilityText } from '#/_lib/messages/opening-hours';
+import { REALTIME_STATUS_TEXTS } from '#/_lib/messages/realtime';
+import { ROLE_LABEL } from '#/_lib/messages/roles';
+import { SUSPENSION_TITLES } from '#/_lib/messages/subscription';
 import { useAlertsControl, useStaffAlerts } from './alerts';
 
 interface Me extends RestaurantSettingsView {
@@ -66,7 +76,7 @@ interface StaffCtx {
     /** Elo support inside the panel: not bound by the admin-vs-admin rule. */
     impersonated: boolean;
     me: Me;
-    /** Atualiza os dados do restaurante após editar as configurações. */
+    /** Refreshes the restaurant data after editing the settings. */
     setMe: (me: Me) => void;
     /** Signed-in member's name and profile photo, shown in the header. */
     name: string;
@@ -145,22 +155,16 @@ interface Suspension {
     contractStartsOn: string | null;
 }
 
-const text = (v: unknown) => (typeof v === 'string' ? v : null);
-
-const suspensionOf = (e: ApiError): Suspension => ({
-    status: text(e.data.status) ?? 'suspended',
-    reasons: Array.isArray(e.data.reasons) ? (e.data.reasons as string[]) : [],
-    contractEndsOn: text(e.data.contractEndsOn),
-    contractStartsOn: text(e.data.contractStartsOn)
-});
+const suspensionOf = (e: ApiError): Suspension =>
+    e.detailsOf(ApiErrorCode.SUBSCRIPTION_SUSPENDED)[0] ?? {
+        status: 'suspended',
+        reasons: [],
+        contractEndsOn: null,
+        contractStartsOn: null
+    };
 
 const dayLabel = (day: string) =>
     `${day.slice(8, 10)}/${day.slice(5, 7)}/${day.slice(0, 4)}`;
-
-const SUSPENSION_TITLE: Record<string, string> = {
-    pending: 'Contrato pendente',
-    ended: 'Contrato encerrado'
-};
 
 function suspensionText({
     status,
@@ -238,7 +242,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
     const changesAt = me?.availability.changesAt;
     useEffect(() => {
         if (!changesAt || !token) return;
-        const wait = new Date(changesAt).getTime() - Date.now() + 1000;
+        const wait = new Date(changesAt).getTime() - Date.now() + STATUS_CHANGE_MARGIN_MS;
         if (wait > 2 ** 31 - 1) return;
         const timer = setTimeout(
             () => {
@@ -246,7 +250,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
                     .then(setMe)
                     .catch(() => undefined);
             },
-            Math.max(wait, 1000)
+            Math.max(wait, STATUS_CHANGE_MARGIN_MS)
         );
         return () => clearTimeout(timer);
     }, [changesAt, token]);
@@ -259,7 +263,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
         const load = (attempt: number) =>
             api<Me>('/api/restaurant/me', { token })
                 .then((data) => {
-                    // O token precisa ser do restaurante deste endereço.
+                    // The token must belong to the restaurant of this address.
                     if (data.slug !== slug) {
                         // The restaurant's link changed: same panel under the current link; a token of another restaurant signs out.
                         if (data.id === user.restaurantId)
@@ -274,28 +278,33 @@ export function PanelShell({ children }: { children: ReactNode }) {
                     setMe(data);
                 })
                 .catch((e) => {
-                    if (e instanceof ApiError && e.status === 403)
+                    if (e instanceof ApiError && e.status === HTTP_STATUS.FORBIDDEN)
                         setSuspended(suspensionOf(e));
                     // A refused token is renewed from the session (useAuth hears the 401); only an ended session signs out.
-                    else if (e instanceof ApiError && e.status === 401) return;
-                    // Limite de requisições ou queda passageira: tenta de novo sem deslogar.
-                    else if (attempt < 4)
+                    else if (
+                        e instanceof ApiError &&
+                        e.status === HTTP_STATUS.UNAUTHORIZED
+                    )
+                        return;
+                    // Rate limit or a brief outage: try again without signing out.
+                    else if (attempt < LOAD_RETRY.attempts)
                         retry = setTimeout(
                             () => void load(attempt + 1),
-                            1500 * (attempt + 1)
+                            LOAD_RETRY.backoffMs * (attempt + 1)
                         );
                     else setFailed(true);
                 });
         void load(0);
         return () => clearTimeout(retry);
-        // Depende de role/sub, não do objeto `user`.
+        // Depends on role/sub, not on the `user` object.
     }, [ready, token, user?.roles.join(','), user?.sub, router, setToken, slug, base]);
 
     // The socket was refused: the API answers why (expired login or suspension) and the shell reacts as on load.
     useEffect(() => {
         if (live !== 'rejected' || !token) return;
         api<Me>('/api/restaurant/me', { token }).catch((e) => {
-            if (e instanceof ApiError && e.status === 403) setSuspended(suspensionOf(e));
+            if (e instanceof ApiError && e.status === HTTP_STATUS.FORBIDDEN)
+                setSuspended(suspensionOf(e));
         });
     }, [live, token]);
 
@@ -308,7 +317,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
                         <ShieldAlert size={30} />
                     </span>
                     <h1 className="text-2xl font-bold">
-                        {SUSPENSION_TITLE[suspended.status] ?? 'Acesso suspenso'}
+                        {SUSPENSION_TITLES[suspended.status] ?? 'Acesso suspenso'}
                     </h1>
                     <p className="text-muted">{suspensionText(suspended)}</p>
                     <Button variant="ghost" onClick={() => void logout()}>
@@ -448,7 +457,7 @@ export function PanelShell({ children }: { children: ReactNode }) {
                             <GlassCard className="mb-5 flex items-start gap-3 border-warning/40 px-4 py-3 text-sm sm:items-center sm:px-5">
                                 <Clock size={20} className="shrink-0 text-warning" />
                                 <span>
-                                    <strong>{me.availability.label}</strong>
+                                    <strong>{availabilityText(me.availability)}</strong>
                                     {me.availability.pauseReason && (
                                         <> · {me.availability.pauseReason}</>
                                     )}
@@ -508,14 +517,23 @@ export function RequireRoles({
 }
 
 const LIVE: Record<RealtimeStatus, { label: string; dot: string }> = {
-    connected: { label: 'Ao vivo', dot: 'pulse-dot' },
-    connecting: { label: 'Conectando…', dot: 'h-2.5 w-2.5 rounded-pill bg-warning' },
+    connected: { label: REALTIME_STATUS_TEXTS.connected.label, dot: 'pulse-dot' },
+    connecting: {
+        label: REALTIME_STATUS_TEXTS.connecting.label,
+        dot: 'h-2.5 w-2.5 rounded-pill bg-warning'
+    },
     reconnecting: {
-        label: 'Reconectando…',
+        label: REALTIME_STATUS_TEXTS.reconnecting.label,
         dot: 'h-2.5 w-2.5 animate-pulse rounded-pill bg-warning'
     },
-    offline: { label: 'Sem internet', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' },
-    rejected: { label: 'Desconectado', dot: 'h-2.5 w-2.5 rounded-pill bg-danger' }
+    offline: {
+        label: REALTIME_STATUS_TEXTS.offline.label,
+        dot: 'h-2.5 w-2.5 rounded-pill bg-danger'
+    },
+    rejected: {
+        label: REALTIME_STATUS_TEXTS.rejected.label,
+        dot: 'h-2.5 w-2.5 rounded-pill bg-danger'
+    }
 };
 
 function LiveIndicator({ status }: { status: RealtimeStatus }) {

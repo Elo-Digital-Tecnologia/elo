@@ -1,6 +1,15 @@
 {
     "extends": "@elo/config/tsconfig.base.json",
-    "compilerOptions": { "module": "CommonJS", "outDir": "dist", "rootDir": "src" },
+    "compilerOptions": {
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "outDir": "dist",
+        "rootDir": "src",
+        "noUncheckedIndexedAccess": true,
+        "exactOptionalPropertyTypes": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noImplicitOverride": true
+    },
     "include": ["src"],
     "exclude": ["src/**/*.spec.ts"]
 }

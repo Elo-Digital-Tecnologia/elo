@@ -1,7 +1,9 @@
 'use client';
 
-import type { PublicMenuView } from '@elo/core';
-import { ApiError, api } from '@elo/client';
+import type { PublicMenuView } from '@elo/core/api/views/restaurant.view';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { SearchX, Store } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { MenuFooter } from '../_components/menu-chrome';
@@ -16,7 +18,7 @@ import { MenuHeader } from '../_components/menu/header';
 import { RestaurantInfo } from '../_components/menu/info';
 import { Notice } from '../_components/notice';
 
-/** Link fixo do restaurante: apenas consulta do cardápio. */
+/** Fixed restaurant link: read-only menu. */
 export default function FixedMenu({ params }: { params: { slug: string } }) {
     const [data, setData] = useState<PublicMenuView | null>(null);
     const [missing, setMissing] = useState<'not_found' | 'unavailable' | null>(null);
@@ -34,7 +36,9 @@ export default function FixedMenu({ params }: { params: { slug: string } }) {
                 (e) =>
                     e instanceof ApiError &&
                     setMissing(
-                        e.code === 'menu_unavailable' ? 'unavailable' : 'not_found'
+                        e.code === ApiErrorCode.MENU_UNAVAILABLE
+                            ? 'unavailable'
+                            : 'not_found'
                     )
             );
     }, [params.slug]);

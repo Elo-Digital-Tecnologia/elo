@@ -1,22 +1,21 @@
 'use client';
 
-import type { RestaurantListItem, RestaurantListView } from '@elo/core';
-import { api } from '@elo/client';
-import { RESTAURANT_STATUS_LABEL } from '@elo/core';
-import {
-    Badge,
-    Donut,
-    ErrorState,
-    GlassCard,
-    PageHeader,
-    SkeletonCards,
-    Stagger,
-    StaggerItem,
-    Stat
-} from '@elo/ui';
+import type {
+    RestaurantListItem,
+    RestaurantListView
+} from '@elo/core/api/views/restaurant.view';
+import { api } from '@elo/client/http/api-client';
+import { Donut } from '@elo/ui/components/data/charts';
+import { Stat } from '@elo/ui/components/data/stat';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { ErrorState, SkeletonCards } from '@elo/ui/components/feedback/states';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
 import { Building2, CircleCheck, FileClock } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { RESTAURANT_STATUS_LABEL } from '#/_lib/messages/subscription';
 import { STATUS_TONE, dayBR } from '../../../_lib/restaurant-status';
 import { useAdmin } from '../../_components/shell';
 

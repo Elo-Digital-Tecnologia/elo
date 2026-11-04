@@ -1,35 +1,30 @@
 'use client';
 
 import type {
-    DocumentView,
-    PlanView,
     RestaurantListItem,
     RestaurantListStatus,
     RestaurantListView
-} from '@elo/core';
+} from '@elo/core/api/views/restaurant.view';
+import type { DocumentView, PlanView } from '@elo/core/billing/billing';
 import type { ContractFormState } from './[id]/_components/contracts';
-import { ApiError, api, apiUpload } from '@elo/client';
+import { api, apiUpload } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { DOCUMENT_LIMITS } from '@elo/core/billing/billing';
+import { businessDay } from '@elo/core/contracts/contracts';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    DOCUMENT_LIMITS,
-    FIELD_RULES,
-    RESTAURANT_STATUS_LABEL,
-    businessDay
-} from '@elo/core';
-import {
-    Badge,
-    Button,
-    ConfirmModal,
-    DataTable,
     EmptyState,
     ErrorState,
-    Field,
-    Input,
-    Modal,
-    PageHeader,
-    Pagination,
-    PasswordInput,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, PasswordInput } from '@elo/ui/components/forms/fields';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Pagination } from '@elo/ui/components/navigation/pagination';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import {
     ArchiveRestore,
     Building2,
@@ -42,6 +37,14 @@ import {
 } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { DEBOUNCE_MS } from '#/_lib/constants/timing';
+import { fileSize } from '#/_lib/format';
+import {
+    CONTRACT_UPLOAD_ERRORS,
+    RESTAURANT_CREATION_ERRORS,
+    RESTAURANT_CREATION_FIELD_ERRORS
+} from '#/_lib/messages/errors';
+import { RESTAURANT_STATUS_LABEL } from '#/_lib/messages/subscription';
 import { STATUS_TONE } from '../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../_lib/use-form';
 import { useAdmin } from '../../_components/shell';
@@ -53,7 +56,6 @@ import {
     contractError,
     contractPlans
 } from './[id]/_components/contracts';
-import { fileSize } from './[id]/_components/documents';
 import { downloadExport } from './export';
 
 const EMPTY = {
@@ -72,25 +74,6 @@ const CHECKS = {
     managerContact: rule(FIELD_RULES.contact),
     adminUsername: rule(FIELD_RULES.username),
     adminPassword: rule(FIELD_RULES.password)
-};
-
-/** The link comes from the name (there is no link field), so link conflicts land under the name. */
-const FIELD_MESSAGES: Record<string, string> = {
-    slug_taken: 'Já existe um restaurante com esse link; mude o nome.',
-    slug_reserved: 'Esse nome gera um link reservado do sistema; mude o nome.',
-    invalid_slug: 'Esse nome não gera um link válido; use letras ou números.',
-    username_taken: 'Esse usuário já existe.'
-};
-
-const CREATE_ERRORS: Record<string, string> = {
-    plan_inactive: 'Este plano foi desativado. Escolha outro.',
-    plan_not_found: 'Este plano não existe mais. Escolha outro.'
-};
-
-/** Steps after the restaurant exists; a failure leaves it created and Pendente. */
-const CONTRACT_STEP_ERRORS: Record<string, string> = {
-    unsupported_document: 'O arquivo não é um PDF ou uma foto aceita.',
-    file_too_large: 'O arquivo passa de 10 MB.'
 };
 const SORTS = [
     ['name', 'Nome'],
@@ -150,7 +133,7 @@ function View() {
     const [data, setData] = useState<RestaurantListView | null>(null);
     const [failed, setFailed] = useState(false);
     const [open, setOpen] = useState(false);
-    const form = useForm(EMPTY, CHECKS, FIELD_MESSAGES);
+    const form = useForm(EMPTY, CHECKS, RESTAURANT_CREATION_FIELD_ERRORS);
     const [withContract, setWithContract] = useState(false);
     const contract = useForm<ContractFormState>(EMPTY_CONTRACT, contractChecks);
     const [contractFile, setContractFile] = useState<File | null>(null);
@@ -196,7 +179,7 @@ function View() {
     // Typing settles for a moment before it becomes a search.
     useEffect(() => {
         if (search.trim() === filters.q) return;
-        const t = setTimeout(() => setFilters({ q: search.trim() }), 350);
+        const t = setTimeout(() => setFilters({ q: search.trim() }), DEBOUNCE_MS.search);
         return () => clearTimeout(t);
     }, [search, filters.q, setFilters]);
 
@@ -279,7 +262,7 @@ function View() {
         } catch (err) {
             if (restaurant) {
                 const problem =
-                    (err instanceof ApiError && CONTRACT_STEP_ERRORS[err.code]) ||
+                    (err instanceof ApiError && CONTRACT_UPLOAD_ERRORS[err.code]) ||
                     contractError(err);
                 form.reset(EMPTY);
                 setWithContract(false);
@@ -288,7 +271,7 @@ function View() {
                 await load();
             } else if (!form.fromServer(err, { slug: 'name', username: 'adminUsername' }))
                 setError(
-                    (err instanceof ApiError && CREATE_ERRORS[err.code]) ||
+                    (err instanceof ApiError && RESTAURANT_CREATION_ERRORS[err.code]) ||
                         unexpected(err)
                 );
         } finally {

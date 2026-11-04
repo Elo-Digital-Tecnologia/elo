@@ -1,21 +1,28 @@
 import 'reflect-metadata';
 
 import { DataSource } from 'typeorm';
-import { ENTITIES } from './entities';
-import { SnakeNamingStrategy } from './naming';
-import { existsSync } from 'fs';
-import * as path from 'path';
+import { SnakeNamingStrategy } from '#/common/database/snake-naming.strategy.js';
+import { loadConfig } from '#/config/env.js';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 
-// The TypeORM CLI does not read env files: apps/api/.env when present, the real environment otherwise.
-const envFile = path.resolve(__dirname, '../../.env');
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+const ENV_FILES = ['../../.env', '../../../../.env'];
+for (const file of ENV_FILES) {
+    const envFile = path.resolve(import.meta.dirname, file);
+    if (existsSync(envFile)) process.loadEnvFile(envFile);
+}
 
-/** Usado pelo CLI do TypeORM (migrations). */
+const { ssl, ...database } = loadConfig().database;
+
+/**
+ * Data source used by the TypeORM CLI (`migration:generate`). The CLI does not read env
+ * files, so `apps/api/.env` and the monorepo root `.env` are loaded here.
+ */
 export default new DataSource({
     type: 'postgres',
-    url: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
-    entities: ENTITIES,
-    migrations: [__dirname + '/migrations/*.js'],
+    ...database,
+    ssl: ssl ? { rejectUnauthorized: false } : false,
+    entities: [path.join(import.meta.dirname, '../modules/*/entities/*.entity.js')],
+    migrations: [path.join(import.meta.dirname, 'migrations/*.js')],
     namingStrategy: new SnakeNamingStrategy()
 });

@@ -1,43 +1,34 @@
 'use client';
 
+import type { DocumentView, PlanView } from '@elo/core/billing/billing';
 import type {
     ContractKind,
     ContractOrigin,
-    ContractProblem,
     ContractView,
-    DocumentView,
-    PlanView,
     TrialStatus
-} from '@elo/core';
-import { ApiError, api } from '@elo/client';
+} from '@elo/core/contracts/contracts';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import {
-    CONTRACT_KIND_LABEL,
     CONTRACT_LIMITS,
-    CONTRACT_ORIGIN_LABEL,
-    FIELD_RULES,
-    GRACE_DAYS,
     addYears,
     businessDay,
     contractStatus,
-    cycleLabel,
-    dayError,
-    fieldError,
-    formatBRL,
     latestContract,
     shiftDay
-} from '@elo/core';
-import {
-    Badge,
-    Button,
-    ConfirmModal,
-    DateInput,
-    Field,
-    GlassCard,
-    Input,
-    Modal,
-    Select,
-    Textarea
-} from '@elo/ui';
+} from '@elo/core/contracts/contracts';
+import { FIELD_RULES, dayError, fieldError } from '@elo/core/fields/field-rules';
+import { formatBRL } from '@elo/core/money/cents';
+import { GRACE_DAYS } from '@elo/core/subscription/subscription';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { Button } from '@elo/ui/components/forms/button';
+import { DateInput } from '@elo/ui/components/forms/date-fields';
+import { Input, Select, Textarea } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field } from '@elo/ui/components/layout/section';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import {
     Ban,
     FilePlus2,
@@ -47,6 +38,15 @@ import {
     Repeat2
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { ACTOR_FALLBACK_LABELS } from '#/_lib/messages/activity';
+import { cycleLabel } from '#/_lib/messages/billing';
+import {
+    CONTRACT_KIND_LABEL,
+    CONTRACT_ORIGIN_LABEL,
+    CONTRACT_ORIGIN_TITLES,
+    CONTRACT_PROBLEMS
+} from '#/_lib/messages/contracts';
+import { CONTRACT_ERRORS } from '#/_lib/messages/errors';
 import { dayBR, plural, trialLine } from '../../../../../_lib/restaurant-status';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { DocumentPicker, DocumentPreview } from './documents';
@@ -55,41 +55,15 @@ import { DocumentPicker, DocumentPreview } from './documents';
 const yearFrom = (start: string) => shiftDay(addYears(start, 1), -1);
 const TRIAL_SHORTCUTS = [0, 7, 14, 30];
 
-export const CONTRACT_PROBLEM: Record<ContractProblem, string> = {
-    signed_in_future: 'A data de assinatura não pode ser no futuro.',
-    signed_after_end: 'A assinatura não pode ser depois do fim da vigência.',
-    ends_before_start: 'O fim da vigência precisa ser depois do início.',
-    too_long: `A vigência pode ter no máximo ${CONTRACT_LIMITS.maxYears} anos.`,
-    already_has_contract: 'Este restaurante já tem contrato: use Renovar ou Converter.',
-    nothing_to_renew: 'Não há contrato para renovar.',
-    overlaps: 'A renovação precisa começar depois do fim do contrato atual.',
-    nothing_to_convert:
-        'A conversão vale para o piloto atual e começa durante a vigência dele (ou no dia seguinte ao fim).',
-    conversion_is_definitive: 'A conversão gera um contrato definitivo.',
-    trial_only_initial_pilot:
-        'Período de teste só no primeiro contrato, e só se for piloto.',
-    plan_required: 'Escolha o plano do contrato.'
-};
-
-const CODES: Record<string, string> = {
-    invalid_document: 'O arquivo enviado não pertence a este restaurante. Envie de novo.',
-    document_in_use: 'Este arquivo já está em outro contrato. Envie o contrato certo.',
-    not_latest_contract: 'Só o contrato mais recente pode ser anulado.',
-    contract_already_voided: 'Este contrato já foi anulado.',
-    trial_over: 'O período de teste já terminou.',
-    plan_inactive: 'Este plano foi desativado. Escolha outro.',
-    plan_not_found: 'Este plano não existe mais. Escolha outro.'
-};
-
 /** Message for a failed contract request: the rules broken, a known code, or the generic one. */
 export function contractError(err: unknown): string {
     const problems =
-        err instanceof ApiError && Array.isArray(err.data.problems)
-            ? (err.data.problems as ContractProblem[])
+        err instanceof ApiError
+            ? err.detailsOf(ApiErrorCode.INVALID_CONTRACT).map((detail) => detail.code)
             : [];
     return problems.length
-        ? problems.map((p) => CONTRACT_PROBLEM[p]).join(' ')
-        : (err instanceof ApiError && CODES[err.code]) || unexpected(err);
+        ? problems.map((p) => CONTRACT_PROBLEMS[p]).join(' ')
+        : (err instanceof ApiError && CONTRACT_ERRORS[err.code]) || unexpected(err);
 }
 
 export interface ContractFormState {
@@ -329,11 +303,6 @@ export function ContractFields({
 }
 
 type Operation = { origin: ContractOrigin; title: string };
-const TITLE: Record<ContractOrigin, string> = {
-    initial: 'Registrar contrato',
-    conversion: 'Converter em definitivo',
-    renewal: 'Renovar contrato'
-};
 
 /**
  * Contract card of a restaurant in the Elo panel: what is in force, until when, the
@@ -411,7 +380,7 @@ export function useContracts({
         void contractPlans(token, planId)
             .then(setPlans)
             .catch(() => setPlans([]));
-        setOp({ origin, title: TITLE[origin] });
+        setOp({ origin, title: CONTRACT_ORIGIN_TITLES[origin] });
     };
 
     /** Runs a request, reloads the contracts and the page, and keeps any error on screen. */
@@ -635,7 +604,7 @@ export function useContracts({
                                 )}
                             </span>
                             <span className="shrink-0 text-muted">
-                                por {c.createdByName} ·{' '}
+                                por {c.createdByName ?? ACTOR_FALLBACK_LABELS.staff} ·{' '}
                                 {new Date(c.createdAt).toLocaleDateString('pt-BR')}
                             </span>
                         </button>

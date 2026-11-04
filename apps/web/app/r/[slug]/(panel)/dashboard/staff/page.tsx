@@ -1,30 +1,37 @@
 'use client';
 
-import type { Role, StaffPerformanceRow, StaffReportView } from '@elo/core';
-import { ApiError, api } from '@elo/client';
+import type {
+    StaffPerformanceRow,
+    StaffReportView
+} from '@elo/core/api/views/report.view';
+import type { Role } from '@elo/core/roles/roles';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import {
+    CREDENTIAL_INPUT_LIMITS,
     FIELD_RULES,
-    ROLE_LABEL,
-    RestaurantStaffRoles,
-    fieldError,
-    formatDuration
-} from '@elo/core';
-import {
-    ActionMenu,
-    Avatar,
-    Badge,
-    Button,
-    DataTable,
-    EmptyState,
-    Field,
-    Input,
-    Modal,
-    PageHeader,
-    PasswordInput,
-    SkeletonCards
-} from '@elo/ui';
+    fieldError
+} from '@elo/core/fields/field-rules';
+import { RestaurantStaffRoles } from '@elo/core/roles/roles';
+import { Avatar } from '@elo/ui/components/data/avatar';
+import { DataTable } from '@elo/ui/components/data/table';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { EmptyState, SkeletonCards } from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, PasswordInput } from '@elo/ui/components/forms/fields';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { ActionMenu } from '@elo/ui/components/overlays/action-menu';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { Crown, KeyRound, Pencil, Power, Trash2, UserPlus, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { formatDuration } from '#/_lib/messages/duration';
+import {
+    OWNER_LOCKED_MESSAGE,
+    STAFF_ERRORS,
+    STAFF_FORM_MESSAGES
+} from '#/_lib/messages/errors';
+import { ROLE_LABEL } from '#/_lib/messages/roles';
 import { AvatarPicker } from '../../../../../_components/avatar-picker';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
@@ -55,17 +62,6 @@ const EMPTY: FormState = {
     roles: ['waiter']
 };
 
-const ERRORS: Record<string, string> = {
-    username_taken: 'Esse usuário já existe na equipe.',
-    not_above:
-        'Gerentes cuidam só de garçons, cozinha e caixa. Gerentes são definidos pelo titular.',
-    self: 'Você não pode desativar, excluir ou trocar os perfis da própria conta.',
-    owner: 'O titular não é desativado nem excluído. Para trocar, use "Tornar titular".',
-    owner_locked: 'Só o próprio titular altera os dados dele.',
-    wrong_password: 'Senha incorreta.',
-    invalid_owner: 'Escolha alguém ativo da equipe.'
-};
-
 /** The owner role is never picked in the form: it only moves through a transfer. */
 const PICKABLE = RestaurantStaffRoles.filter((r) => r !== 'restaurant_admin');
 const roleLabel = (r: Role) => ROLE_LABEL[r] ?? r;
@@ -81,12 +77,7 @@ const leads = (roles: readonly Role[]) => roles.some((r) => LEADS.includes(r));
 
 /** A known refusal from the API in words, or the honest "something failed". */
 const messageOf = (e: unknown) =>
-    (e instanceof ApiError && ERRORS[e.code]) || unexpected(e);
-
-const FORM_MESSAGES = {
-    username_taken: ERRORS.username_taken,
-    too_few: 'Escolha pelo menos um perfil.'
-};
+    (e instanceof ApiError && STAFF_ERRORS[e.code]) || unexpected(e);
 
 function View() {
     const { token, sub, roles: myRoles, impersonated, setAvatarUrl } = useStaff();
@@ -106,7 +97,7 @@ function View() {
             roles: (v: Role[]) =>
                 v.length ? null : { code: 'too_few', params: { min: 1 } }
         },
-        FORM_MESSAGES
+        STAFF_FORM_MESSAGES
     );
     const [error, setError] = useState<string | null>(null);
     const [resetting, setResetting] = useState<Staff | null>(null);
@@ -131,13 +122,16 @@ function View() {
     const lockOf = (u: Staff): string | null => {
         if (u.id === sub)
             return 'Sua conta: altere o nome em Editar e a senha em Minha conta.';
-        if (!isAdmin && leads(u.roles)) return ERRORS.not_above;
+        if (!isAdmin && leads(u.roles))
+            return STAFF_ERRORS[ApiErrorCode.TARGET_NOT_BELOW] ?? null;
         if (u.roles.includes('restaurant_admin') && !impersonated)
-            return ERRORS.owner_locked;
+            return OWNER_LOCKED_MESSAGE;
         return null;
     };
     const ownerLock = (u: Staff) =>
-        u.roles.includes('restaurant_admin') ? ERRORS.owner : null;
+        u.roles.includes('restaurant_admin')
+            ? (STAFF_ERRORS[ApiErrorCode.TARGET_IS_OWNER] ?? null)
+            : null;
 
     const openForm = (target: Staff | 'new') => {
         setError(null);
@@ -223,10 +217,9 @@ function View() {
             setRemoving(null);
             await load();
         } catch (err) {
-            if (err instanceof ApiError && err.code === 'staff_busy') {
-                const tables = Array.isArray(err.data.tables)
-                    ? (err.data.tables as string[]).join(', ')
-                    : '';
+            if (err instanceof ApiError && err.code === ApiErrorCode.STAFF_BUSY) {
+                const tables =
+                    err.detailsOf(ApiErrorCode.STAFF_BUSY)[0]?.tables.join(', ') ?? '';
                 setError(
                     `${removing.name} ainda atende: ${tables}. Feche as mesas ou peça para outro garçom assumir antes de excluir.`
                 );
@@ -521,7 +514,13 @@ function View() {
                                 return (
                                     <label
                                         key={r}
-                                        title={locked ? ERRORS.not_above : undefined}
+                                        title={
+                                            locked
+                                                ? STAFF_ERRORS[
+                                                      ApiErrorCode.TARGET_NOT_BELOW
+                                                  ]
+                                                : undefined
+                                        }
                                         className={`surface flex items-center gap-2.5 px-3.5 py-3 text-sm has-[:checked]:border-brand has-[:checked]:bg-brand/10 ${locked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                                     >
                                         <input
@@ -631,7 +630,7 @@ function View() {
                             autoComplete="current-password"
                             value={ownerPassword}
                             onChange={(e) => setOwnerPassword(e.target.value)}
-                            maxLength={128}
+                            maxLength={CREDENTIAL_INPUT_LIMITS.password}
                             required
                             autoFocus
                         />

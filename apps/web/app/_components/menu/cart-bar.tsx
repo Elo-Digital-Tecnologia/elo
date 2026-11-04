@@ -1,11 +1,12 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { formatBRL } from '@elo/core';
-import { motion } from '@elo/ui';
+import { formatBRL } from '@elo/core/money/cents';
+import { motion } from '@elo/ui/components/motion/motion';
+import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import { ShoppingBag } from 'lucide-react';
 
-/** Barra da sacola presa à base: resumo à esquerda, uma única ação à direita. */
+/** Cart bar pinned to the bottom: summary on the left, a single action on the right. */
 export function CartBar({
     count,
     totalCents,
@@ -22,7 +23,7 @@ export function CartBar({
             initial={{ y: 90 }}
             animate={{ y: 0 }}
             exit={{ y: 90 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            transition={{ ...MOTION_SPRINGS.bar }}
             className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         >
             <div className="btn-glass pointer-events-auto mx-auto flex max-w-2xl items-center gap-2 rounded-[22px] p-2 pl-2">

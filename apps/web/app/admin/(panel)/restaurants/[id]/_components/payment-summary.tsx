@@ -1,13 +1,18 @@
-import type { BillingEntryView, MonthState } from '@elo/core';
-import { formatBRL, paymentSummary } from '@elo/core';
+import type { BillingEntryView, MonthState } from '@elo/core/billing/billing';
+import { paymentSummary } from '@elo/core/billing/billing';
+import { formatBRL } from '@elo/core/money/cents';
+import { BILLING_MONTH_TEXTS } from '#/_lib/messages/billing';
 
 const MONTH: Record<MonthState, { label: string; className: string }> = {
-    paid_on_time: { label: 'Pago em dia', className: 'bg-success' },
-    paid_late: { label: 'Pago com atraso', className: 'bg-warning' },
-    trial: { label: 'Em teste', className: 'bg-brand/40' },
-    uncovered: { label: 'Sem pagamento', className: 'bg-danger' },
-    future: { label: 'Ainda não chegou', className: 'bg-line/40' },
-    before: { label: 'Antes do cadastro', className: 'bg-line/20' }
+    paid_on_time: {
+        label: BILLING_MONTH_TEXTS.paid_on_time.label,
+        className: 'bg-success'
+    },
+    paid_late: { label: BILLING_MONTH_TEXTS.paid_late.label, className: 'bg-warning' },
+    trial: { label: BILLING_MONTH_TEXTS.trial.label, className: 'bg-brand/40' },
+    uncovered: { label: BILLING_MONTH_TEXTS.uncovered.label, className: 'bg-danger' },
+    future: { label: BILLING_MONTH_TEXTS.future.label, className: 'bg-line/40' },
+    before: { label: BILLING_MONTH_TEXTS.before.label, className: 'bg-line/20' }
 };
 
 const monthName = (ym: string) =>

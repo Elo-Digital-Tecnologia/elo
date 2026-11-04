@@ -1,4 +1,5 @@
-import type { RestaurantStatus, TrialStatus } from '@elo/core';
+import type { TrialStatus } from '@elo/core/contracts/contracts';
+import type { RestaurantStatus } from '@elo/core/subscription/subscription';
 
 export const STATUS_TONE: Record<
     RestaurantStatus,

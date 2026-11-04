@@ -1,40 +1,31 @@
 'use client';
 
-import type { BillView, FieldError } from '@elo/core';
-import { ApiError, api, useRealtime } from '@elo/client';
+import type { BillView } from '@elo/core/api/views/bill.view';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { splitBillByItems, splitBillEqually } from '@elo/core/bills/bill';
+import { FIELD_RULES, moneyError } from '@elo/core/fields/field-rules';
+import { formatBRL, parseCents, splitEqually } from '@elo/core/money/cents';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    FIELD_RULES,
-    formatBRL,
-    moneyError,
-    parseCents,
-    splitBillByItems,
-    splitBillEqually,
-    splitEqually
-} from '@elo/core';
-import {
-    Badge,
-    Button,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    Input,
-    MoneyInput,
-    PageHeader,
-    Select,
     SkeletonCards
-} from '@elo/ui';
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, MoneyInput, Select } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
 import { Minus, Percent, Plus, Receipt, Trash2, Users } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { bpsToPercent } from '#/_lib/format';
+import { CASHIER_ERRORS } from '#/_lib/messages/errors';
+import { TABLE_STATE_LABELS } from '#/_lib/messages/tables';
 import { rule, unexpected, useForm } from '../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
-const STATE_LABEL = {
-    pending_open: 'Abrindo',
-    open: 'Aberta',
-    pending_close: 'Pediu a conta',
-    closed: 'Fechada'
-} as const;
 const STATE_TONE = {
     pending_open: 'info',
     open: 'success',
@@ -42,15 +33,8 @@ const STATE_TONE = {
     closed: 'neutral'
 } as const;
 
-const ERRORS: Record<string, string> = {
-    no_active_session: 'A mesa não tem sessão ativa.',
-    zero_adjustment: 'O valor do ajuste não pode ser zero.',
-    too_many_adjustments:
-        'Esta conta já chegou ao limite de 50 ajustes. Remova um antes de aplicar outro.'
-};
-
 const messageOf = (e: unknown) =>
-    (e instanceof ApiError && ERRORS[e.code]) || unexpected(e);
+    (e instanceof ApiError && CASHIER_ERRORS[e.code]) || unexpected(e);
 
 type AdjustmentKind = 'discount' | 'extra';
 
@@ -121,7 +105,7 @@ function Cashier() {
                                                 {b.tableName}
                                             </strong>
                                             <Badge tone={STATE_TONE[b.state]} dot>
-                                                {STATE_LABEL[b.state]}
+                                                {TABLE_STATE_LABELS[b.state]}
                                             </Badge>
                                         </div>
                                         <div className="mt-2 flex items-baseline justify-between text-sm text-muted">
@@ -200,7 +184,7 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
             ? 'Taxa recusada pelo cliente'
             : bill.feeWaivedBy === 'staff'
               ? 'Taxa removida'
-              : `Taxa de serviço (${bill.serviceFeeBps / 100}%)`;
+              : `Taxa de serviço (${bpsToPercent(bill.serviceFeeBps)}%)`;
 
     return (
         <div className="space-y-5">
@@ -208,7 +192,7 @@ function Detail({ bill, onChanged }: { bill: BillView; onChanged: () => Promise<
                 <div className="mb-4 flex items-center justify-between gap-3">
                     <h2 className="font-display text-2xl font-bold">{bill.tableName}</h2>
                     <Badge tone={STATE_TONE[bill.state]} dot>
-                        {STATE_LABEL[bill.state]}
+                        {TABLE_STATE_LABELS[bill.state]}
                     </Badge>
                 </div>
 
@@ -382,7 +366,7 @@ const Row = ({
     </div>
 );
 
-/** Divisão da conta: igual entre N pessoas ou por item (cada linha dividida entre quem consumiu). */
+/** Bill split: equally among N people or per item (each line split among who had it). */
 function Split({ bill }: { bill: BillView }) {
     const [mode, setMode] = useState<'equal' | 'items'>('equal');
     const [people, setPeople] = useState(2);

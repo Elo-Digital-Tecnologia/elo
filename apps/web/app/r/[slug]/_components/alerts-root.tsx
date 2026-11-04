@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { AlertsProvider } from '@elo/ui';
+import { AlertsProvider } from '@elo/ui/components/feedback/alerts';
 import { useRouter } from 'next/navigation';
 
 /** Alerts stay mounted across panel pages, so a banner survives navigation. */

@@ -1,122 +1,183 @@
-import * as path from 'path';
-
-export interface Env {
-    DATABASE_URL: string;
-    JWT_SECRET: string;
-    SUPERADMIN_KEY: string;
-    /** Port the API listens on: the platform's `PORT` first, then `API_PORT`. */
-    API_PORT: number;
-    /** Swagger at /docs. Always on outside production; in production only with `API_DOCS=true`. */
-    API_DOCS: boolean;
-    /** TLS to the database, for managed databases reached by their public URL. */
-    DATABASE_SSL: boolean;
-    CORS_ORIGINS: string[];
-    PUBLIC_BASE_URL: string;
-    NODE_ENV: string;
-    TABLE_SESSION_HOURS: number;
-    /** Fuso dos relatórios (dia do restaurante). */
-    REPORT_TZ: string;
-    /** Pasta das imagens enviadas pelos restaurantes. */
-    UPLOAD_DIR: string;
-    /** Days a deleted restaurant's data is kept before it is erased for good. */
-    RESTAURANT_PURGE_DAYS: number;
-    /** Activity log entries older than this many days are erased on a schedule. */
-    ACTIVITY_RETENTION_DAYS: number;
-    /** How often, in hours, the activity log cleanup runs. */
-    ACTIVITY_CLEANUP_HOURS: number;
-    /** Web Push keys (`pnpm --filter @elo/api vapid:generate`). Without them, push stays off. */
-    VAPID_PUBLIC_KEY: string | null;
-    VAPID_PRIVATE_KEY: string | null;
-    /** Contact sent to push services: mailto: or https: URL. Defaults to PUBLIC_BASE_URL. */
-    VAPID_SUBJECT: string;
-}
-
-const required = ['DATABASE_URL', 'JWT_SECRET', 'SUPERADMIN_KEY'] as const;
-
-/** Falha cedo se segredo faltar ou for fraco. Segredos só vêm de variáveis de ambiente. */
-export function loadEnv(raw: Record<string, string | undefined> = process.env): Env {
-    for (const key of required) {
-        if (!raw[key]) throw new Error(`Missing env var ${key}`);
-    }
-    if (raw.JWT_SECRET!.length < 16)
-        throw new Error('JWT_SECRET must be at least 16 chars');
-    if (raw.SUPERADMIN_KEY!.length < 24)
-        throw new Error('SUPERADMIN_KEY must be at least 24 chars');
-    const production = raw.NODE_ENV === 'production';
-    if (production) {
-        const problems = productionProblems(raw);
-        if (problems.length)
-            throw new Error(`Refusing to start in production: ${problems.join('; ')}`);
-    }
-    return {
-        DATABASE_URL: raw.DATABASE_URL!,
-        JWT_SECRET: raw.JWT_SECRET!,
-        SUPERADMIN_KEY: raw.SUPERADMIN_KEY!,
-        API_PORT: Number(raw.PORT || raw.API_PORT || 3001),
-        API_DOCS: !production || raw.API_DOCS === 'true',
-        DATABASE_SSL: raw.DATABASE_SSL === 'true',
-        CORS_ORIGINS: (raw.CORS_ORIGINS ?? 'http://localhost:3000')
-            .split(',')
-            .map((s) => s.trim()),
-        PUBLIC_BASE_URL: raw.PUBLIC_BASE_URL ?? 'http://localhost:3000',
-        NODE_ENV: raw.NODE_ENV ?? 'development',
-        TABLE_SESSION_HOURS: Number(raw.TABLE_SESSION_HOURS ?? 4),
-        REPORT_TZ: raw.REPORT_TZ ?? 'America/Sao_Paulo',
-        // Relative paths (like ./uploads in .env.example) resolve from where the API runs; files are served by absolute path.
-        UPLOAD_DIR: path.resolve(process.cwd(), raw.UPLOAD_DIR || 'uploads'),
-        RESTAURANT_PURGE_DAYS: positive(
-            raw.RESTAURANT_PURGE_DAYS,
-            90,
-            'RESTAURANT_PURGE_DAYS'
-        ),
-        ACTIVITY_RETENTION_DAYS: positive(
-            raw.ACTIVITY_RETENTION_DAYS,
-            180,
-            'ACTIVITY_RETENTION_DAYS'
-        ),
-        ACTIVITY_CLEANUP_HOURS: positive(
-            raw.ACTIVITY_CLEANUP_HOURS,
-            24,
-            'ACTIVITY_CLEANUP_HOURS',
-            'hours'
-        ),
-        VAPID_PUBLIC_KEY: raw.VAPID_PUBLIC_KEY || null,
-        VAPID_PRIVATE_KEY: raw.VAPID_PRIVATE_KEY || null,
-        VAPID_SUBJECT:
-            raw.VAPID_SUBJECT || (raw.PUBLIC_BASE_URL ?? 'http://localhost:3000')
-    };
-}
+import { z } from 'zod';
+import { parseDuration } from './duration.js';
+import path from 'node:path';
 
 const PRODUCTION_SECRET_LENGTH = 32;
+const DEV_SECRET_LENGTH = 16;
+const SUPERADMIN_KEY_LENGTH = 24;
+const ANY_ORIGIN = '*';
 
-/** What a production deployment must not run with: plain http addresses or short secrets. */
-export function productionProblems(raw: Record<string, string | undefined>): string[] {
-    const problems: string[] = [];
-    const https = (url: string) => /^https:\/\/[^\s/]+/.test(url);
-    if (!raw.PUBLIC_BASE_URL || !https(raw.PUBLIC_BASE_URL))
-        problems.push('PUBLIC_BASE_URL must be an https address');
-    const origins = (raw.CORS_ORIGINS ?? '')
+const isHttps = (url: string) => /^https:\/\/[^\s/]+/.test(url);
+const list = (value: string) =>
+    value
         .split(',')
-        .map((s) => s.trim())
+        .map((item) => item.trim())
         .filter(Boolean);
-    if (!origins.length || !origins.every(https))
-        problems.push('CORS_ORIGINS must list https addresses only');
-    for (const key of ['JWT_SECRET', 'SUPERADMIN_KEY'] as const) {
-        if ((raw[key] ?? '').length < PRODUCTION_SECRET_LENGTH)
+
+const text = z.string().trim().min(1);
+const optionalText = z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().trim().optional()
+);
+const flag = z.enum(['true', 'false']).transform((value) => value === 'true');
+const positiveInteger = z.coerce.number().int().positive();
+const duration = z.string().transform((value, ctx) => {
+    const ms = parseDuration(value);
+    if (ms === null) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'must be a duration such as 60s, 15min, 4h or 7d'
+        });
+        return z.NEVER;
+    }
+    return ms;
+});
+
+const envSchema = z
+    .object({
+        NODE_ENV: z.enum(['development', 'test', 'production']),
+
+        // Application
+        APP_PORT: positiveInteger,
+        APP_PREFIX: z
+            .string()
+            .trim()
+            .regex(/^[a-z0-9-]*$/),
+        APP_PUBLIC_URL: z.url(),
+        APP_TIME_ZONE: text,
+        APP_DOCS: flag,
+        APP_UPLOAD_DIR: text,
+        APP_CORS_ORIGINS: text,
+        APP_CORS_METHODS: text,
+
+        // Postgres connection
+        PG_HOST: text,
+        PG_PORT: positiveInteger,
+        PG_USER: text,
+        PG_PASS: text,
+        PG_DBNAME: text,
+        PG_SSL: flag,
+
+        // JWT
+        JWT_ACCESS_TOKEN_SECRET: z.string().min(DEV_SECRET_LENGTH),
+        JWT_ACCESS_TOKEN_EXPIRES_IN: duration,
+
+        // Sessions
+        SESSION_REFRESH_EXPIRES_IN: duration,
+        SESSION_TABLE_EXPIRES_IN: duration,
+
+        // Superadmin
+        SUPERADMIN_KEY: z.string().min(SUPERADMIN_KEY_LENGTH),
+
+        // Rate limit
+        THROTTLE_TTL: duration,
+        THROTTLE_LIMIT: positiveInteger,
+
+        // Data retention
+        RETENTION_RESTAURANT_PURGE_IN: duration,
+        RETENTION_AUDIT_LOG_IN: duration,
+        RETENTION_AUDIT_LOG_CLEANUP_EVERY: duration,
+
+        // Web Push
+        PUSH_VAPID_PUBLIC_KEY: optionalText,
+        PUSH_VAPID_PRIVATE_KEY: optionalText,
+        PUSH_VAPID_SUBJECT: optionalText
+    })
+    .superRefine((env, ctx) => {
+        if (env.NODE_ENV !== 'production') return;
+        for (const problem of productionProblems(env))
+            ctx.addIssue({ code: 'custom', message: problem });
+    });
+
+export type RawEnv = z.input<typeof envSchema>;
+
+/** What a production deployment must not run with: plain http addresses, open CORS or short secrets. */
+export function productionProblems(env: {
+    APP_PUBLIC_URL?: string | undefined;
+    APP_CORS_ORIGINS?: string | undefined;
+    JWT_ACCESS_TOKEN_SECRET?: string | undefined;
+    SUPERADMIN_KEY?: string | undefined;
+}): string[] {
+    const problems: string[] = [];
+    if (!env.APP_PUBLIC_URL || !isHttps(env.APP_PUBLIC_URL))
+        problems.push('APP_PUBLIC_URL must be an https address');
+    const origins = list(env.APP_CORS_ORIGINS ?? '');
+    if (!origins.length || !origins.every(isHttps))
+        problems.push('APP_CORS_ORIGINS must list https addresses only');
+    for (const key of ['JWT_ACCESS_TOKEN_SECRET', 'SUPERADMIN_KEY'] as const) {
+        if ((env[key] ?? '').length < PRODUCTION_SECRET_LENGTH)
             problems.push(`${key} must be at least ${PRODUCTION_SECRET_LENGTH} chars`);
     }
     return problems;
 }
 
-function positive(
-    value: string | undefined,
-    fallback: number,
-    name: string,
-    unit = 'days'
-): number {
-    if (value === undefined || value === '') return fallback;
-    const n = Number(value);
-    if (!Number.isInteger(n) || n < 1)
-        throw new Error(`${name} must be a positive whole number of ${unit}`);
-    return n;
+/**
+ * Validates the environment and turns it into the nested config read through
+ * `ConfigService<EnvConfig>`. Fails at startup when a value is missing or invalid.
+ */
+export function loadConfig(raw: Record<string, string | undefined> = process.env) {
+    const result = envSchema.safeParse(raw);
+    if (!result.success) {
+        const problems = result.error.issues.map((issue) =>
+            issue.path.length
+                ? `${issue.path.join('.')}: ${issue.message}`
+                : issue.message
+        );
+        throw new Error(`Invalid environment: ${problems.join('; ')}`);
+    }
+    const env = result.data;
+    const isProduction = env.NODE_ENV === 'production';
+    const origins = list(env.APP_CORS_ORIGINS);
+    return {
+        app: {
+            nodeEnv: env.NODE_ENV,
+            isProduction,
+            port: env.APP_PORT,
+            prefix: env.APP_PREFIX,
+            publicUrl: env.APP_PUBLIC_URL.replace(/\/$/, ''),
+            timeZone: env.APP_TIME_ZONE,
+            docs: env.APP_DOCS,
+            uploadDir: path.resolve(process.cwd(), env.APP_UPLOAD_DIR),
+            cors: {
+                anyOrigin: origins.includes(ANY_ORIGIN),
+                origins: origins.filter((origin) => origin !== ANY_ORIGIN),
+                methods: list(env.APP_CORS_METHODS)
+            }
+        },
+        database: {
+            host: env.PG_HOST,
+            port: env.PG_PORT,
+            username: env.PG_USER,
+            password: env.PG_PASS,
+            database: env.PG_DBNAME,
+            ssl: env.PG_SSL
+        },
+        jwt: {
+            accessTokenSecret: env.JWT_ACCESS_TOKEN_SECRET,
+            accessTokenExpiresInMs: env.JWT_ACCESS_TOKEN_EXPIRES_IN
+        },
+        session: {
+            refreshExpiresInMs: env.SESSION_REFRESH_EXPIRES_IN,
+            tableExpiresInMs: env.SESSION_TABLE_EXPIRES_IN
+        },
+        auth: {
+            superadminKey: env.SUPERADMIN_KEY
+        },
+        throttle: {
+            ttlMs: env.THROTTLE_TTL,
+            limit: env.THROTTLE_LIMIT
+        },
+        retention: {
+            restaurantPurgeMs: env.RETENTION_RESTAURANT_PURGE_IN,
+            auditLogMs: env.RETENTION_AUDIT_LOG_IN,
+            auditLogCleanupEveryMs: env.RETENTION_AUDIT_LOG_CLEANUP_EVERY
+        },
+        push: {
+            vapidPublicKey: env.PUSH_VAPID_PUBLIC_KEY ?? null,
+            vapidPrivateKey: env.PUSH_VAPID_PRIVATE_KEY ?? null,
+            vapidSubject: env.PUSH_VAPID_SUBJECT ?? env.APP_PUBLIC_URL
+        }
+    };
 }
+
+export type EnvConfig = ReturnType<typeof loadConfig>;

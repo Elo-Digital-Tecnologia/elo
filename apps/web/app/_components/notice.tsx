@@ -1,6 +1,7 @@
-import { Logo, ThemeToggle } from '@elo/ui';
+import { Logo } from '@elo/ui/components/brand/logo';
+import { ThemeToggle } from '@elo/ui/theme/theme';
 
-/** Aviso de tela cheia: link inválido, mesa em uso, atendimento encerrado, erro. */
+/** Full screen notice: invalid link, table in use, service ended, error. */
 export function Notice({
     title,
     children,

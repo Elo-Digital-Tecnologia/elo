@@ -1,0 +1,216 @@
+import type { PauseList, PauseView } from '@elo/core/api/views/pause.view';
+import type { Availability } from '@elo/core/opening-hours/open-status';
+import type { JwtUser } from '#/common/types/jwt-user.type.js';
+import type { EnvConfig } from '#/config/env.js';
+import type { CreatePauseDTO } from './dto/create-pause.dto.js';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import {
+    availability,
+    isPauseActive,
+    pauseEnd,
+    pauseProblems
+} from '@elo/core/opening-hours/open-status';
+import { IsNull, Repository } from 'typeorm';
+import { SHORT_CACHE_MS } from '#/common/constants.js';
+import { AuditLogService } from '#/modules/audit-logs/audit-log.service.js';
+import { RealtimeService } from '#/modules/realtime/realtime.service.js';
+import { RestaurantEntity } from '#/modules/restaurants/entities/restaurant.entity.js';
+import { RestaurantNotFoundException } from '#/modules/restaurants/exceptions/restaurant-not-found.exception.js';
+import { RestaurantPauseEntity } from './entities/restaurant-pause.entity.js';
+import { InvalidPauseException } from './exceptions/invalid-pause.exception.js';
+import { PauseNotFoundException } from './exceptions/pause-not-found.exception.js';
+import { RestaurantClosedException } from './exceptions/restaurant-closed.exception.js';
+import { PAUSE_HISTORY_LIMIT } from './pause.constants.js';
+
+const PAST_PAGE_SIZE = 5;
+
+const view = (p: RestaurantPauseEntity): PauseView => ({
+    id: p.id,
+    kind: p.kind,
+    startsAt: p.startsAt.toISOString(),
+    endsAt: p.endsAt?.toISOString() ?? null,
+    endedAt: p.endedAt?.toISOString() ?? null,
+    reason: p.reason,
+    createdByName: p.createdByName,
+    createdAt: p.createdAt.toISOString()
+});
+
+/**
+ * Opening hours plus temporary closures decide whether guests can open a table.
+ * Tables already open keep going until the waiter closes them.
+ */
+@Injectable()
+export class PauseService {
+    private readonly cache = new Map<
+        string,
+        { pauses: RestaurantPauseEntity[]; until: number }
+    >();
+
+    constructor(
+        @InjectRepository(RestaurantPauseEntity)
+        private readonly pauses: Repository<RestaurantPauseEntity>,
+        @InjectRepository(RestaurantEntity)
+        private readonly restaurants: Repository<RestaurantEntity>,
+        private readonly configService: ConfigService<EnvConfig, true>,
+        private readonly audit: AuditLogService,
+        private readonly realtime: RealtimeService
+    ) {}
+
+    /** Closures that are running or still to come. */
+    private async pending(restaurantId: string): Promise<RestaurantPauseEntity[]> {
+        const hit = this.cache.get(restaurantId);
+        if (hit && hit.until > Date.now()) return hit.pauses;
+        const now = new Date();
+        const rows = await this.pauses
+            .createQueryBuilder('p')
+            .where('p.restaurantId = :restaurantId', { restaurantId })
+            .andWhere('(p.endedAt IS NULL OR p.endedAt > :now)', { now })
+            .andWhere('(p.endsAt IS NULL OR p.endsAt > :now)', { now })
+            .orderBy('p.startsAt', 'ASC')
+            .take(PAUSE_HISTORY_LIMIT)
+            .getMany();
+        this.cache.set(restaurantId, {
+            pauses: rows,
+            until: Date.now() + SHORT_CACHE_MS
+        });
+        return rows;
+    }
+
+    public async of(
+        restaurant: Pick<RestaurantEntity, 'id' | 'openingHours'>
+    ): Promise<Availability> {
+        return availability({
+            hours: restaurant.openingHours,
+            pauses: await this.pending(restaurant.id),
+            now: new Date(),
+            timeZone: this.configService.getOrThrow('app.timeZone', { infer: true })
+        });
+    }
+
+    /** Refuses a new table while the restaurant is closed or on a temporary closure. */
+    public async assertOpen(restaurantId: string): Promise<void> {
+        const restaurant = await this.restaurants.findOne({
+            where: { id: restaurantId },
+            select: { id: true, openingHours: true }
+        });
+        if (!restaurant) throw new RestaurantNotFoundException();
+        const status = await this.of(restaurant);
+        if (!status.open) throw new RestaurantClosedException({ availability: status });
+    }
+
+    public async list(restaurantId: string, page = 1): Promise<PauseList> {
+        const restaurant = await this.restaurants.findOneOrFail({
+            where: { id: restaurantId },
+            select: { id: true, openingHours: true }
+        });
+        // Closures that really happened; the ones cancelled before starting stay only in the activity log.
+        const past = await this.pauses
+            .createQueryBuilder('p')
+            .where('p.restaurantId = :restaurantId', { restaurantId })
+            .andWhere(
+                '((p.endedAt IS NOT NULL AND p.endedAt <= :now AND p.endedAt > p.startsAt) OR (p.endedAt IS NULL AND p.endsAt <= :now))',
+                { now: new Date() }
+            )
+            .orderBy('p.startsAt', 'DESC')
+            .skip((page - 1) * PAST_PAGE_SIZE)
+            .take(PAST_PAGE_SIZE)
+            .getManyAndCount();
+        return {
+            availability: await this.of(restaurant),
+            upcoming: (await this.pending(restaurantId)).map(view),
+            past: {
+                items: past[0].map(view),
+                total: past[1],
+                page,
+                pageSize: PAST_PAGE_SIZE
+            }
+        };
+    }
+
+    public async create(
+        restaurantId: string,
+        dto: CreatePauseDTO,
+        actor: JwtUser
+    ): Promise<PauseView> {
+        const now = new Date();
+        const startsAt = dto.startsAt ? new Date(dto.startsAt) : now;
+        const endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
+        const kind = dto.kind ?? 'closure';
+        const problems = pauseProblems(
+            { kind, startsAt, endsAt },
+            await this.pending(restaurantId),
+            now
+        );
+        if (problems.length) throw new InvalidPauseException(problems);
+        const who = await this.audit.who(actor);
+        const pause = await this.pauses.save(
+            this.pauses.create({
+                restaurantId,
+                kind,
+                startsAt,
+                endsAt,
+                endedAt: null,
+                reason: dto.reason || null,
+                createdBy: who.id,
+                createdByName: who.name
+            })
+        );
+        await this.audit.record(
+            actor,
+            kind === 'opening' ? 'opening_created' : 'pause_created',
+            restaurantId,
+            {
+                meta: {
+                    startsAt: startsAt.toISOString(),
+                    endsAt: endsAt?.toISOString() ?? null,
+                    reason: pause.reason
+                }
+            }
+        );
+        await this.announce(restaurantId);
+        return view(pause);
+    }
+
+    /** Ends a running closure or extra opening now, or drops one that has not started yet. */
+    public async end(restaurantId: string, id: string, actor: JwtUser): Promise<void> {
+        const now = new Date();
+        const pause = await this.pauses.findOne({
+            where: { id, restaurantId, endedAt: IsNull() }
+        });
+        const end = pause ? pauseEnd(pause) : null;
+        if (!pause || (end !== null && end <= now.getTime()))
+            throw new PauseNotFoundException();
+        const running = isPauseActive(pause, now);
+        pause.endedAt = now;
+        await this.pauses.save(pause);
+        await this.audit.record(
+            actor,
+            pause.kind === 'opening' ? 'opening_ended' : 'pause_ended',
+            restaurantId,
+            {
+                meta: {
+                    running,
+                    startsAt: pause.startsAt.toISOString(),
+                    reason: pause.reason
+                }
+            }
+        );
+        await this.announce(restaurantId);
+    }
+
+    /** Tells open staff screens the new status, after a closure or the opening hours change. */
+    public async announce(restaurantId: string) {
+        this.cache.delete(restaurantId);
+        const restaurant = await this.restaurants.findOneOrFail({
+            where: { id: restaurantId },
+            select: { id: true, openingHours: true }
+        });
+        this.realtime.publish({
+            type: 'restaurant.availability',
+            restaurantId,
+            payload: await this.of(restaurant)
+        });
+    }
+}

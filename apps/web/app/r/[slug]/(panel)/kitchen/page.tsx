@@ -1,33 +1,27 @@
 'use client';
 
-import type { OrderStatus, OrderView } from '@elo/core';
-import { ApiError, api, upsertOrder, useRealtime } from '@elo/client';
-import { nextOrderStatus, previousOrderStatus } from '@elo/core';
-import {
-    AnimatePresence,
-    Badge,
-    Button,
-    EmptyState,
-    GlassCard,
-    PageHeader,
-    motion
-} from '@elo/ui';
+import type { OrderView } from '@elo/core/api/views/order.view';
+import type { OrderStatus } from '@elo/core/orders/order-status';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { upsertOrder } from '@elo/client/realtime/order-events';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { nextOrderStatus, previousOrderStatus } from '@elo/core/orders/order-status';
+import { Badge } from '@elo/ui/components/feedback/badge';
+import { EmptyState } from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { PageHeader } from '@elo/ui/components/layout/section';
+import { AnimatePresence, motion } from '@elo/ui/components/motion/motion';
+import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import { ChefHat, Clock, OctagonAlert, Undo2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { KITCHEN_HIGHLIGHT_MS } from '#/_lib/constants/timing';
+import { KITCHEN_NEXT_STEP_LABELS, KITCHEN_STATUS_LABELS } from '#/_lib/messages/orders';
 import { RequireRoles, useStaff } from '../../_components/shell';
 
-const NEXT_LABEL: Record<string, string> = {
-    received: 'Marcar recebido',
-    preparing: 'Iniciar preparo',
-    ready: 'Marcar pronto'
-};
-
 const STATUS_TONE = { sent: 'info', received: 'brand', preparing: 'warning' } as const;
-const STATUS_LABEL = {
-    sent: 'Novo',
-    received: 'Recebido',
-    preparing: 'Em preparo'
-} as const;
 
 const IN_PROGRESS = ['sent', 'received', 'preparing'];
 /** A "ready" order leaves the board; this long the kitchen can still take it back. */
@@ -45,7 +39,7 @@ function useNow(everyMs = 20_000) {
 const minutesSince = (iso: string, now: number) =>
     Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
 
-/** Tela da cozinha (pensada para TV): cards por ordem de chegada, mesa no canto superior direito. */
+/** Kitchen screen (made for a TV): cards in arrival order, table in the top right corner. */
 function Board() {
     const { token, roles, impersonated } = useStaff();
     // The order status belongs to the kitchen; anyone else (an administrator, Elo support) only watches.
@@ -71,7 +65,7 @@ function Board() {
                         setFresh(
                             (f) => new Set([...f].filter((id) => !added.includes(id)))
                         ),
-                    1600
+                    KITCHEN_HIGHLIGHT_MS
                 );
             }
         }
@@ -83,7 +77,7 @@ function Board() {
         void load();
     }, [load]);
 
-    // O evento já traz o pedido inteiro: aplica no estado em vez de refazer o GET da lista.
+    // The event carries the whole order: applied to the state instead of fetching the list again.
     const onOrder = useCallback((o: OrderView) => {
         setOrders((list) => upsertOrder(list, o, (x) => IN_PROGRESS.includes(x.status)));
         if (!seen.current?.has(o.id) && IN_PROGRESS.includes(o.status)) {
@@ -91,7 +85,7 @@ function Board() {
             setFresh((f) => new Set(f).add(o.id));
             setTimeout(
                 () => setFresh((f) => new Set([...f].filter((id) => id !== o.id))),
-                1600
+                KITCHEN_HIGHLIGHT_MS
             );
         }
     }, []);
@@ -128,9 +122,9 @@ function Board() {
         } catch (e) {
             // A 409 means another screen moved it first: the list reloads to show where it is now.
             setError(
-                e instanceof ApiError && e.status === 409
+                e instanceof ApiError && e.status === HTTP_STATUS.CONFLICT
                     ? 'O pedido mudou em outra tela. A lista foi atualizada.'
-                    : e instanceof ApiError && e.status === 403
+                    : e instanceof ApiError && e.status === HTTP_STATUS.FORBIDDEN
                       ? 'Só quem tem o perfil Cozinha muda o status dos pedidos.'
                       : 'Não foi possível mudar o pedido. Tente de novo.'
             );
@@ -241,9 +235,7 @@ function Board() {
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.9 }}
                                 transition={{
-                                    type: 'spring',
-                                    stiffness: 320,
-                                    damping: 30
+                                    ...MOTION_SPRINGS.card
                                 }}
                             >
                                 <GlassCard
@@ -261,8 +253,8 @@ function Board() {
                                                 dot
                                             >
                                                 {
-                                                    STATUS_LABEL[
-                                                        o.status as keyof typeof STATUS_LABEL
+                                                    KITCHEN_STATUS_LABELS[
+                                                        o.status as keyof typeof KITCHEN_STATUS_LABELS
                                                     ]
                                                 }
                                             </Badge>
@@ -322,7 +314,7 @@ function Board() {
                                                     className="min-w-0 flex-1 !py-3.5 text-base"
                                                     onClick={() => advance(o)}
                                                 >
-                                                    {NEXT_LABEL[next]}
+                                                    {KITCHEN_NEXT_STEP_LABELS[next]}
                                                 </Button>
                                             )}
                                         </div>

@@ -1,33 +1,69 @@
 import 'reflect-metadata';
 
-import { INestApplication } from '@nestjs/common';
+import type { ApiResponse } from '@elo/core/api/api-response';
+import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { Socket } from 'socket.io-client';
 import { JwtService } from '@nestjs/jwt';
-import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage } from '@nestjs/throttler';
-import { businessDay } from '@elo/core';
-import cookieParser from 'cookie-parser';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { businessDay } from '@elo/core/contracts/contracts';
 import sharp from 'sharp';
-import { Socket, io } from 'socket.io-client';
+import { io } from 'socket.io-client';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { AppModule } from '../src/app.module';
-import { ActivityCleanupService } from '../src/audit/activity-cleanup.service';
-import { createValidationPipe } from '../src/common/validation';
-import { RestaurantLifecycleService } from '../src/restaurants/restaurant-lifecycle.service';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AppModule } from '#/app.module.js';
+import { setupApp } from '#/app.setup.js';
+import { AuditLogCleanupService } from '#/modules/audit-logs/audit-log-cleanup.service.js';
+import { RestaurantLifecycleService } from '#/modules/restaurants/restaurant-lifecycle.service.js';
 
 /**
- * Fluxos críticos contra Postgres real (migrations aplicadas).
- * Runs only against DATABASE_URL_TEST (see test/setup-env.ts), never the development database.
+ * Critical flows against a real Postgres (migrations applied).
+ * Runs only against PG_TEST_DBNAME (see test/setup-env.ts), never the development database.
  */
-const suite = process.env.DATABASE_URL_TEST ? describe : describe.skip;
-const SUPERADMIN_KEY = process.env.SUPERADMIN_KEY ?? '';
+/**
+ * The suites read `data` (or `error`) straight from `res.body`; the envelope itself is
+ * checked in its own test with `raw()`.
+ */
+const unwrapEnvelope = (res: request.Response) => {
+    const body = res.body as Partial<ApiResponse> | undefined;
+    if (body && typeof body === 'object' && 'success' in body)
+        res.body = body.success ? body.data : body.error;
+};
+const codeOf = (detail: { code: string }) => detail.code;
+const fieldsOf = (details: { field: string; code: string; params?: unknown }[]) =>
+    Object.fromEntries(details.map(({ field, ...error }) => [field, error]));
 
-suite('fluxo da mesa (e2e)', () => {
+const suite = process.env['PG_TEST_DBNAME'] ? describe : describe.skip;
+const SUPERADMIN_KEY = process.env['SUPERADMIN_KEY'] ?? '';
+
+suite('table flow (e2e)', () => {
     let app: INestApplication;
     let url: string;
     const suf = Date.now().toString(36);
-    const http = () => request(app.getHttpServer());
+    /** Routes live under the global prefix, except the health check and URLs that already carry it. */
+    const routeOf = (url: string) => {
+        const prefix = `/${process.env['APP_PREFIX'] ?? ''}`.replace(/\/$/, '');
+        if (!prefix || url.startsWith('/health') || url.startsWith(`${prefix}/`))
+            return url;
+        return `${prefix}${url}`;
+    };
+    const http = () => {
+        const agent = request(app.getHttpServer());
+        const unwrapped =
+            (method: 'get' | 'post' | 'patch' | 'put' | 'delete') => (url: string) =>
+                agent[method](routeOf(url)).expect(unwrapEnvelope);
+        return {
+            get: unwrapped('get'),
+            post: unwrapped('post'),
+            patch: unwrapped('patch'),
+            put: unwrapped('put'),
+            delete: unwrapped('delete')
+        };
+    };
+    const raw = () => request(app.getHttpServer());
 
     const login = async (username: string, inSlug = slug, password = 'senha12345') =>
         (
@@ -123,8 +159,7 @@ suite('fluxo da mesa (e2e)', () => {
             .useValue(unlimited)
             .compile();
         app = mod.createNestApplication<NestExpressApplication>();
-        app.use(cookieParser());
-        app.useGlobalPipes(createValidationPipe());
+        setupApp(app);
         await app.listen(0);
         url = await app.getUrl();
 
@@ -204,12 +239,12 @@ suite('fluxo da mesa (e2e)', () => {
     it('abandoned scan on a closed table does not lock it', async () => {
         const a = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
         const b = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
-        // o aparelho que perdeu a mesa recebe o motivo, não um "encerrado" genérico
+        // the device that lost the table gets the reason, not a generic "ended"
         const lost = await http()
             .get('/public/session')
             .set('Cookie', cookieOf(a))
             .expect(401);
-        expect(lost.body.message).toBe('session_taken_over');
+        expect(lost.body.code).toBe(ApiErrorCode.SESSION_TAKEN_OVER);
         await http().post('/public/session/open').set('Cookie', cookieOf(a)).expect(401);
         await http().get('/public/session').set('Cookie', cookieOf(b)).expect(200);
         await http().get('/public/session').expect(401);
@@ -219,14 +254,14 @@ suite('fluxo da mesa (e2e)', () => {
         const auth = { Authorization: `Bearer ${waiter}` };
         const a = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
         await http().post('/public/session/open').set('Cookie', cookieOf(a)).expect(201);
-        // com a abertura pedida, outro aparelho é bloqueado com conflito, sem derrubar o primeiro
+        // once the opening is requested, another device gets a conflict without dropping the first one
         await http().post(`/public/${slug}/${tableToken}/session`).expect(409);
         await http().get('/public/session').set('Cookie', cookieOf(a)).expect(200);
         await http().post(`/tables/${tableId}/reject-open`).set(auth).expect(201);
         expect(
             (await http().get('/public/session').set('Cookie', cookieOf(a)).expect(401))
-                .body.message
-        ).toBe('session_rejected');
+                .body.code
+        ).toBe(ApiErrorCode.SESSION_REJECTED);
 
         const b = await http().post(`/public/${slug}/${tableToken}/session`).expect(201);
         await http().post('/public/session/open').set('Cookie', cookieOf(b)).expect(201);
@@ -234,12 +269,41 @@ suite('fluxo da mesa (e2e)', () => {
         await http().post(`/tables/${tableId}/close`).set(auth).expect(201);
         expect(
             (await http().get('/public/session').set('Cookie', cookieOf(b)).expect(401))
-                .body.message
-        ).toBe('session_closed');
+                .body.code
+        ).toBe(ApiErrorCode.SESSION_CLOSED);
     });
 
     it('health answers without a login while the database is up', async () => {
         expect((await http().get('/health').expect(200)).body).toEqual({ status: 'ok' });
+    });
+
+    it('wraps every answer in the envelope, with a code on errors', async () => {
+        const ok = (await raw().get('/health').expect(200)).body as ApiResponse;
+        expect(ok).toMatchObject({
+            success: true,
+            path: '/health',
+            data: { status: 'ok' },
+            error: null
+        });
+        expect(Date.parse(ok.timestamp)).not.toBeNaN();
+        const missing = (await raw().get('/no-such-route').expect(404))
+            .body as ApiResponse;
+        expect(missing).toMatchObject({
+            success: false,
+            path: '/no-such-route',
+            data: null,
+            error: { code: ApiErrorCode.NOT_FOUND, details: [] }
+        });
+        const unknown = (
+            await raw()
+                .post(routeOf('/auth/superadmin'))
+                .send({ key: 'x', extra: true })
+                .expect(400)
+        ).body as ApiResponse;
+        expect(unknown.error).toMatchObject({
+            code: ApiErrorCode.VALIDATION_FAILED,
+            details: [{ field: 'extra', code: 'unknown_field' }]
+        });
     });
 
     it('rejects invalid token and unvalidated ordering', async () => {
@@ -313,8 +377,8 @@ suite('fluxo da mesa (e2e)', () => {
         // the bill waits for the kitchen: no asking for it while an order is still being made
         expect(
             (await http().post('/public/session/close').set('Cookie', cookie).expect(409))
-                .body.message
-        ).toBe('orders_in_progress');
+                .body.code
+        ).toBe(ApiErrorCode.ORDERS_IN_PROGRESS);
         for (const status of ['preparing', 'ready']) {
             await http()
                 .patch(`/orders/${order.body.id}/status`)
@@ -529,7 +593,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({ ...start, serviceFeeBps: 1000, guestFeeRefusal: true })
             .expect(200);
 
-        // 3 x R$ 40,00 + 10% de serviço
+        // 3 x R$ 40.00 + 10% service fee
         let bill = (await http().get(`/bills/${tableId}`).set(auth(cashier)).expect(200))
             .body;
         expect(bill).toMatchObject({
@@ -540,7 +604,7 @@ suite('fluxo da mesa (e2e)', () => {
         });
         await http().get(`/bills/${tableId}`).set(auth(kitchen)).expect(403);
 
-        // cliente recusa a taxa; só desfaz a própria recusa
+        // the guest refuses the fee and can only undo their own refusal
         bill = (
             await http()
                 .post('/public/session/bill/fee')
@@ -585,8 +649,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .set('Cookie', cookie)
                     .send({ refuse: true })
                     .expect(403)
-            ).body.message
-        ).toBe('fee_refusal_disabled');
+            ).body.code
+        ).toBe(ApiErrorCode.FEE_REFUSAL_DISABLED);
         await http()
             .patch('/restaurant/settings')
             .set(auth(admin))
@@ -611,7 +675,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({ waived: false })
             .expect(200);
 
-        // ajuste do caixa
+        // cashier adjustment
         bill = (
             await http()
                 .post(`/bills/${tableId}/adjustments`)
@@ -633,7 +697,7 @@ suite('fluxo da mesa (e2e)', () => {
         ).body;
         expect(bill.totalCents).toBe(13200);
 
-        // cancelado sai da conta; devolução só depois de "pronto"
+        // a cancelled order leaves the bill; returns only after "ready"
         for (const status of ['received', 'preparing', 'ready']) {
             await http()
                 .patch(`/orders/${o1.body.id}/status`)
@@ -671,7 +735,7 @@ suite('fluxo da mesa (e2e)', () => {
             .body;
         expect(bill.subtotalCents).toBe(4000);
 
-        // lista de pedidos: filtro validado e estado "returned" visível
+        // order list: validated filter and the "returned" state visible
         await http().get('/orders?status=banana').set(auth(kitchen)).expect(400);
         const listed = await http()
             .get('/orders?status=returned,sent&limit=10')
@@ -679,7 +743,7 @@ suite('fluxo da mesa (e2e)', () => {
             .expect(200);
         expect(listed.body.map((o: { id: string }) => o.id)).toContain(o1.body.id);
 
-        // relatórios: só admin; devolvido não conta como receita
+        // reports: admin only; returned orders are not revenue
         await http().get('/reports').set(auth(waiter)).expect(403);
         await http().get('/reports?from=2026-13-99').set(auth(admin)).expect(400);
         const rep = (await http().get('/reports').set(auth(admin)).expect(200)).body;
@@ -688,7 +752,7 @@ suite('fluxo da mesa (e2e)', () => {
         expect(rep.byHour).toHaveLength(24);
         expect(rep.topProducts[0].name).toBe('Margherita');
 
-        // outro restaurante não enxerga nada disto
+        // another restaurant sees none of this
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken;
         const due = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
@@ -707,7 +771,7 @@ suite('fluxo da mesa (e2e)', () => {
         );
         const other = await login(`out${suf}`, outro.body.slug);
 
-        // login é por restaurante: usuário de um não entra no outro, e o mesmo nome pode existir nos dois
+        // sign-in is per restaurant: a user of one cannot enter the other, and the same name may exist in both
         await http()
             .post(`/auth/restaurants/${slug}/login`)
             .send({ username: `out${suf}`, password: 'senha12345' })
@@ -745,7 +809,7 @@ suite('fluxo da mesa (e2e)', () => {
             })
             .expect(409);
         expect(await login(`adm${suf}`, outro.body.slug)).toBeTruthy();
-        // acesso da equipe Elo ao restaurante: exige permissão, vale como admin, não mexe em senhas e é auditado
+        // Elo team access to a restaurant: needs the permission, acts as admin, cannot touch passwords and is audited
         const eloUser = `elo${suf}`;
         await http()
             .post('/admin/staff')
@@ -798,7 +862,7 @@ suite('fluxo da mesa (e2e)', () => {
             amountCents: 9900,
             recordedByName: 'Superadmin'
         });
-        // slug reservado não vira restaurante
+        // a reserved slug never becomes a restaurant
         await restaurant(
             sa,
             {
@@ -823,7 +887,7 @@ suite('fluxo da mesa (e2e)', () => {
             []
         );
 
-        // configurações: slug não muda; taxa limitada
+        // settings: the slug does not change; the fee is capped
         await http()
             .patch('/restaurant/settings')
             .set(auth(admin))
@@ -857,7 +921,7 @@ suite('fluxo da mesa (e2e)', () => {
             })
             .expect(400);
 
-        // troca de senha e usuário desativado perde o acesso
+        // password change, and a deactivated user loses access
         await http()
             .patch('/me/password')
             .set(auth(cashier))
@@ -887,7 +951,7 @@ suite('fluxo da mesa (e2e)', () => {
         await http().post(`/tables/${tableId}/close`).set(auth(waiter)).expect(201);
     }, 30_000);
 
-    it('banco de imagens: valida o conteúdo, converte, serve e protege o que está em uso', async () => {
+    it('image library: validates the content, converts, serves and protects what is in use', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const png = await sharp({
             create: { width: 1600, height: 900, channels: 3, background: '#2e7d32' }
@@ -895,7 +959,7 @@ suite('fluxo da mesa (e2e)', () => {
             .png()
             .toBuffer();
 
-        // só o administrador envia; arquivo falso com extensão de imagem é recusado
+        // only the admin uploads; a fake file with an image extension is refused
         await http()
             .post('/catalog/media')
             .set(auth(waiter))
@@ -933,7 +997,7 @@ suite('fluxo da mesa (e2e)', () => {
             )
         ).toContain(up.body.id);
 
-        // produto usa a imagem do banco; em uso, não apaga
+        // a product uses the library image; while in use it cannot be deleted
         const cat = await http()
             .post('/catalog/categories')
             .set(auth(admin))
@@ -968,7 +1032,7 @@ suite('fluxo da mesa (e2e)', () => {
         await http().get(up.body.url.replace('/api', '')).expect(404);
     }, 30_000);
 
-    it('perfil público, etiquetas, ordem e avaliação', async () => {
+    it('public profile, tags, order and review', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const base = {
             name: 'Perfil',
@@ -977,7 +1041,7 @@ suite('fluxo da mesa (e2e)', () => {
             serviceFeeBps: 500
         };
 
-        // perfil: valida o formato e aceita limpar com texto vazio
+        // profile: validates the format and clears with empty text
         await http()
             .patch('/restaurant/settings')
             .set(auth(admin))
@@ -1148,7 +1212,7 @@ suite('fluxo da mesa (e2e)', () => {
             ).body.googleReviewUrl
         ).toBeNull();
 
-        // consulta pública mostra o perfil, mas nunca o Wi-Fi
+        // the read-only link shows the profile, but never the Wi-Fi
         const pub = await http().get(`/public/${slug}/menu`).expect(200);
         expect(pub.body.restaurant).toMatchObject({
             description: 'Pizzas no forno a lenha.',
@@ -1157,7 +1221,7 @@ suite('fluxo da mesa (e2e)', () => {
         });
         expect(JSON.stringify(pub.body)).not.toContain('segredo-wifi-123');
 
-        // dentro da mesa o Wi-Fi aparece
+        // at the table the Wi-Fi shows up
         const sess = await http()
             .post(`/public/${slug}/${tableToken}/session`)
             .expect(201);
@@ -1206,7 +1270,7 @@ suite('fluxo da mesa (e2e)', () => {
         const c = (await p('Gama').expect(201)).body;
         expect(a).toMatchObject({ featured: true, tags: ['spicy', 'new'] });
 
-        // ordem de produtos: precisa trazer todos, só do restaurante
+        // product order: must list all of them, only from the restaurant
         await http()
             .patch('/catalog/products/order')
             .set(auth(admin))
@@ -1233,7 +1297,7 @@ suite('fluxo da mesa (e2e)', () => {
             [c.id, a.id, b.id]
         );
 
-        // ordem de categorias: lista completa
+        // category order: full list
         const all = menu.map((x) => x.id);
         await http()
             .patch('/catalog/categories/order')
@@ -1260,7 +1324,7 @@ suite('fluxo da mesa (e2e)', () => {
             .expect(403);
         expect(cat2.body.id).toBeTruthy();
 
-        // avaliação: precisa de mesa aberta, 1 a 5, uma por sessão
+        // review: needs an open table, 1 to 5, one per session
         await http()
             .post('/public/session/review')
             .set('Cookie', cookie)
@@ -1307,7 +1371,7 @@ suite('fluxo da mesa (e2e)', () => {
         await http().post(`/tables/${tableId}/close`).set(auth(waiter)).expect(201);
     }, 30_000);
 
-    it('equipe: vários perfis, um só titular, disputa entre garçons, arquivamento e desempenho', async () => {
+    it('team: several roles, a single owner, waiters racing, archiving and performance', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const create = (body: Record<string, unknown>) =>
             http()
@@ -1315,7 +1379,7 @@ suite('fluxo da mesa (e2e)', () => {
                 .set(auth(admin))
                 .send({ password: 'senha12345', ...body });
 
-        // vários perfis numa pessoa; nome obrigatório
+        // several roles for one person; the name is required
         await create({ username: `sem${suf}`, roles: ['waiter'] }).expect(400);
         await create({ username: `vaz${suf}`, name: 'Sem Perfil', roles: [] }).expect(
             400
@@ -1338,8 +1402,8 @@ suite('fluxo da mesa (e2e)', () => {
                     name: 'Bruna Gerente',
                     roles: ['restaurant_admin', 'waiter']
                 }).expect(403)
-            ).body.message
-        ).toBe('owner');
+            ).body.code
+        ).toBe(ApiErrorCode.TARGET_IS_OWNER);
         const team = (await http().get('/staff').set(auth(admin)).expect(200)).body as {
             id: string;
             username: string;
@@ -1355,15 +1419,15 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(admin))
                     .send({ roles: ['restaurant_admin'] })
                     .expect(403)
-            ).body.message
-        ).toBe('owner');
+            ).body.code
+        ).toBe(ApiErrorCode.TARGET_IS_OWNER);
         await http().delete(`/staff/${me.id}`).set(auth(admin)).expect(403);
         expect(team.find((u) => u.username === `kc${suf}`)).toMatchObject({
             name: 'Kátia Cozinha',
             roles: ['kitchen', 'cashier']
         });
 
-        // dois garçons validam a mesma mesa ao mesmo tempo: só um passa, o outro sabe quem foi
+        // two waiters validate the same table at once: only one wins, the other learns who did
         const w2 = (
             await create({
                 username: `wb${suf}`,
@@ -1384,15 +1448,18 @@ suite('fluxo da mesa (e2e)', () => {
         ]);
         expect([r1.status, r2.status].sort()).toEqual([201, 409]);
         const loser = r1.status === 409 ? r1 : r2;
-        expect(loser.body).toMatchObject({ message: 'already_handled', state: 'open' });
+        expect(loser.body).toMatchObject({
+            code: ApiErrorCode.ALREADY_HANDLED,
+            details: [{ state: 'open' }]
+        });
         const winnerIsAna = r1.status === 201;
-        expect(loser.body.by).toBe(winnerIsAna ? 'Ana Lima' : 'Pessoa wai');
+        expect(loser.body.details[0].by).toBe(winnerIsAna ? 'Ana Lima' : 'Pessoa wai');
         const state = (
             await http().get('/public/session').set('Cookie', cookie).expect(200)
         ).body;
         expect(state.table.waiterName).toBe(winnerIsAna ? 'Ana' : 'Pessoa');
 
-        // chamado: o primeiro a atender leva; o cliente fica sabendo quem vem
+        // call: the first to answer takes it; the guest learns who is coming
         const call = (
             await http().post('/public/session/call').set('Cookie', cookie).expect(201)
         ).body;
@@ -1410,15 +1477,15 @@ suite('fluxo da mesa (e2e)', () => {
                 ? { name: 'Ana Lima', guest: 'Ana' }
                 : { name: 'Pessoa wai', guest: 'Pessoa' };
         expect((c1.status === 409 ? c1 : c2).body).toMatchObject({
-            message: 'already_handled',
-            by: callWinner.name
+            code: ApiErrorCode.ALREADY_HANDLED,
+            details: [{ by: callWinner.name }]
         });
         expect(((await resolved) as { handledBy: { name: string } }).handledBy.name).toBe(
             callWinner.guest
         );
         guest.close();
 
-        // cozinha volta um passo marcado por engano
+        // the kitchen reverts a step marked by mistake
         const order = (
             await http()
                 .post('/public/session/orders')
@@ -1460,7 +1527,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({})
             .expect(201);
 
-        // quem atende uma mesa aberta não pode ser arquivado; outro garçom assume e aí pode
+        // whoever serves an open table cannot be archived; once another waiter takes over, they can
         const servingId = winnerIsAna
             ? w2.id
             : team.find((u) => u.username === `wai${suf}`)!.id;
@@ -1469,7 +1536,10 @@ suite('fluxo da mesa (e2e)', () => {
             .delete(`/staff/${servingId}`)
             .set(auth(admin))
             .expect(409);
-        expect(busy.body).toMatchObject({ message: 'staff_busy', tables: ['Mesa 01'] });
+        expect(busy.body).toMatchObject({
+            code: ApiErrorCode.STAFF_BUSY,
+            details: [{ tables: ['Mesa 01'] }]
+        });
         await http().post(`/tables/${tableId}/take`).set(auth(other)).expect(201);
         await http().post(`/tables/${tableId}/close`).set(auth(other)).expect(201);
 
@@ -1491,7 +1561,7 @@ suite('fluxo da mesa (e2e)', () => {
         );
         await http().get('/reports/staff').set(auth(waiter)).expect(403);
 
-        // arquivado: some da equipe, não entra, o nome de usuário fica livre e o histórico continua
+        // archived: leaves the team, cannot sign in, the username is freed and the history stays
         await http().delete(`/staff/${w2.id}`).set(auth(admin)).expect(204);
         await http()
             .post(`/auth/restaurants/${slug}/login`)
@@ -1520,7 +1590,7 @@ suite('fluxo da mesa (e2e)', () => {
         }
     }, 30_000);
 
-    it('painel Elo: permissões separadas, lista com filtros e exclusão em duas etapas', async () => {
+    it('Elo panel: split permissions, filtered list and two-step deletion', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -1547,7 +1617,7 @@ suite('fluxo da mesa (e2e)', () => {
                     .expect(201)
             ).body.accessToken as string;
 
-        // permissões: cada uma depende de "ver"; ninguém concede o que não tem; excluir só o superadmin concede
+        // permissions: each depends on "view"; nobody grants what they lack; only the superadmin grants delete
         const viewer = (
             await http()
                 .post('/admin/staff')
@@ -1604,7 +1674,7 @@ suite('fluxo da mesa (e2e)', () => {
         const vw = await teamLogin(`vw${suf}`);
         await restaurant(vw, {}, 403);
         await http().get('/admin/restaurants?status=deleted').set(auth(vw)).expect(403);
-        // tokens emitidos antes da separação continuam valendo pelo que cobriam
+        // tokens issued before the split keep working for what they covered
         const legacy = app.get(JwtService).sign({
             sub: viewer.id,
             role: 'elo_admin',
@@ -1622,7 +1692,7 @@ suite('fluxo da mesa (e2e)', () => {
             .set(auth(legacy))
             .expect(200);
 
-        // lista: busca, situação, página e contagens
+        // list: search, status, page and counts
         const a = (await newRestaurant(`Busca ${suf} Alfa`, `ba${suf}`)).body;
         const b = (await newRestaurant(`Busca ${suf} Beta`, `bb${suf}`)).body;
         const found = (
@@ -1664,7 +1734,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({ name: `Busca ${suf} Alfa Novo` })
             .expect(200);
 
-        // exclusão: só suspenso, com o slug digitado; some de tudo; pode voltar; some de vez depois do prazo
+        // deletion: only when suspended, with the slug typed; hidden everywhere; can be restored; erased after the period
         await http()
             .delete(`/admin/restaurants/${b.id}`)
             .set(auth(sa))
@@ -1784,7 +1854,7 @@ suite('fluxo da mesa (e2e)', () => {
         expect(slugFree.body.slug).toBe(b.slug);
     }, 30_000);
 
-    it('registros, validações dos campos e inscrição para push', async () => {
+    it('activity log, field validation and push subscription', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -1806,7 +1876,7 @@ suite('fluxo da mesa (e2e)', () => {
         ).body;
         const owner = await login(`rg${suf}`, r.slug);
 
-        // campos validados e normalizados com as mesmas regras do formulário
+        // fields validated and normalized with the same rules as the form
         const base = {
             name: 'Registro',
             managerName: 'Rita Souza',
@@ -1859,7 +1929,7 @@ suite('fluxo da mesa (e2e)', () => {
             ).body
         ).toMatchObject({ phone: null, instagram: null });
 
-        // ações da equipe e da Elo ficam registradas, com nome e origem
+        // team and Elo actions are recorded, with name and origin
         await http()
             .post('/tables')
             .set(auth(owner))
@@ -1959,7 +2029,7 @@ suite('fluxo da mesa (e2e)', () => {
             .set(auth(out))
             .expect(403);
 
-        // push: chave pública (vazia sem configuração), só endpoint https, uma linha por aparelho
+        // push: public key (empty without configuration), https endpoints only, one row per device
         expect(
             (await http().get('/push/public-key').set(auth(waiterTok)).expect(200)).body
         ).toHaveProperty('key');
@@ -2002,7 +2072,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({ endpoint: `https://fcm.googleapis.com/fcm/send/${suf}` })
             .expect(204);
     }, 30_000);
-    it('assinatura: planos, pagamento calculado, estorno, ajuste de vencimento e modo suporte', async () => {
+    it('subscription: plans, calculated payment, void, due date adjustment and support mode', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -2057,7 +2127,10 @@ suite('fluxo da mesa (e2e)', () => {
             .set(auth(sa))
             .send({ cycles: 1, paidAt: dayFrom(0), amountCents: 5000 })
             .expect(400);
-        expect(bad.body.problems).toEqual(['note_required', 'receipt_required']);
+        expect(bad.body.details.map(codeOf)).toEqual([
+            'note_required',
+            'receipt_required'
+        ]);
         await http()
             .post(`/admin/restaurants/${r.id}/payments`)
             .set(auth(sa))
@@ -2284,7 +2357,7 @@ suite('fluxo da mesa (e2e)', () => {
             .send({ status: 'received' })
             .expect(403);
     });
-    it('sessões duram entre abas, renovam pelo cookie e acabam com saída, senha nova ou desativação', async () => {
+    it('sessions last across tabs, renew by cookie and end on sign-out, new password or deactivation', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const scope = `r:${slug}`;
         await http()
@@ -2380,7 +2453,7 @@ suite('fluxo da mesa (e2e)', () => {
         await http().get('/admin/overview').set(auth(sa.body.accessToken)).expect(401);
     });
 
-    it('endereço novo: o antigo continua levando ao restaurante, fica reservado e a equipe segue logada', async () => {
+    it('new address: the old one still leads to the restaurant, stays reserved and the team stays signed in', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = await superadmin();
         const r = (
@@ -2476,7 +2549,7 @@ suite('fluxo da mesa (e2e)', () => {
         expect(log.filter((l) => l.action === 'slug_changed')).toHaveLength(2);
     });
 
-    it('perfis trocados valem na hora e o painel recebe um token novo sem entrar de novo', async () => {
+    it('changed roles apply at once and the panel gets a new token without signing in again', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const member = (
             await http()
@@ -2522,7 +2595,7 @@ suite('fluxo da mesa (e2e)', () => {
             .expect(403);
         await http().get('/orders?open=true&status=ready').set(auth(admin)).expect(200);
     });
-    it('cliente: avisos só com a mesa aberta, e o aparelho é esquecido quando a mesa fecha', async () => {
+    it('guest: news only while the table is open, and the device is forgotten when it closes', async () => {
         const auth = { Authorization: `Bearer ${waiter}` };
         const db = app.get(DataSource);
         const count = async () =>
@@ -2565,7 +2638,7 @@ suite('fluxo da mesa (e2e)', () => {
             await new Promise((r) => setTimeout(r, 50));
         expect(await count()).toBe(0);
     });
-    it('gerente: cuida do dia a dia e da equipe operacional, sem configurações nem administradores', async () => {
+    it('manager: runs the day and the operational team, without settings or admins', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         await http()
             .post('/staff')
@@ -2612,8 +2685,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(manager))
                     .send({ roles: ['manager'] })
                     .expect(403)
-            ).body.message
-        ).toBe('not_above');
+            ).body.code
+        ).toBe(ApiErrorCode.TARGET_NOT_BELOW);
         expect(
             (
                 await http()
@@ -2626,8 +2699,8 @@ suite('fluxo da mesa (e2e)', () => {
                         roles: ['manager']
                     })
                     .expect(403)
-            ).body.message
-        ).toBe('not_above');
+            ).body.code
+        ).toBe(ApiErrorCode.TARGET_NOT_BELOW);
         expect(
             (
                 await http()
@@ -2640,8 +2713,8 @@ suite('fluxo da mesa (e2e)', () => {
                         roles: ['restaurant_admin']
                     })
                     .expect(403)
-            ).body.message
-        ).toBe('owner');
+            ).body.code
+        ).toBe(ApiErrorCode.TARGET_IS_OWNER);
         const team = (await http().get('/staff').set(auth(manager)).expect(200)).body as {
             id: string;
             username: string;
@@ -2654,7 +2727,7 @@ suite('fluxo da mesa (e2e)', () => {
             .expect(403);
     });
 
-    it('titular: transfere com a senha, o suporte troca com motivo e o banco aceita um só', async () => {
+    it('owner: transfers with the password, support changes it with a reason and the database allows only one', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -2707,8 +2780,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(owner))
                     .send({ password: 'errada123' })
                     .expect(403)
-            ).body.message
-        ).toBe('wrong_password');
+            ).body.code
+        ).toBe(ApiErrorCode.WRONG_PASSWORD);
         await http()
             .post(`/staff/${gm.id}/transfer-ownership`)
             .set(auth(owner))
@@ -2801,7 +2874,7 @@ suite('fluxo da mesa (e2e)', () => {
         ).rejects.toThrow(/UQ_staff_restaurant_owner/);
     });
 
-    it('funcionamento: fechado não abre mesa nova, mas as abertas terminam; paradas agendadas e encerradas', async () => {
+    it('opening hours: closed means no new tables, but open ones finish; scheduled and ended closures', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -2874,7 +2947,7 @@ suite('fluxo da mesa (e2e)', () => {
                 await http().post(`/public/${r.slug}/${t.token}/session`).expect(201)
             );
 
-        // mesa A abre antes da parada
+        // table A opens before the closure
         const a = await seat(t1);
         await http().post('/public/session/open').set('Cookie', a).expect(201);
         await http()
@@ -2898,22 +2971,26 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(owner))
                     .send({})
                     .expect(400)
-            ).body.problems
+            ).body.details.map(codeOf)
         ).toEqual(['overlaps']);
 
-        // nenhuma mesa nova abre; a que já estava aberta continua pedindo
+        // no new table opens; the one already open keeps ordering
         const b = await seat(t2);
         const closed = await http()
             .post('/public/session/open')
             .set('Cookie', b)
             .expect(409);
         expect(closed.body).toMatchObject({
-            message: 'restaurant_closed',
-            availability: {
-                open: false,
-                reason: 'pause',
-                pauseReason: 'Falta de energia'
-            }
+            code: ApiErrorCode.RESTAURANT_CLOSED,
+            details: [
+                {
+                    availability: {
+                        open: false,
+                        reason: 'pause',
+                        pauseReason: 'Falta de energia'
+                    }
+                }
+            ]
         });
         await http()
             .post('/public/session/orders')
@@ -2923,13 +3000,14 @@ suite('fluxo da mesa (e2e)', () => {
         const menu = (await http().get(`/public/${r.slug}/menu`).expect(200)).body;
         expect(menu.restaurant.availability).toMatchObject({
             open: false,
-            label: 'Fechado temporariamente'
+            reason: 'pause',
+            until: null
         });
         const me = (await http().get('/restaurant/me').set(auth(waiterP)).expect(200))
             .body;
         expect(me.availability.reason).toBe('pause');
 
-        // encerrada antes do fim: volta a abrir mesa
+        // ended early: tables open again
         await http()
             .post(`/restaurant/pauses/${pause.id}/end`)
             .set(auth(owner))
@@ -2940,7 +3018,7 @@ suite('fluxo da mesa (e2e)', () => {
             .expect(404);
         await http().post('/public/session/open').set('Cookie', b).expect(201);
 
-        // agendada: não fecha agora, aparece como próxima mudança e pode ser cancelada
+        // scheduled: does not close now, shows as the next change and can be cancelled
         const later = new Date(Date.now() + 2 * 3_600_000).toISOString();
         const until = new Date(Date.now() + 5 * 3_600_000).toISOString();
         await http()
@@ -2974,7 +3052,7 @@ suite('fluxo da mesa (e2e)', () => {
         expect(after.past.items.map((p: { id: string }) => p.id)).toEqual([pause.id]);
         await http().get('/restaurant/pauses?page=0').set(auth(manager)).expect(400);
 
-        // fora do horário: o garçom não valida a mesa pedida antes de fechar
+        // outside opening hours: the waiter cannot validate a table requested before closing
         const settings = {
             name: `Pausa ${suf}`,
             managerName: 'Rita',
@@ -2990,9 +3068,9 @@ suite('fluxo da mesa (e2e)', () => {
             .post(`/tables/${t2.id}/validate-open`)
             .set(auth(waiterP))
             .expect(409);
-        expect(refused.body.availability).toMatchObject({
+        expect(refused.body.details[0].availability).toMatchObject({
             reason: 'hours',
-            label: 'Fechado'
+            hours: { open: false, change: null }
         });
         // an extra opening outside the hours lets the table open; it needs an end and ends early on request
         expect(
@@ -3002,7 +3080,7 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(manager))
                     .send({ kind: 'opening' })
                     .expect(400)
-            ).body.problems
+            ).body.details.map(codeOf)
         ).toEqual(['opening_needs_end']);
         const extra = (
             await http()
@@ -3044,8 +3122,8 @@ suite('fluxo da mesa (e2e)', () => {
         const c = await seat(t3);
         expect(
             (await http().post('/public/session/open').set('Cookie', c).expect(409)).body
-                .message
-        ).toBe('restaurant_closed');
+                .code
+        ).toBe(ApiErrorCode.RESTAURANT_CLOSED);
         const log = (
             await http()
                 .get('/restaurant/activity?category=settings')
@@ -3060,7 +3138,7 @@ suite('fluxo da mesa (e2e)', () => {
         ).toHaveLength(2);
     });
 
-    it('histórico de pedidos por perfil, foto de perfil e limpeza dos registros antigos', async () => {
+    it('order history by role, profile photo and cleanup of old records', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -3210,12 +3288,12 @@ suite('fluxo da mesa (e2e)', () => {
 
         // old activity entries are erased by the scheduled cleanup; recent ones stay
         const [{ id: oldLog }] = await db.query(
-            `INSERT INTO audit_log (actor, actor_name, actor_kind, action, restaurant_id, created_at) VALUES ('system', 'Sistema', 'system', 'settings_updated', $1, now() - interval '400 days') RETURNING id`,
+            `INSERT INTO audit_logs (actor, actor_name, actor_kind, action, restaurant_id, created_at) VALUES ('system', 'Sistema', 'system', 'settings_updated', $1, now() - interval '400 days') RETURNING id`,
             [r.id]
         );
-        expect(await app.get(ActivityCleanupService).run()).toBeGreaterThanOrEqual(1);
+        expect(await app.get(AuditLogCleanupService).run()).toBeGreaterThanOrEqual(1);
         expect(
-            await db.query(`SELECT 1 FROM audit_log WHERE id = $1`, [oldLog])
+            await db.query(`SELECT 1 FROM audit_logs WHERE id = $1`, [oldLog])
         ).toHaveLength(0);
         expect(
             (await http().get('/restaurant/activity').set(auth(owner)).expect(200)).body
@@ -3223,7 +3301,7 @@ suite('fluxo da mesa (e2e)', () => {
         ).toBeGreaterThan(0);
     });
 
-    it('validação: um código por campo, texto em branco recusado, tetos e login sem revelar regras', async () => {
+    it('validation: one code per field, blank text refused, limits and sign-in without revealing rules', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const bad = (
             await http()
@@ -3233,23 +3311,25 @@ suite('fluxo da mesa (e2e)', () => {
                 .expect(400)
         ).body;
         expect(bad).toEqual({
-            statusCode: 400,
-            message: 'validation_failed',
-            fields: { name: { code: 'required' } }
+            code: ApiErrorCode.VALIDATION_FAILED,
+            message: 'Validation failed',
+            details: [{ field: 'name', code: 'required' }]
         });
-        const many = (
-            await http()
-                .post('/staff')
-                .set(auth(admin))
-                .send({
-                    username: 'Ana Lima',
-                    password: 'curta',
-                    name: 'Ana 123',
-                    roles: ['waiter'],
-                    extra: 1
-                })
-                .expect(400)
-        ).body.fields;
+        const many = fieldsOf(
+            (
+                await http()
+                    .post('/staff')
+                    .set(auth(admin))
+                    .send({
+                        username: 'Ana Lima',
+                        password: 'curta',
+                        name: 'Ana 123',
+                        roles: ['waiter'],
+                        extra: 1
+                    })
+                    .expect(400)
+            ).body.details
+        );
         expect(many).toEqual({
             username: { code: 'invalid_username' },
             password: { code: 'too_short', params: { min: 8 } },
@@ -3264,44 +3344,55 @@ suite('fluxo da mesa (e2e)', () => {
                 .expect(201)
         ).body;
         expect(cat.name).toBe('Sobremesas da casa');
-        const tooExpensive = (
-            await http()
-                .post('/catalog/products')
-                .set(auth(admin))
-                .send({ categoryId: cat.id, name: 'Caro', priceCents: 1_000_001 })
-                .expect(400)
-        ).body.fields;
+        const tooExpensive = fieldsOf(
+            (
+                await http()
+                    .post('/catalog/products')
+                    .set(auth(admin))
+                    .send({ categoryId: cat.id, name: 'Caro', priceCents: 1_000_001 })
+                    .expect(400)
+            ).body.details
+        );
         expect(tooExpensive.priceCents).toEqual({
             code: 'too_large',
             params: { max: 1_000_000, money: true }
         });
-        const empty = (
-            await http()
-                .post('/catalog/products')
-                .set(auth(admin))
-                .send({
-                    categoryId: cat.id,
-                    name: 'Sem escolha',
-                    priceCents: 100,
-                    options: [
-                        { name: 'Tamanho', required: true, multiple: false, choices: [] }
-                    ]
-                })
-                .expect(400)
-        ).body.fields;
+        const empty = fieldsOf(
+            (
+                await http()
+                    .post('/catalog/products')
+                    .set(auth(admin))
+                    .send({
+                        categoryId: cat.id,
+                        name: 'Sem escolha',
+                        priceCents: 100,
+                        options: [
+                            {
+                                name: 'Tamanho',
+                                required: true,
+                                multiple: false,
+                                choices: []
+                            }
+                        ]
+                    })
+                    .expect(400)
+            ).body.details
+        );
         expect(empty['options.0.choices']).toEqual({ code: 'too_few' });
-        const notes = (
-            await http()
-                .post('/catalog/products')
-                .set(auth(admin))
-                .send({
-                    categoryId: cat.id,
-                    name: 'Foto',
-                    priceCents: 100,
-                    imageUrl: 'http://exemplo.com/a.png'
-                })
-                .expect(400)
-        ).body.fields;
+        const notes = fieldsOf(
+            (
+                await http()
+                    .post('/catalog/products')
+                    .set(auth(admin))
+                    .send({
+                        categoryId: cat.id,
+                        name: 'Foto',
+                        priceCents: 100,
+                        imageUrl: 'http://exemplo.com/a.png'
+                    })
+                    .expect(400)
+            ).body.details
+        );
         expect(notes.imageUrl).toEqual({ code: 'invalid_url' });
 
         // sign-in never tells the rules: a short password is just wrong
@@ -3338,12 +3429,14 @@ suite('fluxo da mesa (e2e)', () => {
         await http().get(`/public/${created.slug}/menu`).expect(200);
         // impossible days and explicit nulls in required settings are refused, not turned into 500s
         expect(
-            (
-                await http()
-                    .get('/reports?from=2024-13-45&to=2024-13-46')
-                    .set(auth(admin))
-                    .expect(400)
-            ).body.fields.from
+            fieldsOf(
+                (
+                    await http()
+                        .get('/reports?from=2024-13-45&to=2024-13-46')
+                        .set(auth(admin))
+                        .expect(400)
+                ).body.details
+            ).from
         ).toEqual({ code: 'invalid_date' });
         const me = (await http().get('/restaurant/me').set(auth(admin)).expect(200)).body;
         const base = {
@@ -3396,10 +3489,13 @@ suite('fluxo da mesa (e2e)', () => {
                 })
                 .expect(409)
         ).body;
-        expect(taken).toMatchObject({ message: 'username_taken', field: 'username' });
+        expect(taken).toMatchObject({
+            code: ApiErrorCode.USERNAME_TAKEN,
+            details: [{ field: 'username' }]
+        });
     });
 
-    it('comprovantes: arquivo privado, de um só pagamento e do mesmo restaurante, ou o motivo de não ter', async () => {
+    it('receipts: private file, of a single payment and the same restaurant, or the reason for none', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = (await http().post('/auth/superadmin').send({ key: SUPERADMIN_KEY }))
             .body.accessToken as string;
@@ -3452,21 +3548,23 @@ suite('fluxo da mesa (e2e)', () => {
                 .post(`/admin/restaurants/${rid}/payments`)
                 .set(auth(sa))
                 .send({ cycles: 1, paidAt: today(), ...body });
-        expect((await pay({}).expect(400)).body.problems).toEqual(['receipt_required']);
+        expect((await pay({}).expect(400)).body.details.map(codeOf)).toEqual([
+            'receipt_required'
+        ]);
         expect(
             (
                 await pay({
                     receiptId: doc.id,
                     noReceiptReason: 'Pago em dinheiro'
                 }).expect(400)
-            ).body.problems
+            ).body.details.map(codeOf)
         ).toEqual(['receipt_or_reason']);
         await pay({ receiptId: doc.id }, b.id).expect(400);
         const paid = (await pay({ receiptId: doc.id }).expect(201)).body;
         expect(paid.receipt).toMatchObject({ id: doc.id, name: 'comprovante.pdf' });
         expect((await pay({ receiptId: doc.id }).expect(409)).body).toMatchObject({
-            message: 'receipt_in_use',
-            field: 'receiptId'
+            code: ApiErrorCode.RECEIPT_IN_USE,
+            details: [{ field: 'receiptId' }]
         });
 
         // a payment without proof gets one later, and keeps it
@@ -3514,7 +3612,7 @@ suite('fluxo da mesa (e2e)', () => {
         await http().get(`/admin/documents/${doc.id}`).expect(401);
     });
 
-    it('contratos: pendente, teste do piloto, conversão, renovação com intervalo, anulação e fim', async () => {
+    it('contracts: pending, pilot trial, conversion, renewal with a gap, void and end', async () => {
         const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
         const sa = await superadmin();
         const db = app.get(DataSource);
@@ -3581,12 +3679,12 @@ suite('fluxo da mesa (e2e)', () => {
         expect(
             (await http().get('/catalog').set(auth(owner)).expect(403)).body
         ).toMatchObject({
-            message: 'subscription_suspended',
-            reasons: ['contract_pending']
+            code: ApiErrorCode.SUBSCRIPTION_SUSPENDED,
+            details: [{ reasons: ['contract_pending'] }]
         });
-        expect(
-            (await http().get(`/public/${r.slug}/menu`).expect(404)).body.message
-        ).toBe('menu_unavailable');
+        expect((await http().get(`/public/${r.slug}/menu`).expect(404)).body.code).toBe(
+            ApiErrorCode.MENU_UNAVAILABLE
+        );
         // billing starts with the contract: nothing is paid or rescheduled before it
         expect(
             (
@@ -3599,8 +3697,8 @@ suite('fluxo da mesa (e2e)', () => {
                         noReceiptReason: 'Pago em dinheiro'
                     })
                     .expect(409)
-            ).body.message
-        ).toBe('contract_pending');
+            ).body.code
+        ).toBe(ApiErrorCode.CONTRACT_PENDING);
         await http()
             .post(`/admin/restaurants/${r.id}/due-date`)
             .set(auth(sa))
@@ -3613,8 +3711,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .post(`/admin/restaurants/${r.id}/suspend`)
                     .set(auth(sa))
                     .expect(409)
-            ).body.message
-        ).toBe('nothing_to_suspend');
+            ).body.code
+        ).toBe(ApiErrorCode.NOTHING_TO_SUSPEND);
         expect(await inList('pending', `Contrato ${suf}`)).toEqual([r.id]);
         expect(
             (
@@ -3646,7 +3744,7 @@ suite('fluxo da mesa (e2e)', () => {
                     trialDays: 7,
                     documentId: await upload(r.id)
                 }).expect(400)
-            ).body.problems
+            ).body.details.map(codeOf)
         ).toEqual(['trial_only_initial_pilot']);
         const [d1, d2] = [await upload(r.id), await upload(r.id)];
         const both = await Promise.all(
@@ -3946,8 +4044,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .set(auth(sa))
                     .send({ cycles: 1, paidAt: day(0), noReceiptReason: 'De novo' })
                     .expect(409)
-            ).body.message
-        ).toBe('nothing_owed');
+            ).body.code
+        ).toBe(ApiErrorCode.NOTHING_OWED);
 
         // a contract that ended locks the team, takes the menu down and stops orders from a table already open
         const ended = await create('Encerrado', 'en');
@@ -3982,8 +4080,9 @@ suite('fluxo da mesa (e2e)', () => {
             `UPDATE contracts SET ends_on = $2, effective_ends_on = $2 WHERE restaurant_id = $1`,
             [ended.id, day(-1)]
         );
-        const endedLock = (await http().get('/catalog').set(auth(endedOwner)).expect(403))
-            .body;
+        const [endedLock] = (
+            await http().get('/catalog').set(auth(endedOwner)).expect(403)
+        ).body.details;
         expect(endedLock.contractEndsOn).toBe(day(-1));
         expect(endedLock.reasons).toEqual(['contract_ended']);
         await http().get(`/public/${ended.slug}/menu`).expect(404);
@@ -3993,8 +4092,8 @@ suite('fluxo da mesa (e2e)', () => {
                     .post('/public/session/open')
                     .set('Cookie', cookieOf(guest))
                     .expect(404)
-            ).body.message
-        ).toBe('menu_unavailable');
+            ).body.code
+        ).toBe(ApiErrorCode.MENU_UNAVAILABLE);
         await http().get('/public/session').set('Cookie', cookieOf(guest)).expect(200);
     });
 });

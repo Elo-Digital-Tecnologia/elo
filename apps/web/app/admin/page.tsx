@@ -1,7 +1,13 @@
 'use client';
 
-import { ApiError, api, useAuth } from '@elo/client';
-import { AuthLayout, Button, Field, Input, PasswordInput } from '@elo/ui';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { useAuth } from '@elo/client/session/auth';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input, PasswordInput } from '@elo/ui/components/forms/fields';
+import { AuthLayout } from '@elo/ui/components/layout/auth-layout';
+import { Field } from '@elo/ui/components/layout/section';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { unexpected, useForm } from '../_lib/use-form';
@@ -47,11 +53,12 @@ export default function Login() {
             setToken(res.accessToken);
         } catch (err) {
             setError(
-                err instanceof ApiError && err.status === 401
+                err instanceof ApiError && err.status === HTTP_STATUS.UNAUTHORIZED
                     ? mode === 'team'
                         ? 'Usuário ou senha incorretos.'
                         : 'Chave de superadmin incorreta.'
-                    : err instanceof ApiError && err.status === 429
+                    : err instanceof ApiError &&
+                        err.status === HTTP_STATUS.TOO_MANY_REQUESTS
                       ? 'Muitas tentativas seguidas. Aguarde um minuto e tente de novo.'
                       : unexpected(err)
             );

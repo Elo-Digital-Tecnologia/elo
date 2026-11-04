@@ -29,10 +29,11 @@ jobs:
                 options: >-
                     --health-cmd "pg_isready -U elo" --health-interval 5s --health-timeout 5s --health-retries 10
         env:
-            # Throwaway values for this run only; no repository secret is used.
-            DATABASE_URL: postgres://elo:elo@localhost:5432/elo_digital
-            DATABASE_URL_TEST: postgres://elo:elo@localhost:5432/elo_digital_test
-            JWT_SECRET: ci-only-jwt-secret-used-nowhere-else
+            # Throwaway values for this run only; no repository secret is used. The rest
+            # comes from the .env.example files copied below.
+            NODE_ENV: test
+            PG_PORT: 5432
+            JWT_ACCESS_TOKEN_SECRET: ci-only-jwt-secret-used-nowhere-else
             SUPERADMIN_KEY: ci-only-superadmin-key-used-nowhere-else
         steps:
             - uses: actions/checkout@v4
@@ -41,10 +42,12 @@ jobs:
             - uses: pnpm/action-setup@v4
             - uses: actions/setup-node@v4
               with:
-                  node-version: 22
+                  node-version: 26
                   cache: pnpm
             - run: pnpm install --frozen-lockfile
+            - run: cp .env.example .env && cp apps/api/.env.example apps/api/.env
             - run: pnpm exec turbo run lint build
             - run: pnpm --filter @elo/core test
             - run: pnpm --filter @elo/api db:test:prepare
             - run: pnpm --filter @elo/api test
+            - run: pnpm --filter @elo/api test:e2e

@@ -1,7 +1,6 @@
-// Smoke manual contra a API rodando (pnpm --filter @elo/api start). Requer SUPERADMIN_KEY igual ao valor abaixo.
-// Uso: SUPERADMIN_KEY=... node apps/api/test/smoke.mjs
+// Manual smoke test against a running API (pnpm --filter @elo/api start).
+// Usage: SUPERADMIN_KEY=... node apps/api/test/smoke.mjs
 const B = 'http://localhost:3001';
-const jar = {};
 async function call(method, path, { token, body, cookie } = {}) {
     const res = await fetch(B + path, {
         method,
@@ -15,7 +14,8 @@ async function call(method, path, { token, body, cookie } = {}) {
     const text = await res.text();
     let json;
     try {
-        json = JSON.parse(text);
+        const envelope = JSON.parse(text);
+        json = envelope.success ? envelope.data : envelope.error;
     } catch {
         json = text;
     }

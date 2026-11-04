@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
-import { LogoMark, ThemeToggle } from '@elo/ui';
+import { LogoMark } from '@elo/ui/components/brand/logo';
+import { ThemeToggle } from '@elo/ui/theme/theme';
 
 /**
- * Topo do cardápio. Logo e nome ficam dentro da capa, então nada invade o conteúdo
- * abaixo. Sem imagem, a capa usa o degradê verde do tema com a marca ao fundo.
+ * Menu top. Logo and name stay inside the cover, so nothing spills into the content
+ * below. Without an image, the cover uses the theme's green gradient with the mark behind.
  */
 export function MenuHeader({
     name,
@@ -15,9 +16,9 @@ export function MenuHeader({
     name: string;
     coverUrl?: string | null;
     logoUrl?: string | null;
-    /** Botão extra no canto da capa (ex.: chamar o garçom). */
+    /** Extra button in the cover corner (e.g. calling the waiter). */
     action?: ReactNode;
-    /** Linha sob a capa: situação da mesa, aviso de consulta etc. */
+    /** Line under the cover: table status, read-only notice and so on. */
     children?: ReactNode;
 }) {
     return (

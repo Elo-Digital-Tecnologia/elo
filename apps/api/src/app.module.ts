@@ -1,140 +1,121 @@
-import { Injectable, Module } from '@nestjs/common';
+import type { TypeOrmModuleOptions } from '@nestjs/typeorm';
+import type { EnvConfig } from '#/config/env.js';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD, Reflector } from '@nestjs/core';
-import { JwtModule, JwtService } from '@nestjs/jwt';
-import {
-    InjectThrottlerOptions,
-    InjectThrottlerStorage,
-    ThrottlerGuard,
-    ThrottlerModule,
-    ThrottlerModuleOptions,
-    ThrottlerStorage
-} from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { SESSION_RULES } from '@elo/core';
-import { AuditModule } from './audit/audit.module';
-import { AuthModule } from './auth/auth.module';
-import { JwtAuthGuard, RolesGuard, SubscriptionGuard } from './auth/guards';
-import { BillingModule } from './billing/billing.module';
-import { BillsModule } from './bills/bills.module';
-import { CallsModule } from './calls/calls.module';
-import { CatalogModule } from './catalog/catalog.module';
-import { Env, loadEnv } from './config/env';
-import { ContractsModule } from './contracts/contracts.module';
-import { ENTITIES } from './database/entities';
-import { SnakeNamingStrategy } from './database/naming';
-import { DocumentsModule } from './documents/documents.module';
-import { HealthModule } from './health/health.module';
-import { MediaModule } from './media/media.module';
-import { OrdersModule } from './orders/orders.module';
-import { PausesModule } from './pauses/pauses.module';
-import { PublicModule } from './public/public.module';
-import { TABLE_COOKIE } from './realtime/realtime.gateway';
-import { RealtimeModule } from './realtime/realtime.module';
-import { ReportsModule } from './reports/reports.module';
-import { RestaurantsModule } from './restaurants/restaurants.module';
-import { ReviewsModule } from './reviews/reviews.module';
-import { SessionsModule } from './sessions/sessions.module';
-import { StaffModule } from './staff/staff.module';
-import { TablesModule } from './tables/tables.module';
-
-/**
- * Limite por funcionário (JWT verificado), senão por sessão da mesa, senão por IP.
- * O guard roda antes do JwtAuthGuard, então o token é verificado aqui: um token
- * forjado cai no balde do IP e não consome o limite de outra pessoa.
- */
-const UUID = /^[0-9a-f-]{36}$/;
-
-@Injectable()
-class SessionOrIpThrottlerGuard extends ThrottlerGuard {
-    constructor(
-        @InjectThrottlerOptions() options: ThrottlerModuleOptions,
-        @InjectThrottlerStorage() storage: ThrottlerStorage,
-        reflector: Reflector,
-        private readonly jwt: JwtService
-    ) {
-        super(options, storage, reflector);
-    }
-
-    protected async getTracker(req: Record<string, unknown>): Promise<string> {
-        const header = (req.headers as Record<string, string | undefined> | undefined)
-            ?.authorization;
-        if (header?.startsWith('Bearer ')) {
-            try {
-                const { sub } = this.jwt.verify<{ sub: string }>(header.slice(7));
-                if (sub) return `u:${sub}`;
-            } catch {
-                /* token inválido: segue para os outros critérios */
-            }
-        }
-        // Sign-in and starting a table session never trust the cookie: a made-up value
-        // would otherwise open a fresh bucket on every request and lift the limit.
-        const path = String(req.url ?? '').split('?')[0];
-        if (/\/auth\//.test(path) || /\/public\/[^/]+\/[^/]+\/session$/.test(path))
-            return `ip:${req.ip}`;
-        const session = (req.cookies as Record<string, string> | undefined)?.[
-            TABLE_COOKIE
-        ];
-        return session && UUID.test(session) ? `s:${session}` : `ip:${req.ip}`;
-    }
-}
+import { MS_PER_SECOND } from '@elo/core/time/time-units';
+import { SnakeNamingStrategy } from '#/common/database/snake-naming.strategy.js';
+import { SessionOrIpThrottlerGuard } from '#/common/guards/session-or-ip-throttler.guard.js';
+import { loadConfig } from '#/config/env.js';
+import { AuditLogModule } from '#/modules/audit-logs/audit-log.module.js';
+import { AuthModule } from '#/modules/auth/auth.module.js';
+import { AccessTokenGuard } from '#/modules/auth/guards/access-token.guard.js';
+import { RolesGuard } from '#/modules/auth/guards/roles.guard.js';
+import { SubscriptionGuard } from '#/modules/auth/guards/subscription.guard.js';
+import { BillingModule } from '#/modules/billing/billing.module.js';
+import { BillModule } from '#/modules/bills/bill.module.js';
+import { CallModule } from '#/modules/calls/call.module.js';
+import { CatalogModule } from '#/modules/catalog/catalog.module.js';
+import { ContractModule } from '#/modules/contracts/contract.module.js';
+import { DocumentModule } from '#/modules/documents/document.module.js';
+import { HealthModule } from '#/modules/health/health.module.js';
+import { MediaModule } from '#/modules/media/media.module.js';
+import { OrderModule } from '#/modules/orders/order.module.js';
+import { PauseModule } from '#/modules/pauses/pause.module.js';
+import { PublicModule } from '#/modules/public/public.module.js';
+import { RealtimeModule } from '#/modules/realtime/realtime.module.js';
+import { ReportModule } from '#/modules/reports/report.module.js';
+import { RestaurantModule } from '#/modules/restaurants/restaurant.module.js';
+import { ReviewModule } from '#/modules/reviews/review.module.js';
+import { SessionModule } from '#/modules/sessions/session.module.js';
+import { StaffModule } from '#/modules/staff/staff.module.js';
+import { TableModule } from '#/modules/tables/table.module.js';
 
 @Module({
     imports: [
+        // Config
         ConfigModule.forRoot({
             isGlobal: true,
-            // apps/api/.env; the scripts run with the API folder as the working directory.
-            envFilePath: ['.env'],
-            validate: (raw) => ({ ...raw, ...loadEnv(raw) })
+            envFilePath: ['.env', '../../.env'],
+            load: [() => loadConfig()]
         }),
-        ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+        ThrottlerModule.forRootAsync({
+            inject: [ConfigService],
+            useFactory: (configService: ConfigService<EnvConfig, true>) => [
+                {
+                    ttl: configService.getOrThrow('throttle.ttlMs', { infer: true }),
+                    limit: configService.getOrThrow('throttle.limit', { infer: true })
+                }
+            ]
+        }),
         JwtModule.registerAsync({
             global: true,
             inject: [ConfigService],
-            useFactory: (config: ConfigService<Env, true>) => ({
-                secret: config.get('JWT_SECRET', { infer: true }),
-                signOptions: { expiresIn: `${SESSION_RULES.accessTokenMinutes}m` }
+            useFactory: (configService: ConfigService<EnvConfig, true>) => ({
+                secret: configService.getOrThrow('jwt.accessTokenSecret', {
+                    infer: true
+                }),
+                signOptions: {
+                    expiresIn: Math.floor(
+                        configService.getOrThrow('jwt.accessTokenExpiresInMs', {
+                            infer: true
+                        }) / MS_PER_SECOND
+                    )
+                }
             })
         }),
+
+        // Database
         TypeOrmModule.forRootAsync({
             inject: [ConfigService],
-            useFactory: (config: ConfigService<Env, true>) => ({
-                type: 'postgres' as const,
-                url: config.get('DATABASE_URL', { infer: true }),
-                entities: ENTITIES,
-                namingStrategy: new SnakeNamingStrategy(),
-                ssl: config.get('DATABASE_SSL', { infer: true })
-                    ? { rejectUnauthorized: false }
-                    : false,
-                // Local apenas: demais ambientes usam migrations versionadas.
-                synchronize: false,
-                migrationsRun: false
-            })
+            useFactory: (
+                configService: ConfigService<EnvConfig, true>
+            ): TypeOrmModuleOptions => {
+                const { ssl, ...database } = configService.getOrThrow('database', {
+                    infer: true
+                });
+                return {
+                    type: 'postgres',
+                    ...database,
+                    ssl: ssl ? { rejectUnauthorized: false } : false,
+                    autoLoadEntities: true,
+                    namingStrategy: new SnakeNamingStrategy(),
+                    synchronize: !configService.getOrThrow('app.isProduction', {
+                        infer: true
+                    }),
+                    migrationsRun: false
+                };
+            }
         }),
+
+        // Application modules
         HealthModule,
-        AuditModule,
+        AuditLogModule,
         AuthModule,
-        SessionsModule,
+        SessionModule,
         StaffModule,
-        RestaurantsModule,
+        RestaurantModule,
         BillingModule,
-        DocumentsModule,
-        ContractsModule,
-        PausesModule,
+        DocumentModule,
+        ContractModule,
+        PauseModule,
         CatalogModule,
         MediaModule,
-        ReviewsModule,
-        TablesModule,
-        OrdersModule,
-        CallsModule,
-        BillsModule,
-        ReportsModule,
+        ReviewModule,
+        TableModule,
+        OrderModule,
+        CallModule,
+        BillModule,
+        ReportModule,
         RealtimeModule,
         PublicModule
     ],
     providers: [
         { provide: APP_GUARD, useClass: SessionOrIpThrottlerGuard },
-        { provide: APP_GUARD, useClass: JwtAuthGuard },
+        { provide: APP_GUARD, useClass: AccessTokenGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: SubscriptionGuard }
     ]

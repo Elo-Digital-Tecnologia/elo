@@ -17,7 +17,7 @@ const write = (store: () => Storage, key: string) => {
     try {
         store().setItem(key, '1');
     } catch {
-        /* storage indisponível: o convite pode voltar */
+        /* storage unavailable: the invitation may come back */
     }
 };
 

@@ -1,27 +1,25 @@
 'use client';
 
-import type { FieldError } from '@elo/core';
-import { ApiError, api } from '@elo/client';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
 import {
-    FIELD_RULES,
     LIMITS,
-    WEEKDAYS,
     brazilPhone,
     instagramHandle,
     maskPhone
-} from '@elo/core';
-import {
-    Field,
-    GlassCard,
-    Input,
-    PageHeader,
-    PasswordInput,
-    SaveBar,
-    Switch,
-    Textarea
-} from '@elo/ui';
+} from '@elo/core/fields/value-normalizers';
+import { Input, PasswordInput, Switch, Textarea } from '@elo/ui/components/forms/fields';
+import { SaveBar } from '@elo/ui/components/forms/save-bar';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { FEEDBACK_MS } from '#/_lib/constants/timing';
+import { bpsToPercent, percentToBps } from '#/_lib/format';
+import { serviceFeeHint, settingsFormMessages } from '#/_lib/messages/errors';
+import { WEEKDAYS } from '#/_lib/messages/opening-hours';
 import { ImageField } from '../../../../../_components/image-field';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import {
@@ -32,16 +30,10 @@ import {
 } from '../../../_components/hours-editor';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
-const MAX_FEE_PCT = LIMITS.serviceFeeBpsMax / 100;
-const FEE_MESSAGE = `Use um valor maior que 0% e até ${MAX_FEE_PCT}%, como 10 ou 12,5. Para não cobrar, desligue a taxa.`;
+const MAX_FEE_PCT = bpsToPercent(LIMITS.serviceFeeBpsMax);
 /** A fee that is switched on starts at this percent. */
 const DEFAULT_FEE = '10';
-/** The fee is the only number in this form, so its range codes always mean the percent. */
-const MESSAGES = {
-    too_small: FEE_MESSAGE,
-    too_large: FEE_MESSAGE,
-    not_integer: FEE_MESSAGE
-};
+const MESSAGES = settingsFormMessages(MAX_FEE_PCT);
 
 const percentOf = (fee: string) => Number(fee.replace(',', '.'));
 
@@ -90,7 +82,7 @@ function Settings() {
             managerContact: me.managerContact,
             fee:
                 me.serviceFeeBps > 0
-                    ? String(me.serviceFeeBps / 100).replace('.', ',')
+                    ? String(bpsToPercent(me.serviceFeeBps)).replace('.', ',')
                     : DEFAULT_FEE,
             googleReviewUrl: me.googleReviewUrl ?? ''
         },
@@ -138,7 +130,7 @@ function Settings() {
     // A saved notice goes away on its own; an error stays until the next try.
     useEffect(() => {
         if (!msg?.ok) return;
-        const timer = setTimeout(() => setMsg(null), 4000);
+        const timer = setTimeout(() => setMsg(null), FEEDBACK_MS.saved);
         return () => clearTimeout(timer);
     }, [msg]);
 
@@ -179,7 +171,7 @@ function Settings() {
                     name: values.name,
                     managerName: values.managerName,
                     managerContact: values.managerContact,
-                    serviceFeeBps: feeOn ? Math.round(percentOf(values.fee) * 100) : 0,
+                    serviceFeeBps: feeOn ? percentToBps(percentOf(values.fee)) : 0,
                     guestFeeRefusal: feeOn && feeRefusal,
                     googleReviewUrl: values.googleReviewUrl,
                     description: values.description,
@@ -428,7 +420,7 @@ function Settings() {
                         <>
                             <Field
                                 label="Taxa de serviço (%)"
-                                hint={`Acima de 0% e até ${MAX_FEE_PCT}%.`}
+                                hint={serviceFeeHint(MAX_FEE_PCT)}
                                 error={form.errors.fee}
                             >
                                 <Input

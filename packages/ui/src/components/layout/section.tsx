@@ -1,0 +1,97 @@
+'use client';
+
+import type { ReactNode } from 'react';
+import { ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+import { useUiTexts } from '../../texts/ui-texts';
+
+export interface Crumb {
+    label: string;
+    href?: string;
+}
+
+/** Breadcrumb: the last item is the current page. */
+export function Breadcrumbs({ items }: { items: Crumb[] }) {
+    const t = useUiTexts();
+    return (
+        <nav aria-label={t.breadcrumb} className="mb-3">
+            <ol className="flex flex-wrap items-center gap-1 text-sm text-muted">
+                {items.map((c, i) => (
+                    <li key={c.label} className="flex items-center gap-1">
+                        {i > 0 && <ChevronRight size={14} aria-hidden />}
+                        {c.href && i < items.length - 1 ? (
+                            <Link href={c.href} className="transition hover:text-fg">
+                                {c.label}
+                            </Link>
+                        ) : (
+                            <span
+                                aria-current={i === items.length - 1 ? 'page' : undefined}
+                                className={i === items.length - 1 ? 'text-fg' : undefined}
+                            >
+                                {c.label}
+                            </span>
+                        )}
+                    </li>
+                ))}
+            </ol>
+        </nav>
+    );
+}
+
+/** Page header: large title, short description, actions and an optional breadcrumb. */
+export function PageHeader({
+    title,
+    description,
+    actions,
+    crumbs
+}: {
+    title: string;
+    description?: ReactNode;
+    actions?: ReactNode;
+    crumbs?: Crumb[];
+}) {
+    return (
+        <>
+            {crumbs && <Breadcrumbs items={crumbs} />}
+            <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold sm:text-4xl">{title}</h1>
+                    {description && (
+                        <div className="mt-1 max-w-xl text-muted">{description}</div>
+                    )}
+                </div>
+                {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+            </div>
+        </>
+    );
+}
+
+/**
+ * Label, control and one line below it: the error when there is one, the hint
+ * otherwise. The error is announced politely, not on every keystroke.
+ */
+export function Field({
+    label,
+    children,
+    hint,
+    error
+}: {
+    label: string;
+    children: ReactNode;
+    hint?: ReactNode;
+    error?: string | null;
+}) {
+    return (
+        <label className="block space-y-1.5 text-sm">
+            <span className="font-medium">{label}</span>
+            {children}
+            <span aria-live="polite" className="block text-xs">
+                {error ? (
+                    <span className="text-danger">{error}</span>
+                ) : (
+                    hint && <span className="text-muted">{hint}</span>
+                )}
+            </span>
+        </label>
+    );
+}

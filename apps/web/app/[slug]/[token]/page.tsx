@@ -1,15 +1,20 @@
 'use client';
 
-import type { FieldError, ProductView, SessionStateView } from '@elo/core';
-import { ApiError, api, useRealtime } from '@elo/client';
-import { ORDER_IN_PROGRESS, canRequestBill, fieldMessage, formatBRL } from '@elo/core';
-import {
-    AlertsProvider,
-    AnimatePresence,
-    Button,
-    Sheet,
-    unlockAlertSound
-} from '@elo/ui';
+import type { ProductView } from '@elo/core/api/views/catalog.view';
+import type { SessionStateView } from '@elo/core/api/views/table.view';
+import type { FieldError } from '@elo/core/fields/field-rules';
+import type { CartLine } from '../../_components/product-sheet';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { formatBRL } from '@elo/core/money/cents';
+import { ORDER_IN_PROGRESS, canRequestBill } from '@elo/core/orders/order-status';
+import { AlertsProvider, unlockAlertSound } from '@elo/ui/components/feedback/alerts';
+import { Button } from '@elo/ui/components/forms/button';
+import { AnimatePresence } from '@elo/ui/components/motion/motion';
+import { Sheet } from '@elo/ui/components/overlays/sheet';
 import {
     BellRing,
     Check,
@@ -24,6 +29,17 @@ import {
     WifiOff
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    FEEDBACK_MS,
+    MAX_TIMEOUT_MS,
+    STATUS_CHANGE_MARGIN_MS
+} from '#/_lib/constants/timing';
+import { bpsToPercent } from '#/_lib/format';
+import { GUEST_ERRORS } from '#/_lib/messages/errors';
+import { fieldMessage } from '#/_lib/messages/fields';
+import { CLOSED_FALLBACK, availabilityText } from '#/_lib/messages/opening-hours';
+import { ORDER_LINE_PARTS } from '#/_lib/messages/orders';
+import { TABLE_STATE_HINTS } from '#/_lib/messages/tables';
 import { BillPanel } from '../../_components/bill-panel';
 import { MenuFooter } from '../../_components/menu-chrome';
 import {
@@ -44,7 +60,7 @@ import { RestaurantInfo } from '../../_components/menu/info';
 import { ReviewForm } from '../../_components/menu/review-form';
 import { Notice } from '../../_components/notice';
 import { OrderTracker } from '../../_components/order-tracker';
-import { CartLine, ProductSheet, lineUnit } from '../../_components/product-sheet';
+import { ProductSheet, lineUnit } from '../../_components/product-sheet';
 import { unexpected } from '../../_lib/use-form';
 
 type Phase =
@@ -60,43 +76,9 @@ type Phase =
     | 'error';
 type View = 'menu' | 'orders' | 'bill';
 
-const HINT: Record<string, string> = {
-    closed: 'Escolha os itens e abra a mesa.',
-    pending_open: 'Aguardando o garçom confirmar a mesa.',
-    open: 'Mesa aberta. Envie a comanda quando quiser.',
-    pending_close: 'Conta pedida. O garçom vai fechar a mesa.'
-};
-
-const GUEST_ERRORS: Record<string, string> = {
-    orders_in_progress:
-        'Ainda há pedidos sendo preparados. Peça a conta quando todos estiverem prontos.',
-    table_not_open: 'A mesa ainda não foi aberta pelo garçom.',
-    invalid_table_state: 'A mesa mudou. Atualizamos a tela.',
-    restaurant_closed:
-        'O restaurante está fechado agora, então a mesa não pode ser aberta.',
-    fee_refusal_disabled:
-        'Este restaurante não permite retirar a taxa de serviço por aqui. Fale com o garçom.',
-    product_unavailable: 'Um item da sacola esgotou. Remova-o e envie de novo.',
-    invalid_product: 'Um item da sacola saiu do cardápio. Remova-o e envie de novo.',
-    invalid_option:
-        'As opções de um item mudaram no cardápio. Remova-o da sacola e adicione de novo.',
-    missing_required_option:
-        'Falta escolher uma opção obrigatória em um item. Remova-o da sacola e adicione de novo.',
-    too_many_options:
-        'Um item tem mais escolhas do que o grupo permite. Remova-o da sacola e adicione de novo.',
-    duplicate_option:
-        'Um item tem a mesma escolha repetida. Remova-o da sacola e adicione de novo.'
-};
-
 /** Most different lines one order takes (the API refuses more). */
 const MAX_CART_LINES = 50;
 const CART_FULL = `A sacola chegou ao limite de ${MAX_CART_LINES} itens diferentes. Envie esta comanda ou aumente a quantidade de um item que já está nela.`;
-
-const LINE_PART: Record<string, string> = {
-    notes: 'Observação de',
-    quantity: 'Quantidade de',
-    options: 'Opções de'
-};
 
 /** An order the API refused field by field (`items.0.notes`), named after the bag line it is about. */
 function orderProblem(e: ApiError, cart: CartLine[]): string | null {
@@ -111,16 +93,16 @@ function orderProblem(e: ApiError, cart: CartLine[]): string | null {
     const m = /^items\.(\d+)\.(\w+)/.exec(path);
     const line = m && cart[Number(m[1])];
     if (!m || !line) return null;
-    return `${LINE_PART[m[2]] ?? 'Item'} ${line.product.name}: ${fieldMessage(error as FieldError)}`;
+    return `${ORDER_LINE_PARTS[m[2]] ?? 'Item'} ${line.product.name}: ${fieldMessage(error as FieldError)}`;
 }
 
-/** O servidor diz por que a sessão caiu; cada motivo tem sua mensagem. */
-const phaseFor = (code: string): Phase =>
-    code === 'session_taken_over'
+/** The server says why the session dropped; each reason has its own message. */
+const phaseFor = (code: ApiErrorCode): Phase =>
+    code === ApiErrorCode.SESSION_TAKEN_OVER
         ? 'taken'
-        : code === 'session_rejected'
+        : code === ApiErrorCode.SESSION_REJECTED
           ? 'rejected'
-          : code === 'session_expired'
+          : code === ApiErrorCode.SESSION_EXPIRED
             ? 'expired'
             : 'ended';
 
@@ -170,7 +152,8 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             const next = await api<SessionStateView>('/api/public/session');
             if (call === latest.current) setState(next);
         } catch (e) {
-            if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
+            if (e instanceof ApiError && e.status === HTTP_STATUS.UNAUTHORIZED)
+                setPhase(phaseFor(e.code));
         }
     }, []);
 
@@ -190,10 +173,12 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                 setPhase('ready');
             })
             .catch((e) => {
-                if (e instanceof ApiError && e.code === 'menu_unavailable')
+                if (e instanceof ApiError && e.code === ApiErrorCode.MENU_UNAVAILABLE)
                     setPhase('unavailable');
-                else if (e instanceof ApiError && e.status === 404) setPhase('invalid');
-                else if (e instanceof ApiError && e.status === 409) setPhase('in_use');
+                else if (e instanceof ApiError && e.status === HTTP_STATUS.NOT_FOUND)
+                    setPhase('invalid');
+                else if (e instanceof ApiError && e.status === HTTP_STATUS.CONFLICT)
+                    setPhase('in_use');
                 else setPhase('error');
             });
     }, [params.slug, params.token]);
@@ -232,7 +217,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             'call.resolved': (p: { handledBy: { name: string | null } | null }) => {
                 setCalled(false);
                 setComing(p.handledBy?.name ?? 'O garçom');
-                setTimeout(() => setComing(null), 8000);
+                setTimeout(() => setComing(null), FEEDBACK_MS.waiterComing);
                 alertOn('call.resolved')(p);
             }
         },
@@ -267,7 +252,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         return () => clearInterval(timer);
     }, [waiting, phase, refresh]);
 
-    // Garçom encerrou a mesa: a sessão cai e o estado volta a falhar com 401.
+    // The waiter closed the table: the session drops and the state fails again with 401.
     useEffect(() => {
         if (state?.table.state === 'closed' && phase === 'ready') void refresh();
     }, [state?.table.state, phase, refresh]);
@@ -276,19 +261,22 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
     const changesAt = state?.restaurant.availability.changesAt;
     useEffect(() => {
         if (!changesAt) return;
-        const wait = new Date(changesAt).getTime() - Date.now() + 1000;
-        if (wait > 2 ** 31 - 1) return;
-        const timer = setTimeout(() => void refresh(), Math.max(wait, 1000));
+        const wait = new Date(changesAt).getTime() - Date.now() + STATUS_CHANGE_MARGIN_MS;
+        if (wait > MAX_TIMEOUT_MS) return;
+        const timer = setTimeout(
+            () => void refresh(),
+            Math.max(wait, STATUS_CHANGE_MARGIN_MS)
+        );
         return () => clearTimeout(timer);
     }, [changesAt, refresh]);
 
-    // Conta pedida: leva o cliente para a aba Conta, onde está a avaliação do atendimento.
+    // Bill requested: takes the guest to the Bill tab, where the service review is.
     const tableStateNow = state?.table.state;
     useEffect(() => {
         if (tableStateNow === 'pending_close') setView('bill');
     }, [tableStateNow]);
 
-    // Carrinho salvo no aparelho: sobrevive a recarregar a página.
+    // Cart saved on the device: survives a page reload.
     useEffect(() => {
         if (!state || cartLoaded) return;
         try {
@@ -316,7 +304,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                 )
             );
         } catch {
-            /* carrinho salvo ilegível: começa vazio */
+            /* unreadable saved cart: start empty */
         }
         setCartLoaded(true);
     }, [state, cartLoaded, cartKey]);
@@ -336,7 +324,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                 )
             );
         } catch {
-            /* storage indisponível */
+            /* storage unavailable */
         }
     }, [cart, cartLoaded, cartKey]);
 
@@ -352,9 +340,10 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             await refresh();
             return true;
         } catch (e) {
-            if (e instanceof ApiError && e.status === 401) setPhase(phaseFor(e.code));
-            else if (e instanceof ApiError && e.code === 'restaurant_closed') {
-                setMessage(GUEST_ERRORS.restaurant_closed);
+            if (e instanceof ApiError && e.status === HTTP_STATUS.UNAUTHORIZED)
+                setPhase(phaseFor(e.code));
+            else if (e instanceof ApiError && e.code === ApiErrorCode.RESTAURANT_CLOSED) {
+                setMessage(GUEST_ERRORS[ApiErrorCode.RESTAURANT_CLOSED] ?? null);
                 void refresh();
             } else
                 setMessage(
@@ -505,11 +494,11 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             await act(() => api('/api/public/session/call', { method: 'POST', body: {} }))
         ) {
             setCalled(true);
-            setTimeout(() => setCalled(false), 3500);
+            setTimeout(() => setCalled(false), FEEDBACK_MS.called);
         }
     };
 
-    // Uma ação principal por estado da mesa.
+    // One main action per table state.
     const primary = (className: string) =>
         closedNow ? (
             <span className="px-3 text-sm font-semibold opacity-90">
@@ -557,7 +546,8 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                     {state.table.name}
                 </span>
                 <span className="flex items-center gap-2">
-                    <span className="pulse-dot" aria-hidden /> {HINT[tableState]}
+                    <span className="pulse-dot" aria-hidden />{' '}
+                    {TABLE_STATE_HINTS[tableState]}
                 </span>
                 {state.table.waiterName &&
                     (tableState === 'open' || tableState === 'pending_close') && (
@@ -779,7 +769,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                         {closedNow && (
                             <p className="surface px-4 py-3 text-center text-sm">
                                 <strong className="block">
-                                    {availability.label ?? 'Restaurante fechado'}
+                                    {availabilityText(availability) ?? CLOSED_FALLBACK}
                                 </strong>
                                 {availability.pauseReason && (
                                     <span className="block text-muted">
@@ -806,9 +796,9 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
                         {state.restaurant.serviceFeeBps > 0 && (
                             <p className="text-center text-xs text-muted">
                                 Taxa de serviço de{' '}
-                                {(state.restaurant.serviceFeeBps / 100).toLocaleString(
-                                    'pt-BR'
-                                )}
+                                {bpsToPercent(
+                                    state.restaurant.serviceFeeBps
+                                ).toLocaleString('pt-BR')}
                                 % na conta.
                                 {state.restaurant.guestFeeRefusal
                                     ? ' Você pode recusá-la na aba Conta.'

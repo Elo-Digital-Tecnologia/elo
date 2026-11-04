@@ -1,33 +1,35 @@
 'use client';
 
-import type { TableView } from '@elo/core';
-import { ApiError, api } from '@elo/client';
-import { FIELD_RULES } from '@elo/core';
+import type { TableView } from '@elo/core/api/views/table.view';
+import { api } from '@elo/client/http/api-client';
+import { ApiError } from '@elo/client/http/api-error';
+import { HTTP_STATUS } from '@elo/client/http/http-status';
+import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { Badge } from '@elo/ui/components/feedback/badge';
 import {
-    Badge,
-    Button,
     EmptyState,
     ErrorState,
-    Field,
-    GlassCard,
-    Input,
-    Modal,
-    PageHeader,
-    SkeletonCards,
-    Stagger,
-    StaggerItem
-} from '@elo/ui';
+    SkeletonCards
+} from '@elo/ui/components/feedback/states';
+import { Button } from '@elo/ui/components/forms/button';
+import { Input } from '@elo/ui/components/forms/fields';
+import { GlassCard } from '@elo/ui/components/layout/glass-card';
+import { Field, PageHeader } from '@elo/ui/components/layout/section';
+import { Stagger, StaggerItem } from '@elo/ui/components/motion/motion';
+import { Modal } from '@elo/ui/components/overlays/modal';
 import { Check, Copy, Download, Plus, Table2, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { FEEDBACK_MS } from '#/_lib/constants/timing';
+import { TABLE_STATE_TEXTS } from '#/_lib/messages/tables';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 
 const STATE: Record<string, { label: string; tone: 'neutral' | 'warning' | 'success' }> =
     {
-        closed: { label: 'Livre', tone: 'neutral' },
-        pending_open: { label: 'Aguardando garçom', tone: 'warning' },
-        open: { label: 'Aberta', tone: 'success' },
-        pending_close: { label: 'Pediu a conta', tone: 'warning' }
+        closed: { label: TABLE_STATE_TEXTS.closed.label, tone: 'neutral' },
+        pending_open: { label: TABLE_STATE_TEXTS.pending_open.label, tone: 'warning' },
+        open: { label: TABLE_STATE_TEXTS.open.label, tone: 'success' },
+        pending_close: { label: TABLE_STATE_TEXTS.pending_close.label, tone: 'warning' }
     };
 
 function TableCard({
@@ -67,9 +69,9 @@ function TableCard({
         try {
             await navigator.clipboard.writeText(link);
             setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
+            setTimeout(() => setCopied(false), FEEDBACK_MS.copied);
         } catch {
-            /* sem permissão de área de transferência */
+            /* no clipboard permission */
         }
     };
 
@@ -166,7 +168,7 @@ function View() {
             await load();
         } catch (e) {
             setError(
-                e instanceof ApiError && e.status === 409
+                e instanceof ApiError && e.status === HTTP_STATUS.CONFLICT
                     ? 'Uma mesa em uso não pode ser removida. Feche a mesa antes.'
                     : 'Não foi possível remover a mesa.'
             );
