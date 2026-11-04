@@ -3,7 +3,7 @@
 import type { ProductView } from '@elo/core/api/views/catalog.view';
 import type { SessionStateView } from '@elo/core/api/views/table.view';
 import type { FieldError } from '@elo/core/fields/field-rules';
-import type { CartLine } from '../../_components/product-sheet';
+import type { CartLine } from '../product-sheet';
 import { api } from '@elo/client/http/api-client';
 import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
@@ -11,7 +11,7 @@ import { useRealtime } from '@elo/client/realtime/use-realtime';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { formatBRL } from '@elo/core/money/cents';
 import { ORDER_IN_PROGRESS, canRequestBill } from '@elo/core/orders/order-status';
-import { AlertsProvider, unlockAlertSound } from '@elo/ui/components/feedback/alerts';
+import { unlockAlertSound } from '@elo/ui/components/feedback/alerts';
 import { Button } from '@elo/ui/components/forms/button';
 import { AnimatePresence } from '@elo/ui/components/motion/motion';
 import { Sheet } from '@elo/ui/components/overlays/sheet';
@@ -19,11 +19,9 @@ import {
     BellRing,
     Check,
     DoorClosed,
-    Lock,
     Minus,
     Plus,
     Smartphone,
-    Store,
     Timer,
     Trash2,
     WifiOff
@@ -39,41 +37,32 @@ import { GUEST_ERRORS } from '#/_lib/messages/errors';
 import { fieldMessage } from '#/_lib/messages/fields';
 import { CLOSED_FALLBACK, availabilityText } from '#/_lib/messages/opening-hours';
 import { ORDER_LINE_PARTS } from '#/_lib/messages/orders';
-import { TABLE_STATE_HINTS } from '#/_lib/messages/tables';
-import { BillPanel } from '../../_components/bill-panel';
-import { MenuFooter } from '../../_components/menu-chrome';
+import { cartKey } from '#/_lib/guest-storage';
+import { SESSION_NOTICES, TABLE_STATE_HINTS } from '#/_lib/messages/tables';
+import { BillPanel } from '../bill-panel';
+import { MenuFooter } from '../menu-chrome';
 import {
     CategoryTabs,
     Highlights,
     MenuList,
     MenuSearch,
     filterMenu
-} from '../../_components/menu-list';
-import { CartBar } from '../../_components/menu/cart-bar';
+} from '../menu-list';
+import { CartBar } from '../menu/cart-bar';
 import {
     GoogleReviewCard,
     GoogleReviewRow
-} from '../../_components/menu/google-review-card';
-import { useGuestAlertHandlers, useGuestPush } from '../../_components/menu/guest-alerts';
-import { MenuHeader } from '../../_components/menu/header';
-import { RestaurantInfo } from '../../_components/menu/info';
-import { ReviewForm } from '../../_components/menu/review-form';
-import { Notice } from '../../_components/notice';
-import { OrderTracker } from '../../_components/order-tracker';
-import { ProductSheet, lineUnit } from '../../_components/product-sheet';
-import { unexpected } from '../../_lib/use-form';
+} from '../menu/google-review-card';
+import { useGuestAlertHandlers, useGuestPush } from '../menu/guest-alerts';
+import { MenuHeader } from '../menu/header';
+import { RestaurantInfo } from '../menu/info';
+import { ReviewForm } from '../menu/review-form';
+import { Notice } from '../notice';
+import { OrderTracker } from '../order-tracker';
+import { ProductSheet, lineUnit } from '../product-sheet';
+import { unexpected } from '#/_lib/use-form';
 
-type Phase =
-    | 'loading'
-    | 'ready'
-    | 'invalid'
-    | 'unavailable'
-    | 'in_use'
-    | 'taken'
-    | 'rejected'
-    | 'expired'
-    | 'ended'
-    | 'error';
+type Phase = 'ready' | 'taken' | 'rejected' | 'expired' | 'ended';
 type View = 'menu' | 'orders' | 'bill';
 
 /** Most different lines one order takes (the API refuses more). */
@@ -114,21 +103,13 @@ const LINK_NOTICE_AFTER_MS = 3000;
 const ACTION =
     'rounded-[18px] bg-white/95 px-5 py-3 text-sm font-bold text-leaf-700 shadow-sm transition active:scale-95 disabled:opacity-60';
 
-export default function TableMenu({
-    params
-}: {
-    params: { slug: string; token: string };
-}) {
-    return (
-        <AlertsProvider>
-            <TableMenuView params={params} />
-        </AlertsProvider>
-    );
-}
-
-function TableMenuView({ params }: { params: { slug: string; token: string } }) {
-    const [phase, setPhase] = useState<Phase>('loading');
-    const [state, setState] = useState<SessionStateView | null>(null);
+/**
+ * The guest's table, from a session already started. The table link (token) never reaches
+ * this view: after the start the cookie alone carries the session. Needs `AlertsProvider`.
+ */
+export function TableMenuView({ initial }: { initial: SessionStateView }) {
+    const [phase, setPhase] = useState<Phase>('ready');
+    const [state, setState] = useState<SessionStateView>(initial);
     const [cart, setCart] = useState<CartLine[]>([]);
     const [reviewed, setReviewed] = useState(false);
     const [picked, setPicked] = useState<ProductView | null>(null);
@@ -141,7 +122,7 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
     const [view, setView] = useState<View>('menu');
     const [billVersion, setBillVersion] = useState(0);
     const [query, setQuery] = useState('');
-    const cartKey = `elo.cart.${params.slug}.${params.token}`;
+    const cartStorageKey = cartKey(initial.restaurant.slug);
     const [cartLoaded, setCartLoaded] = useState(false);
 
     /** Number of the latest state request: an older answer arriving late never overwrites a newer one. */
@@ -157,35 +138,9 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         }
     }, []);
 
-    useEffect(() => {
-        api<SessionStateView>(`/api/public/${params.slug}/${params.token}/session`, {
-            method: 'POST'
-        })
-            .then((s) => {
-                // A QR code printed with the old link: show the current one in the address bar.
-                if (s.restaurant.slug !== params.slug)
-                    window.history.replaceState(
-                        null,
-                        '',
-                        `/${s.restaurant.slug}/${params.token}`
-                    );
-                setState(s);
-                setPhase('ready');
-            })
-            .catch((e) => {
-                if (e instanceof ApiError && e.code === ApiErrorCode.MENU_UNAVAILABLE)
-                    setPhase('unavailable');
-                else if (e instanceof ApiError && e.status === HTTP_STATUS.NOT_FOUND)
-                    setPhase('invalid');
-                else if (e instanceof ApiError && e.status === HTTP_STATUS.CONFLICT)
-                    setPhase('in_use');
-                else setPhase('error');
-            });
-    }, [params.slug, params.token]);
-
     const tableOpen =
         state?.table.state === 'open' || state?.table.state === 'pending_close';
-    const guestPush = useGuestPush(params.token, tableOpen);
+    const guestPush = useGuestPush(initial.restaurant.slug, tableOpen);
     // The "on the way" banner already covers an answered call while the page is in view.
     const quiet = useCallback(
         (kind: string) =>
@@ -278,9 +233,9 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
 
     // Cart saved on the device: survives a page reload.
     useEffect(() => {
-        if (!state || cartLoaded) return;
+        if (cartLoaded) return;
         try {
-            const saved = JSON.parse(localStorage.getItem(cartKey) ?? '[]') as {
+            const saved = JSON.parse(localStorage.getItem(cartStorageKey) ?? '[]') as {
                 productId: string;
                 quantity: number;
                 notes: string;
@@ -307,13 +262,13 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
             /* unreadable saved cart: start empty */
         }
         setCartLoaded(true);
-    }, [state, cartLoaded, cartKey]);
+    }, [state, cartLoaded, cartStorageKey]);
 
     useEffect(() => {
         if (!cartLoaded) return;
         try {
             localStorage.setItem(
-                cartKey,
+                cartStorageKey,
                 JSON.stringify(
                     cart.map((l) => ({
                         productId: l.product.id,
@@ -326,7 +281,17 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         } catch {
             /* storage unavailable */
         }
-    }, [cart, cartLoaded, cartKey]);
+    }, [cart, cartLoaded, cartStorageKey]);
+
+    // The session is over: its bag goes with it.
+    useEffect(() => {
+        if (phase === 'ready') return;
+        try {
+            localStorage.removeItem(cartStorageKey);
+        } catch {
+            /* storage unavailable */
+        }
+    }, [phase, cartStorageKey]);
 
     /** Runs a guest action; `explain` names a refusal only that action understands. */
     const act = async (
@@ -356,90 +321,39 @@ function TableMenuView({ params }: { params: { slug: string; token: string } }) 
         }
     };
 
-    if (phase === 'loading')
-        return (
-            <main className="mx-auto max-w-2xl" aria-busy>
-                <div className="skeleton h-36 !rounded-none sm:h-48" />
-                <div className="space-y-4 p-4">
-                    <div className="skeleton h-8 w-2/3" />
-                    <div className="skeleton h-24" />
-                    <div className="skeleton h-24" />
-                    <div className="skeleton h-24" />
-                </div>
-            </main>
-        );
-    if (phase === 'invalid')
-        return (
-            <Notice title="Link não reconhecido" icon={<Lock size={30} />}>
-                Este QR Code ou tag não é válido. Chame o garçom.
-            </Notice>
-        );
-    if (phase === 'unavailable')
-        return (
-            <Notice title="Cardápio indisponível no momento" icon={<Store size={30} />}>
-                Os pedidos por aqui estão fora do ar. Chame o garçom.
-            </Notice>
-        );
-    if (phase === 'in_use')
-        return (
-            <Notice title="Mesa em atendimento" icon={<Lock size={30} />}>
-                Esta mesa já está aberta em outro aparelho. Chame o garçom se precisar.
-            </Notice>
-        );
-    const reload = <Button onClick={() => location.reload()}>Recarregar a página</Button>;
     if (phase === 'taken')
         return (
-            <Notice
-                title="Mesa aberta em outro aparelho"
-                icon={<Smartphone size={30} />}
-                action={reload}
-            >
-                Outra pessoa abriu o link desta mesa depois de você, e este aparelho foi
-                desconectado. Para pedir por aqui, recarregue a página. Se o outro
-                aparelho já tiver aberto a mesa, chame o garçom.
+            <Notice title={SESSION_NOTICES.taken.title} icon={<Smartphone size={30} />}>
+                {SESSION_NOTICES.taken.text}
             </Notice>
         );
     if (phase === 'rejected')
         return (
-            <Notice
-                title="Abertura não confirmada"
-                icon={<DoorClosed size={30} />}
-                action={reload}
-            >
-                O garçom não confirmou a abertura da mesa. Chame o garçom ou tente abrir
-                de novo.
+            <Notice title={SESSION_NOTICES.rejected.title} icon={<DoorClosed size={30} />}>
+                {SESSION_NOTICES.rejected.text}
             </Notice>
         );
     if (phase === 'expired')
         return (
-            <Notice title="Sessão expirada" icon={<Timer size={30} />}>
-                Escaneie o QR Code da mesa de novo para continuar.
+            <Notice title={SESSION_NOTICES.expired.title} icon={<Timer size={30} />}>
+                {SESSION_NOTICES.expired.text}
             </Notice>
         );
-    if (phase === 'ended') {
+    if (phase === 'ended')
         return (
             <Notice
-                title="Atendimento encerrado"
+                title={SESSION_NOTICES.ended.title}
                 icon={<Check size={30} />}
                 action={
-                    state && (
-                        <GoogleReviewCard
-                            url={state.restaurant.googleReviewUrl}
-                            slug={state.restaurant.slug}
-                            name={state.restaurant.name}
-                            thanks
-                        />
-                    )
+                    <GoogleReviewCard
+                        url={state.restaurant.googleReviewUrl}
+                        slug={state.restaurant.slug}
+                        name={state.restaurant.name}
+                        thanks
+                    />
                 }
             >
-                Obrigado pela visita! Para pedir de novo, escaneie o QR Code da mesa.
-            </Notice>
-        );
-    }
-    if (phase === 'error' || !state)
-        return (
-            <Notice title="Algo deu errado" icon={<WifiOff size={30} />}>
-                Não foi possível carregar o cardápio. Tente de novo em instantes.
+                {SESSION_NOTICES.ended.text}
             </Notice>
         );
 

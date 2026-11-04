@@ -12,9 +12,8 @@ import { unlockAlertSound, useAlerts } from '@elo/ui/components/feedback/alerts'
 import { Button } from '@elo/ui/components/forms/button';
 import { BellRing, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { pushInviteDismissedKey } from '#/_lib/guest-storage';
 import { guestAlertText } from '#/_lib/messages/alerts';
-
-const DISMISS_KEY = (token: string) => `elo.guest-alerts.${token}`;
 
 /**
  * Realtime events of the guest's table turned into on-screen alerts (sound,
@@ -41,7 +40,7 @@ export function useGuestAlertHandlers(push: PushState, quiet: (kind: string) => 
  * Offer to keep the guest posted with the screen locked. Shown once the table is
  * open, never on browsers that cannot do it (an iPhone outside the home screen).
  */
-export function useGuestPush(token: string, tableOpen: boolean) {
+export function useGuestPush(slug: string, tableOpen: boolean) {
     const [state, setState] = useState<PushState>('off');
     const [available, setAvailable] = useState(false);
     const [dismissed, setDismissed] = useState(true);
@@ -51,14 +50,14 @@ export function useGuestPush(token: string, tableOpen: boolean) {
         if (!pushSupported()) return setState('unsupported');
         void pushState().then(setState);
         try {
-            setDismissed(localStorage.getItem(DISMISS_KEY(token)) === '1');
+            setDismissed(localStorage.getItem(pushInviteDismissedKey(slug)) === '1');
         } catch {
             setDismissed(false);
         }
         api<{ key: string | null }>('/api/public/push-key')
             .then((r) => setAvailable(!!r.key))
             .catch(() => setAvailable(false));
-    }, [token]);
+    }, [slug]);
 
     // Already allowed on this phone: register it for this visit too, without asking again.
     useEffect(() => {
@@ -69,7 +68,7 @@ export function useGuestPush(token: string, tableOpen: boolean) {
     const dismiss = () => {
         setDismissed(true);
         try {
-            localStorage.setItem(DISMISS_KEY(token), '1');
+            localStorage.setItem(pushInviteDismissedKey(slug), '1');
         } catch {
             /* storage unavailable */
         }

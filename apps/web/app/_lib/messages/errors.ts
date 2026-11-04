@@ -10,6 +10,8 @@ export const GENERIC_MESSAGES = {
 };
 
 export const GUEST_ERRORS: Partial<Record<ApiErrorCode, string>> = {
+    [ApiErrorCode.TOO_MANY_REQUESTS]:
+        'Muitas tentativas seguidas. Aguarde um instante e tente de novo.',
     [ApiErrorCode.ORDERS_IN_PROGRESS]:
         'Ainda há pedidos sendo preparados. Peça a conta quando todos estiverem prontos.',
     [ApiErrorCode.TABLE_NOT_OPEN]: 'A mesa ainda não foi aberta pelo garçom.',

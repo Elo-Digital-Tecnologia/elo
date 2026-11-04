@@ -1,9 +1,11 @@
 'use client';
 
 import type { PublicMenuView } from '@elo/core/api/views/restaurant.view';
+import type { SessionStateView } from '@elo/core/api/views/table.view';
 import { api } from '@elo/client/http/api-client';
 import { ApiError } from '@elo/client/http/api-error';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { AlertsProvider } from '@elo/ui/components/feedback/alerts';
 import { SearchX, Store } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { MenuFooter } from '../_components/menu-chrome';
@@ -16,32 +18,47 @@ import {
 } from '../_components/menu-list';
 import { MenuHeader } from '../_components/menu/header';
 import { RestaurantInfo } from '../_components/menu/info';
+import { MenuSkeleton } from '../_components/menu/menu-skeleton';
 import { Notice } from '../_components/notice';
+import { TableMenuView } from '../_components/table/table-menu-view';
 
-/** Fixed restaurant link: read-only menu. */
+/**
+ * Fixed restaurant link: read-only menu. A guest whose table session is still valid here
+ * (the table link drops its token from the address bar) gets the table back instead.
+ */
 export default function FixedMenu({ params }: { params: { slug: string } }) {
     const [data, setData] = useState<PublicMenuView | null>(null);
+    const [session, setSession] = useState<SessionStateView | null>(null);
     const [missing, setMissing] = useState<'not_found' | 'unavailable' | null>(null);
     const [query, setQuery] = useState('');
 
     useEffect(() => {
-        api<PublicMenuView>(`/api/public/${params.slug}/menu`)
-            .then((d) => {
-                // Opened from an old link: show the current one in the address bar.
-                if (d.restaurant.slug !== params.slug)
-                    window.history.replaceState(null, '', `/${d.restaurant.slug}`);
-                setData(d);
-            })
-            .catch(
-                (e) =>
-                    e instanceof ApiError &&
-                    setMissing(
-                        e.code === ApiErrorCode.MENU_UNAVAILABLE
-                            ? 'unavailable'
-                            : 'not_found'
-                    )
-            );
+        void Promise.allSettled([
+            api<PublicMenuView>(`/api/public/${params.slug}/menu`),
+            api<SessionStateView>('/api/public/session')
+        ]).then(([menu, table]) => {
+            const slug =
+                menu.status === 'fulfilled' ? menu.value.restaurant.slug : params.slug;
+            // Opened from an old link: show the current one in the address bar.
+            if (slug !== params.slug) window.history.replaceState(null, '', `/${slug}`);
+            if (table.status === 'fulfilled' && table.value.restaurant.slug === slug)
+                setSession(table.value);
+            else if (menu.status === 'fulfilled') setData(menu.value);
+            else if (menu.reason instanceof ApiError)
+                setMissing(
+                    menu.reason.code === ApiErrorCode.MENU_UNAVAILABLE
+                        ? 'unavailable'
+                        : 'not_found'
+                );
+        });
     }, [params.slug]);
+
+    if (session)
+        return (
+            <AlertsProvider>
+                <TableMenuView initial={session} />
+            </AlertsProvider>
+        );
 
     if (missing === 'unavailable')
         return (
@@ -55,18 +72,7 @@ export default function FixedMenu({ params }: { params: { slug: string } }) {
                 Confira o endereço do cardápio.
             </Notice>
         );
-    if (!data)
-        return (
-            <main className="mx-auto max-w-2xl" aria-busy>
-                <div className="skeleton h-36 !rounded-none sm:h-48" />
-                <div className="space-y-4 p-4">
-                    <div className="skeleton h-8 w-2/3" />
-                    <div className="skeleton h-24" />
-                    <div className="skeleton h-24" />
-                    <div className="skeleton h-24" />
-                </div>
-            </main>
-        );
+    if (!data) return <MenuSkeleton />;
 
     const visible = filterMenu(data.menu, query);
     return (
