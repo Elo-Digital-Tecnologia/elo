@@ -18,21 +18,11 @@ jobs:
     check:
         runs-on: ubuntu-latest
         timeout-minutes: 20
-        services:
-            postgres:
-                image: postgres:16-alpine
-                env:
-                    POSTGRES_USER: elo
-                    POSTGRES_PASSWORD: elo
-                    POSTGRES_DB: elo_digital
-                ports: ['5432:5432']
-                options: >-
-                    --health-cmd "pg_isready -U elo" --health-interval 5s --health-timeout 5s --health-retries 10
         env:
             # Throwaway values for this run only; no repository secret is used. The rest
-            # comes from the .env.example files copied below.
+            # comes from the .env.example files copied below. The e2e database is a
+            # Testcontainers Postgres started by the suite itself.
             NODE_ENV: test
-            PG_PORT: 5432
             JWT_ACCESS_TOKEN_SECRET: ci-only-jwt-secret-used-nowhere-else
             SUPERADMIN_KEY: ci-only-superadmin-key-used-nowhere-else
         steps:
@@ -48,6 +38,5 @@ jobs:
             - run: cp .env.example .env && cp apps/api/.env.example apps/api/.env
             - run: pnpm exec turbo run lint build
             - run: pnpm --filter @elo/core test
-            - run: pnpm --filter @elo/api db:test:prepare
             - run: pnpm --filter @elo/api test
             - run: pnpm --filter @elo/api test:e2e

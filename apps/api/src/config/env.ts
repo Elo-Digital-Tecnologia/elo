@@ -6,6 +6,8 @@ const PRODUCTION_SECRET_LENGTH = 32;
 const DEV_SECRET_LENGTH = 16;
 const SUPERADMIN_KEY_LENGTH = 24;
 const ANY_ORIGIN = '*';
+/** bcrypt work factors accepted for staff passwords; production keeps at least the default. */
+const PASSWORD_HASH_COST = { min: 4, max: 15, default: 10 } as const;
 
 const isHttps = (url: string) => /^https:\/\/[^\s/]+/.test(url);
 const list = (value: string) =>
@@ -49,6 +51,12 @@ const envSchema = z
         APP_UPLOAD_DIR: text,
         APP_CORS_ORIGINS: text,
         APP_CORS_METHODS: text,
+        APP_PASSWORD_HASH_COST: z.coerce
+            .number()
+            .int()
+            .min(PASSWORD_HASH_COST.min)
+            .max(PASSWORD_HASH_COST.max)
+            .default(PASSWORD_HASH_COST.default),
 
         // Postgres connection
         PG_HOST: text,
@@ -97,6 +105,7 @@ export function productionProblems(env: {
     APP_CORS_ORIGINS?: string | undefined;
     JWT_ACCESS_TOKEN_SECRET?: string | undefined;
     SUPERADMIN_KEY?: string | undefined;
+    APP_PASSWORD_HASH_COST?: number | undefined;
 }): string[] {
     const problems: string[] = [];
     if (!env.APP_PUBLIC_URL || !isHttps(env.APP_PUBLIC_URL))
@@ -108,6 +117,13 @@ export function productionProblems(env: {
         if ((env[key] ?? '').length < PRODUCTION_SECRET_LENGTH)
             problems.push(`${key} must be at least ${PRODUCTION_SECRET_LENGTH} chars`);
     }
+    if (
+        (env.APP_PASSWORD_HASH_COST ?? PASSWORD_HASH_COST.default) <
+        PASSWORD_HASH_COST.default
+    )
+        problems.push(
+            `APP_PASSWORD_HASH_COST must be at least ${PASSWORD_HASH_COST.default}`
+        );
     return problems;
 }
 
@@ -142,7 +158,8 @@ export function loadConfig(raw: Record<string, string | undefined> = process.env
                 anyOrigin: origins.includes(ANY_ORIGIN),
                 origins: origins.filter((origin) => origin !== ANY_ORIGIN),
                 methods: list(env.APP_CORS_METHODS)
-            }
+            },
+            passwordHashCost: env.APP_PASSWORD_HASH_COST
         },
         database: {
             host: env.PG_HOST,

@@ -21,9 +21,6 @@ export const RATE_LIMITS = {
 /** Length of a day in ISO format, "YYYY-MM-DD". */
 export const ISO_DAY_LENGTH = 10;
 
-/** bcrypt work factor for staff passwords. */
-export const BCRYPT_COST = 10;
-
 /** Longest file name kept for uploaded images and documents. */
 export const FILE_NAME_MAX_LENGTH = 120;
 

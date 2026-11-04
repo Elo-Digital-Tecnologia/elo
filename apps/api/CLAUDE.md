@@ -2,7 +2,7 @@
 
 NestJS on Express, ESM, TypeORM + Postgres, Passport JWT, Vitest, ESLint.
 
-`start:dev`, `build`, `lint`, `test` (unit), `db:test:prepare` + `test:e2e`, `migration:generate`. After changes run `lint` and `build`.
+`dev` (`nest start --watch`), `build`, `lint`, `test` (unit), `test:e2e` (needs Docker: Testcontainers starts its own Postgres), `migration:generate`. After changes run `lint` and `build`.
 
 ## Layout
 
@@ -15,6 +15,9 @@ src/
   modules/<feature>/
     <feature>.module|controller|service.ts, <feature>.constants.ts
     dto/ entities/ exceptions/ guards/ strategies/ decorators/ types/ utils/
+test/
+  global-setup.ts (Postgres container), setup-env.ts (env + one database per worker)
+  support/flow.ts (shared app, http helpers, base fixture), e2e/<subject>.e2e-spec.ts
 ```
 
 - Folder plural (`orders`), files and classes singular (`order.service.ts`, `OrderService`); one class per file, `<name>.<kind>.ts` → `<Name><Kind>`.

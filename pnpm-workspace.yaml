@@ -7,3 +7,7 @@ allowBuilds:
     '@nestjs/core': false
     # The platform binary comes from an optional dependency; its install script is not needed.
     '@swc/core': false
+    # Testcontainers' Docker client: native speedups only, it works without them.
+    cpu-features: false
+    protobufjs: false
+    ssh2: false

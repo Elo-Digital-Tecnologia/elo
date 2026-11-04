@@ -1,6 +1,8 @@
 import type { StaffAction } from '@elo/core/roles/staff-rules';
 import type { JwtUser } from '#/common/types/jwt-user.type.js';
+import type { EnvConfig } from '#/config/env.js';
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Role } from '@elo/core/roles/roles';
 import {
@@ -12,12 +14,7 @@ import {
 import { TableState } from '@elo/core/tables/table-state';
 import bcrypt from 'bcryptjs';
 import { ArrayContains, In, IsNull, Not, Repository } from 'typeorm';
-import {
-    BCRYPT_COST,
-    SHORT_CACHE_MS,
-    SUPERADMIN_NAME,
-    UUID_PATTERN
-} from '#/common/constants.js';
+import { SHORT_CACHE_MS, SUPERADMIN_NAME, UUID_PATTERN } from '#/common/constants.js';
 import { AuditLogService } from '#/modules/audit-logs/audit-log.service.js';
 import { InvalidCredentialsException } from '#/modules/auth/exceptions/invalid-credentials.exception.js';
 import { RealtimeService } from '#/modules/realtime/realtime.service.js';
@@ -79,8 +76,17 @@ export class StaffService {
         private readonly tables: Repository<DiningTableEntity>,
         private readonly audit: AuditLogService,
         private readonly realtime: RealtimeService,
-        private readonly sessions: SessionService
+        private readonly sessions: SessionService,
+        private readonly configService: ConfigService<EnvConfig, true>
     ) {}
+
+    /** bcrypt hash of a staff password, at the cost set for this deployment. */
+    public hashPassword(password: string): Promise<string> {
+        return bcrypt.hash(
+            password,
+            this.configService.getOrThrow('app.passwordHashCost', { infer: true })
+        );
+    }
 
     public async create(data: CreateStaffInput, actor?: JwtUser): Promise<PublicStaff> {
         // The owner is created with the restaurant and only changes through a transfer; managers come from the owner.
@@ -108,7 +114,7 @@ export class StaffService {
                 username: data.username,
                 name: data.name.trim(),
                 displayName: data.displayName?.trim() || null,
-                passwordHash: await bcrypt.hash(data.password, BCRYPT_COST),
+                passwordHash: await this.hashPassword(data.password),
                 roles: data.roles,
                 permissions: data.permissions ?? []
             })
@@ -220,7 +226,7 @@ export class StaffService {
     ): Promise<void> {
         const user = await this.find(id, restaurantId);
         await this.authorize(actor, user, 'reset_password');
-        user.passwordHash = await bcrypt.hash(next, BCRYPT_COST);
+        user.passwordHash = await this.hashPassword(next);
         await this.users.save(user);
         // Every session of the member ended with the old password.
         await this.sessions.keepAfterPasswordChange(undefined, user.passwordHash);
@@ -421,7 +427,7 @@ export class StaffService {
             throw new InvalidCredentialsException();
         }
         if (current === next) throw new SamePasswordException();
-        user.passwordHash = await bcrypt.hash(next, BCRYPT_COST);
+        user.passwordHash = await this.hashPassword(next);
         await this.users.save(user);
         await this.sessions.keepAfterPasswordChange(sessionId, user.passwordHash);
         // Live feeds of the other devices drop now; this one reconnects with its still valid token.

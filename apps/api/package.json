@@ -8,15 +8,13 @@
     },
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
-        "dev": "node scripts/dev.mjs",
+        "dev": "nest start --watch",
         "start": "node dist/main.js",
-        "start:dev": "node scripts/dev.mjs",
         "lint": "eslint src test",
         "test": "vitest run --project unit",
         "test:e2e": "vitest run --project e2e",
         "migration:generate": "pnpm build && typeorm migration:generate -d dist/database/data-source.js",
         "vapid:generate": "node scripts/vapid-generate.mjs",
-        "db:test:prepare": "node scripts/test-db.mjs",
         "db:seed": "node dist/database/seeds/demo.js"
     },
     "dependencies": {
@@ -52,6 +50,7 @@
         "@nestjs/cli": "^10.4.5",
         "@nestjs/testing": "^10.4.4",
         "@swc/core": "^1.16.21",
+        "@testcontainers/postgresql": "^12.2.1",
         "@types/bcryptjs": "^2.4.6",
         "@types/cookie-parser": "^1.4.7",
         "@types/express": "^4.17.21",

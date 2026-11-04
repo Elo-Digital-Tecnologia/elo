@@ -20,8 +20,12 @@ export default defineConfig({
                 resolve: { alias },
                 test: {
                     name: 'e2e',
-                    include: ['test/**/*.e2e-spec.ts'],
+                    include: ['test/e2e/**/*.e2e-spec.ts'],
+                    globalSetup: ['test/global-setup.ts'],
                     setupFiles: ['test/setup-env.ts'],
+                    pool: 'forks',
+                    // One app import per worker instead of one per file.
+                    isolate: false,
                     testTimeout: 30_000,
                     hookTimeout: 60_000
                 }

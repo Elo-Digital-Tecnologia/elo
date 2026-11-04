@@ -10,7 +10,7 @@ import { EloStaffRoles, Role, hasAnyRole } from '@elo/core/roles/roles';
 import { restaurantScope } from '@elo/core/sessions/session-scope';
 import bcrypt from 'bcryptjs';
 import { IsNull, Repository } from 'typeorm';
-import { BCRYPT_COST, SUPERADMIN_NAME } from '#/common/constants.js';
+import { SUPERADMIN_NAME } from '#/common/constants.js';
 import { RestaurantSlugAliasEntity } from '#/modules/restaurants/entities/restaurant-slug-alias.entity.js';
 import { RestaurantEntity } from '#/modules/restaurants/entities/restaurant.entity.js';
 import { restaurantBySlug } from '#/modules/restaurants/utils/restaurant-slug.js';
@@ -19,9 +19,6 @@ import { StaffUserEntity } from '#/modules/staff/entities/staff-user.entity.js';
 import { InvalidCredentialsException } from './exceptions/invalid-credentials.exception.js';
 import { SessionEndedException } from './exceptions/session-ended.exception.js';
 import { timingSafeEqual } from 'node:crypto';
-
-/** Hash compared when the user does not exist, so the response takes the same time. */
-const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', BCRYPT_COST);
 
 /** A short access token plus the long session behind it, kept by the browser in a cookie. */
 export interface SignedIn {
@@ -39,7 +36,15 @@ export class AuthService {
         private readonly jwt: JwtService,
         private readonly configService: ConfigService<EnvConfig, true>,
         private readonly sessions: SessionService
-    ) {}
+    ) {
+        this.dummyHash = bcrypt.hashSync(
+            'not-a-real-password',
+            configService.getOrThrow('app.passwordHashCost', { infer: true })
+        );
+    }
+
+    /** Hash compared when the user does not exist, so the answer takes as long as a real check. */
+    private readonly dummyHash: string;
 
     /** Sign-in of a restaurant team: the user only counts inside the restaurant of the address. */
     public async restaurantLogin(
@@ -89,7 +94,7 @@ export class AuthService {
         scope: SessionScope,
         userAgent?: string
     ): Promise<SignedIn> {
-        const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+        const ok = await bcrypt.compare(password, user?.passwordHash ?? this.dummyHash);
         if (!user || !ok || !user.active || !roleOk(user))
             throw new InvalidCredentialsException();
         const session = await this.sessions.open(user, scope, userAgent);
