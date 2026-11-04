@@ -17,7 +17,7 @@ COPY packages/config/package.json packages/config/
 RUN pnpm install --frozen-lockfile --prod --filter @elo/api...
 
 FROM node:26-slim AS run
-ENV NODE_ENV=production UPLOAD_DIR=/data/uploads
+ENV NODE_ENV=production APP_UPLOAD_DIR=/data/uploads
 WORKDIR /repo
 COPY --from=deps /repo ./
 COPY --from=build /repo/packages/core/dist packages/core/dist
@@ -26,6 +26,5 @@ RUN mkdir -p /data/uploads && chown -R node:node /data
 USER node
 WORKDIR /repo/apps/api
 EXPOSE 3001
-# Before the first production deploy, generate the initial migration
-# (pnpm --filter @elo/api migration:generate) and run it here before starting.
+# Migrations are a separate step before each deploy: pnpm --filter @elo/api migration:run
 CMD ["node", "dist/main.js"]

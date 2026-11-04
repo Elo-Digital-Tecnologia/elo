@@ -34,5 +34,5 @@ pnpm + Turborepo, TypeScript ESM, Node >= 26.
 - Shared logic and types go to `packages/core`; check core and `@elo/ui` before writing something new. Theme values come from `@elo/ui` tokens.
 - Folders by subject; one class/component per file; import each file directly (no barrels).
 - Naming: `camelCase` values, `PascalCase` types, `UPPER_SNAKE_CASE` constants and enum members, `kebab-case` files. `interface` for shapes, `type` for unions. `import type` for type-only imports.
-- The database schema synchronizes in development; generate the first migration only before the first production deploy.
+- The database schema synchronizes in development only. Production runs `migration:run` as a separate deploy step, so every schema change ships with a migration (`migration:generate`).
 - Commits: Conventional Commits, lowercase message.

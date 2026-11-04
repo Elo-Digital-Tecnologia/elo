@@ -15,7 +15,7 @@ for (const file of ENV_FILES) {
 const { ssl, ...database } = loadConfig().database;
 
 /**
- * Data source used by the TypeORM CLI (`migration:generate`). The CLI does not read env
+ * Data source used by the TypeORM CLI (`migration:run`, `migration:generate`). The CLI does not read env
  * files, so `apps/api/.env` and the monorepo root `.env` are loaded here.
  */
 export default new DataSource({

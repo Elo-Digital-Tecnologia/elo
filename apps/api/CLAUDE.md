@@ -2,7 +2,7 @@
 
 NestJS on Express, ESM, TypeORM + Postgres, Passport JWT, Vitest, ESLint.
 
-`dev` (`nest start --watch`), `build`, `lint`, `test` (unit), `test:e2e` (needs Docker: Testcontainers starts its own Postgres), `migration:generate`. After changes run `lint` and `build`.
+`dev` (`nest start --watch`), `build`, `lint`, `test` (unit), `test:e2e` (needs Docker: Testcontainers starts its own Postgres), `migration:run`, `migration:generate`. After changes run `lint` and `build`.
 
 ## Layout
 
@@ -10,7 +10,7 @@ NestJS on Express, ESM, TypeORM + Postgres, Passport JWT, Vitest, ESLint.
 src/
   main.ts, app.setup.ts (middlewares, pipes, interceptor, filter, adapters), app.module.ts
   config/      env.ts (Zod, nested config), cors.ts, duration.ts
-  database/    data-source.ts, seeds/ (migrations/ empty until the first deploy)
+  database/    data-source.ts, migrations/, seeds/
   common/      constants.ts, database/, decorators/, exceptions/, filters/, guards/, interceptors/, pipes/, types/
   modules/<feature>/
     <feature>.module|controller|service.ts, <feature>.constants.ts

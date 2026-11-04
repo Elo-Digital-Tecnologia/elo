@@ -13,6 +13,7 @@
         "lint": "eslint src test",
         "test": "vitest run --project unit",
         "test:e2e": "vitest run --project e2e",
+        "migration:run": "typeorm migration:run -d dist/database/data-source.js",
         "migration:generate": "pnpm build && typeorm migration:generate -d dist/database/data-source.js",
         "vapid:generate": "node scripts/vapid-generate.mjs",
         "db:seed": "node dist/database/seeds/demo.js"
