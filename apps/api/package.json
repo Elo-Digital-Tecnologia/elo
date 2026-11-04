@@ -6,6 +6,13 @@
     "imports": {
         "#/*": "./dist/*"
     },
+    "devEngines": {
+        "runtime": {
+            "name": "node",
+            "version": "26.x",
+            "onFail": "download"
+        }
+    },
     "scripts": {
         "build": "tsc -p tsconfig.build.json",
         "dev": "nest start --watch",
