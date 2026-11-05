@@ -10,7 +10,7 @@ import { HTTP_STATUS } from '@elo/client/http/http-status';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { PRODUCT_TAGS } from '@elo/core/catalog/product-tags';
 import { FIELD_RULES } from '@elo/core/fields/field-rules';
-import { formatBRL, parseCents } from '@elo/core/money/cents';
+import { parseCents } from '@elo/core/money/cents';
 import { Badge } from '@elo/ui/components/feedback/badge';
 import {
     EmptyState,
@@ -45,15 +45,17 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { centsToInput } from '#/_lib/format';
-import { PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
+import { PRODUCT_PRICE_TEXTS, PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
 import { MENU_ERRORS, PRODUCT_FORM_MESSAGES } from '#/_lib/messages/errors';
 import { ImagePicker } from '../../../../../_components/image-picker';
+import { ProductPrice } from '../../../../../_components/menu-list';
 import { money, rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
 import {
     OptionsEditor,
     draftErrors,
     draftErrorsFromServer,
+    draftPricedBySize,
     firstInvalid,
     fromDraft,
     toDraft
@@ -97,7 +99,9 @@ const CATEGORY_CHECKS = { name: rule(FIELD_RULES.categoryName) };
 const PRODUCT_CHECKS = {
     categoryId: (v: string): FieldError | null => (v ? null : { code: 'invalid_option' }),
     name: rule(FIELD_RULES.productName),
-    price: money(FIELD_RULES.priceCents),
+    // A product priced by its sizes has no price of its own.
+    price: (v: string, all: Form) =>
+        draftPricedBySize(all.options) ? null : money(FIELD_RULES.priceCents)(v),
     description: rule(FIELD_RULES.productDescription),
     imageUrl: rule(FIELD_RULES.imageUrl)
 };
@@ -109,7 +113,7 @@ const stepOf = (field: string) =>
 
 const firstBad = (v: Form) =>
     (Object.keys(PRODUCT_CHECKS) as Checked[]).find((k) =>
-        (PRODUCT_CHECKS[k] as (x: unknown) => FieldError | null)(v[k])
+        (PRODUCT_CHECKS[k] as (x: unknown, all: Form) => FieldError | null)(v[k], v)
     );
 
 function View() {
@@ -258,7 +262,9 @@ function View() {
         const body = {
             categoryId: v.categoryId,
             name: v.name.trim(),
-            priceCents: parseCents(v.price) ?? 0,
+            priceCents: draftPricedBySize(v.options)
+                ? undefined
+                : (parseCents(v.price) ?? 0),
             description: v.description.trim() || undefined,
             imageUrl: v.imageUrl.trim() || undefined,
             featured: v.featured,
@@ -442,7 +448,7 @@ function View() {
                                                     {p.name}
                                                 </h3>
                                                 <span className="font-display font-bold text-brand">
-                                                    {formatBRL(p.priceCents)}
+                                                    <ProductPrice product={p} />
                                                 </span>
                                             </div>
                                             {p.description && (
@@ -623,10 +629,23 @@ function View() {
                                         data-autofocus
                                     />
                                 </Field>
-                                <Field label="Preço" error={form.errors.price}>
-                                    <MoneyInput {...form.bind('price')} />
-                                </Field>
+                                {draftPricedBySize(form.values.options) ? (
+                                    <Field label="Preço">
+                                        <p className="pt-2 text-sm text-muted">
+                                            {PRODUCT_PRICE_TEXTS.bySize}
+                                        </p>
+                                    </Field>
+                                ) : (
+                                    <Field label="Preço" error={form.errors.price}>
+                                        <MoneyInput {...form.bind('price')} />
+                                    </Field>
+                                )}
                             </div>
+                            {!draftPricedBySize(form.values.options) && (
+                                <p className="-mt-2 text-xs text-muted">
+                                    {PRODUCT_PRICE_TEXTS.hint}
+                                </p>
+                            )}
                             <label className="flex items-center gap-3 text-sm font-medium">
                                 <Switch
                                     label="Destaque"

@@ -1,6 +1,6 @@
+import type { OptionGroup } from '@elo/core/api/views/catalog.view';
 import type { ProductTag } from '@elo/core/catalog/product-tags';
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
-import { OptionGroup } from '../types/option-group.type.js';
 
 @Entity('products')
 export class ProductEntity {

@@ -71,4 +71,60 @@ describe('priceItem', () => {
             priceItem({ ...pizza, available: false }, { productId: 'p1', quantity: 1 })
         ).toThrow(ProductUnavailableException);
     });
+    it('prices by size and by the highest flavor', () => {
+        const halfAndHalf = {
+            id: 'p2',
+            name: 'Pizza meio a meio',
+            priceCents: 0,
+            available: true,
+            options: [
+                {
+                    name: 'Tamanho',
+                    kind: 'size',
+                    required: true,
+                    multiple: false,
+                    choices: [
+                        { label: 'M', priceCents: 0, maxFlavors: 1 },
+                        { label: 'G', priceCents: 0, maxFlavors: 2 }
+                    ]
+                },
+                {
+                    name: 'Sabores',
+                    kind: 'flavor',
+                    required: true,
+                    multiple: true,
+                    flavorPricing: 'highest',
+                    choices: [
+                        {
+                            label: 'Calabresa',
+                            priceCents: 0,
+                            sizePrices: { M: 5000, G: 6000 }
+                        },
+                        {
+                            label: 'Camarão',
+                            priceCents: 0,
+                            sizePrices: { M: 6500, G: 8000 }
+                        }
+                    ]
+                }
+            ]
+        } as unknown as ProductEntity;
+        const both = [
+            { group: 'Sabores', label: 'Calabresa' },
+            { group: 'Sabores', label: 'Camarão' }
+        ];
+        const item = priceItem(halfAndHalf, {
+            productId: 'p2',
+            quantity: 1,
+            options: [{ group: 'Tamanho', label: 'G' }, ...both]
+        });
+        expect(item.unitCents).toBe(8000);
+        expect(() =>
+            priceItem(halfAndHalf, {
+                productId: 'p2',
+                quantity: 1,
+                options: [{ group: 'Tamanho', label: 'M' }, ...both]
+            })
+        ).toThrow(TooManyOptionsException);
+    });
 });

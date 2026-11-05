@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import {
+    normalizeOptions,
+    optionsProblems,
+    pricedBySize
+} from '@elo/core/catalog/product-pricing';
 import { Repository } from 'typeorm';
 import { TenantRepository } from '#/common/database/tenant.repository.js';
+import { ValidationFailedException } from '#/common/exceptions/validation-failed.exception.js';
 import { CategoryDTO } from './dto/category.dto.js';
 import { ProductDTO } from './dto/product.dto.js';
 import { CategoryEntity } from './entities/category.entity.js';
@@ -82,17 +88,18 @@ export class CatalogService {
 
     public async createProduct(rid: string, dto: ProductDTO) {
         await this.assertCategory(rid, dto.categoryId);
+        const pricing = this.pricing(dto);
         return this.prods(rid).create({
             categoryId: dto.categoryId,
             name: dto.name,
             description: dto.description ?? null,
-            priceCents: dto.priceCents,
+            priceCents: pricing.priceCents,
             imageUrl: dto.imageUrl ?? null,
             available: dto.available ?? true,
             featured: dto.featured ?? false,
             tags: dto.tags ?? [],
             position: await this.nextPosition(rid, dto.categoryId),
-            options: dto.options ?? []
+            options: pricing.options
         });
     }
 
@@ -101,18 +108,39 @@ export class CatalogService {
         const p = await repo.findOne({ id });
         if (!p) throw new ProductNotFoundException();
         await this.assertCategory(rid, dto.categoryId);
+        const pricing = this.pricing(dto);
         Object.assign(p, {
             categoryId: dto.categoryId,
             name: dto.name,
             description: dto.description ?? null,
-            priceCents: dto.priceCents,
+            priceCents: pricing.priceCents,
             imageUrl: dto.imageUrl ?? null,
             available: dto.available ?? p.available,
             featured: dto.featured ?? false,
             tags: dto.tags ?? [],
-            options: dto.options ?? []
+            options: pricing.options
         });
         return repo.save(p);
+    }
+
+    /**
+     * The option setup as stored, checked as a whole (sizes, flavors, repeated names).
+     * A product priced by its size keeps no price of its own; any other needs one.
+     */
+    private pricing(dto: ProductDTO) {
+        const groups = dto.options ?? [];
+        const problems = optionsProblems(groups);
+        const bySize = pricedBySize(groups);
+        if (!bySize && dto.priceCents === undefined)
+            problems.push({ path: 'priceCents', error: { code: 'required' } });
+        if (problems.length)
+            throw new ValidationFailedException(
+                problems.map((p) => ({ field: p.path, ...p.error }))
+            );
+        return {
+            priceCents: bySize ? 0 : (dto.priceCents ?? 0),
+            options: normalizeOptions(groups)
+        };
     }
 
     /** End of the category list: a new product goes last. */

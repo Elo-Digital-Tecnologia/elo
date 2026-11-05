@@ -1,4 +1,13 @@
+import type { OptionGroupKind } from '../../catalog/option-kinds.js';
 import type { OrderStatus } from '../../orders/order-status.js';
+
+export interface OrderItemOptionView {
+    group: string;
+    label: string;
+    priceCents: number;
+    /** Absent on orders placed before kinds existed. */
+    kind?: OptionGroupKind | undefined;
+}
 
 export interface OrderItemView {
     productId: string;
@@ -6,7 +15,7 @@ export interface OrderItemView {
     unitCents: number;
     quantity: number;
     notes?: string | undefined;
-    options: { group: string; label: string; priceCents: number }[];
+    options: OrderItemOptionView[];
 }
 
 export interface OrderView {

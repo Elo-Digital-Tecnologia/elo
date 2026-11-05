@@ -26,8 +26,9 @@ export class ProductDTO {
     @Field(FIELD_RULES.productDescription, { optional: true })
     public description?: string | null;
 
-    @Field(FIELD_RULES.priceCents)
-    public priceCents: number;
+    /** Required unless a size group sets the price. */
+    @Field(FIELD_RULES.priceCents, { optional: true })
+    public priceCents?: number;
 
     /** External link (https) or an image from the restaurant's library (/api/media/<id>.webp). */
     @Field(FIELD_RULES.imageUrl, { optional: true })

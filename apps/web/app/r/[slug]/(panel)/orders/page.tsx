@@ -4,6 +4,7 @@ import type { OrderHistoryItem, OrderHistoryPage } from '@elo/core/api/views/ord
 import type { TableView } from '@elo/core/api/views/table.view';
 import type { OrderStatus } from '@elo/core/orders/order-status';
 import { api } from '@elo/client/http/api-client';
+import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { dayError } from '@elo/core/fields/field-rules';
 import { formatBRL } from '@elo/core/money/cents';
 import { ORDER_HISTORY_FLOOR_DAYS } from '@elo/core/orders/order-status';
@@ -93,7 +94,9 @@ function OrderRow({ order }: { order: OrderHistoryItem }) {
                                     </span>
                                     {i.options.length > 0 && (
                                         <span className="block text-xs text-muted">
-                                            {i.options.map((o) => o.label).join(', ')}
+                                            {summarizeOptions(i.options)
+                                                .map((o) => o.text)
+                                                .join(', ')}
                                         </span>
                                     )}
                                     {i.notes && (

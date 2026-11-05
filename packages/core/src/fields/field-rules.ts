@@ -1,3 +1,4 @@
+import { FLAVORS_MAX } from '../catalog/option-kinds.js';
 import { parseCents } from '../money/cents.js';
 import { SLUG_PATTERN } from '../slug/slug.js';
 import {
@@ -41,6 +42,9 @@ export type FieldErrorCode =
     | 'too_few'
     | 'too_many'
     | 'unknown_field'
+    | 'duplicate'
+    | 'one_per_product'
+    | 'needs_size'
     | 'invalid';
 
 export interface FieldError {
@@ -278,6 +282,8 @@ export const FIELD_RULES = {
         patternCode: 'invalid_google_url'
     }),
     priceCents: int({ min: 0, max: MONEY_MAX_CENTS, money: true }),
+    /** Flavors one pizza size takes (half-and-half). */
+    flavorsPerSize: int({ min: 1, max: FLAVORS_MAX }),
     planPriceCents: int({ min: 1, max: MONEY_MAX_CENTS, money: true }),
     paymentCents: int({ min: 1, max: MONEY_MAX_CENTS * 10, money: true }),
     adjustmentCents: int({

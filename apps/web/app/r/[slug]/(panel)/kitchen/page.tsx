@@ -7,6 +7,7 @@ import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
 import { upsertOrder } from '@elo/client/realtime/order-events';
 import { useRealtime } from '@elo/client/realtime/use-realtime';
+import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { nextOrderStatus, previousOrderStatus } from '@elo/core/orders/order-status';
 import { Badge } from '@elo/ui/components/feedback/badge';
 import { EmptyState } from '@elo/ui/components/feedback/states';
@@ -281,8 +282,8 @@ function Board() {
                                                 {i.name}
                                                 {i.options.length > 0 && (
                                                     <span className="block text-sm text-muted">
-                                                        {i.options
-                                                            .map((x) => x.label)
+                                                        {summarizeOptions(i.options)
+                                                            .map((x) => x.text)
                                                             .join(' · ')}
                                                     </span>
                                                 )}

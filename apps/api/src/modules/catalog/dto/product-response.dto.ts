@@ -1,5 +1,4 @@
-import type { ProductView } from '@elo/core/api/views/catalog.view';
-import type { OptionGroup } from '../types/option-group.type.js';
+import type { OptionGroup, ProductView } from '@elo/core/api/views/catalog.view';
 import { Exclude, Expose, plainToInstance } from 'class-transformer';
 
 @Exclude()

@@ -2,13 +2,29 @@
 
 import type { CategoryView, ProductView } from '@elo/core/api/views/catalog.view';
 import type { ProductTag } from '@elo/core/catalog/product-tags';
+import { startingPrice } from '@elo/core/catalog/product-pricing';
 import { formatBRL } from '@elo/core/money/cents';
 import { Input } from '@elo/ui/components/forms/fields';
 import { motion } from '@elo/ui/components/motion/motion';
 import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import { Plus, Search, Star, UtensilsCrossed, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
+import { CATALOG_TEXTS, PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
+
+/** Price on a menu card: the cheapest one, with "from" when the choices change it. */
+export function ProductPrice({ product }: { product: ProductView }) {
+    const { cents, varies } = startingPrice(product);
+    return (
+        <>
+            {varies && (
+                <span className="mr-1 text-xs font-medium text-muted">
+                    {CATALOG_TEXTS.priceFrom}
+                </span>
+            )}
+            {formatBRL(cents)}
+        </>
+    );
+}
 
 const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -122,7 +138,7 @@ export function Highlights({
                                 {p.name}
                             </h3>
                             <p className="text-sm font-semibold text-brand">
-                                {formatBRL(p.priceCents)}
+                                <ProductPrice product={p} />
                             </p>
                         </>
                     );
@@ -256,7 +272,6 @@ function Row({
     product: ProductView;
     onPick?: (p: ProductView) => void;
 }) {
-    const from = product.options.some((o) => o.required);
     const content = (
         <>
             <div className="min-w-0 flex-1">
@@ -268,12 +283,7 @@ function Row({
                 )}
                 <TagChips tags={product.tags} />
                 <p className="mt-2 font-semibold text-brand">
-                    {from && (
-                        <span className="mr-1 text-xs font-medium text-muted">
-                            a partir de
-                        </span>
-                    )}
-                    {formatBRL(product.priceCents)}
+                    <ProductPrice product={product} />
                 </p>
             </div>
             <div className="relative shrink-0">

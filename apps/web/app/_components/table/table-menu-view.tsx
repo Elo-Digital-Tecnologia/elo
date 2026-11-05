@@ -9,6 +9,7 @@ import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
 import { useRealtime } from '@elo/client/realtime/use-realtime';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { formatBRL } from '@elo/core/money/cents';
 import { ORDER_IN_PROGRESS, canRequestBill } from '@elo/core/orders/order-status';
 import { unlockAlertSound } from '@elo/ui/components/feedback/alerts';
@@ -33,26 +34,18 @@ import {
     STATUS_CHANGE_MARGIN_MS
 } from '#/_lib/constants/timing';
 import { bpsToPercent } from '#/_lib/format';
+import { cartKey } from '#/_lib/guest-storage';
 import { GUEST_ERRORS } from '#/_lib/messages/errors';
 import { fieldMessage } from '#/_lib/messages/fields';
 import { CLOSED_FALLBACK, availabilityText } from '#/_lib/messages/opening-hours';
 import { ORDER_LINE_PARTS } from '#/_lib/messages/orders';
-import { cartKey } from '#/_lib/guest-storage';
 import { SESSION_NOTICES, TABLE_STATE_HINTS } from '#/_lib/messages/tables';
+import { unexpected } from '#/_lib/use-form';
 import { BillPanel } from '../bill-panel';
 import { MenuFooter } from '../menu-chrome';
-import {
-    CategoryTabs,
-    Highlights,
-    MenuList,
-    MenuSearch,
-    filterMenu
-} from '../menu-list';
+import { CategoryTabs, Highlights, MenuList, MenuSearch, filterMenu } from '../menu-list';
 import { CartBar } from '../menu/cart-bar';
-import {
-    GoogleReviewCard,
-    GoogleReviewRow
-} from '../menu/google-review-card';
+import { GoogleReviewCard, GoogleReviewRow } from '../menu/google-review-card';
 import { useGuestAlertHandlers, useGuestPush } from '../menu/guest-alerts';
 import { MenuHeader } from '../menu/header';
 import { RestaurantInfo } from '../menu/info';
@@ -60,7 +53,6 @@ import { ReviewForm } from '../menu/review-form';
 import { Notice } from '../notice';
 import { OrderTracker } from '../order-tracker';
 import { ProductSheet, lineUnit } from '../product-sheet';
-import { unexpected } from '#/_lib/use-form';
 
 type Phase = 'ready' | 'taken' | 'rejected' | 'expired' | 'ended';
 type View = 'menu' | 'orders' | 'bill';
@@ -329,7 +321,10 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
         );
     if (phase === 'rejected')
         return (
-            <Notice title={SESSION_NOTICES.rejected.title} icon={<DoorClosed size={30} />}>
+            <Notice
+                title={SESSION_NOTICES.rejected.title}
+                icon={<DoorClosed size={30} />}
+            >
                 {SESSION_NOTICES.rejected.text}
             </Notice>
         );
@@ -732,7 +727,9 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                                 <div className="font-semibold">{l.product.name}</div>
                                 {l.options.length > 0 && (
                                     <div className="text-muted">
-                                        {l.options.map((o) => o.label).join(' · ')}
+                                        {summarizeOptions(l.options)
+                                            .map((o) => o.text)
+                                            .join(' · ')}
                                     </div>
                                 )}
                                 {l.notes && (

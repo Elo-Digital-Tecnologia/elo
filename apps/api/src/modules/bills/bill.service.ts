@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { BillView, FeeWaivedBy } from '@elo/core/api/views/bill.view';
 import { calculateBill } from '@elo/core/bills/bill';
+import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { TableState } from '@elo/core/tables/table-state';
 import { Repository } from 'typeorm';
 import { ResourceNotFoundException } from '#/common/exceptions/resource-not-found.exception.js';
@@ -146,7 +147,7 @@ export class BillService {
                 name: i.name,
                 unitCents: i.unitCents,
                 quantity: i.quantity,
-                details: i.options.map((opt) => `${opt.group}: ${opt.label}`)
+                details: summarizeOptions(i.options).map((g) => `${g.group}: ${g.text}`)
             }))
         );
         const adjustments = session?.adjustments ?? [];

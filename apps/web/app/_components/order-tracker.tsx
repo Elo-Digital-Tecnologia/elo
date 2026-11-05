@@ -2,6 +2,7 @@
 
 import type { OrderView } from '@elo/core/api/views/order.view';
 import type { OrderStatus } from '@elo/core/orders/order-status';
+import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { Badge } from '@elo/ui/components/feedback/badge';
 import { motion } from '@elo/ui/components/motion/motion';
 import { MOTION_DURATIONS, MOTION_EASE } from '@elo/ui/theme/motion';
@@ -38,7 +39,10 @@ export function OrderTracker({
                             {i.options.length > 0 && (
                                 <span className="text-muted">
                                     {' '}
-                                    · {i.options.map((o) => o.label).join(', ')}
+                                    ·{' '}
+                                    {summarizeOptions(i.options)
+                                        .map((o) => o.text)
+                                        .join(', ')}
                                 </span>
                             )}
                         </li>
