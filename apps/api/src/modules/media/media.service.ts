@@ -1,9 +1,10 @@
+import type { MediaView } from '@elo/core/api/views/media.view';
 import type { EnvConfig } from '#/config/env.js';
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import sharp from 'sharp';
-import { Like, Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { FILE_NAME_MAX_LENGTH, MEDIA_URL_PATTERN } from '#/common/constants.js';
 import { TenantRepository } from '#/common/database/tenant.repository.js';
 import { ProductEntity } from '#/modules/catalog/entities/product.entity.js';
@@ -17,6 +18,7 @@ import { UnsupportedImageTypeException } from './exceptions/unsupported-image-ty
 import {
     AVATAR_IMAGE,
     IMAGE_MAX_INPUT_PIXELS,
+    MEDIA_ID_IN_URL,
     MEDIA_PER_RESTAURANT,
     MENU_IMAGE,
     MENU_THUMBNAIL
@@ -27,25 +29,16 @@ import path from 'node:path';
 
 const ACCEPTED = new Set(['jpeg', 'png', 'webp']);
 
-export interface MediaView {
-    id: string;
-    url: string;
-    thumbUrl: string;
-    width: number;
-    height: number;
-    bytes: number;
-    name: string;
-}
-
 const urlOf = (id: string) => `/api/media/${id}.webp`;
-const view = (m: MediaEntity): MediaView => ({
+const view = (m: MediaEntity, inUse: boolean): MediaView => ({
     id: m.id,
     url: urlOf(m.id),
     thumbUrl: `/api/media/${m.id}-sm.webp`,
     width: m.width,
     height: m.height,
     bytes: m.bytes,
-    name: m.originalName
+    name: m.originalName,
+    inUse
 });
 
 /** Local image library: validates, shrinks and converts to WebP (main image and thumbnail). */
@@ -73,7 +66,33 @@ export class MediaService implements OnModuleInit {
     }
 
     public async list(rid: string): Promise<MediaView[]> {
-        return (await this.repo(rid).find({}, { createdAt: 'DESC' })).map(view);
+        const [rows, used] = await Promise.all([
+            this.repo(rid).find({}, { createdAt: 'DESC' }),
+            this.usedIds(rid)
+        ]);
+        return rows.map((m) => view(m, used.has(m.id)));
+    }
+
+    /** Library images the restaurant's products, logo or banner point to. */
+    private async usedIds(rid: string): Promise<Set<string>> {
+        const [products, restaurant] = await Promise.all([
+            this.products.find({
+                where: { restaurantId: rid, imageUrl: Not(IsNull()) },
+                select: { id: true, imageUrl: true }
+            }),
+            this.restaurants.findOne({
+                where: { id: rid },
+                select: { id: true, logoUrl: true, coverUrl: true }
+            })
+        ]);
+        const urls = [
+            ...products.map((p) => p.imageUrl),
+            restaurant?.logoUrl,
+            restaurant?.coverUrl
+        ];
+        return new Set(
+            urls.flatMap((url) => url?.match(MEDIA_ID_IN_URL)?.[1] ?? [])
+        );
     }
 
     public async upload(
@@ -130,7 +149,7 @@ export class MediaService implements OnModuleInit {
             writeFile(path.join(this.dir, `${row.id}.webp`), main.data),
             writeFile(path.join(this.dir, `${row.id}-sm.webp`), thumb)
         ]);
-        return view(row);
+        return view(row, false);
     }
 
     /** Square profile photo, kept apart from the restaurant's image bank. Returns its URL. */
@@ -165,16 +184,7 @@ export class MediaService implements OnModuleInit {
     public async remove(rid: string, id: string): Promise<void> {
         const repo = this.repo(rid);
         if (!(await repo.findOne({ id }))) throw new MediaNotFoundException();
-        const inProducts = await this.products.count({
-            where: { restaurantId: rid, imageUrl: Like(`%${id}%`) }
-        });
-        const inProfile = await this.restaurants.count({
-            where: [
-                { id: rid, logoUrl: Like(`%${id}%`) },
-                { id: rid, coverUrl: Like(`%${id}%`) }
-            ]
-        });
-        if (inProducts || inProfile) throw new ImageInUseException();
+        if ((await this.usedIds(rid)).has(id)) throw new ImageInUseException();
         await repo.remove({ id });
         await Promise.all(
             [`${id}.webp`, `${id}-sm.webp`].map((f) =>

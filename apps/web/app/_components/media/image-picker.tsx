@@ -1,5 +1,6 @@
 'use client';
 
+import type { MediaView } from '@elo/core/api/views/media.view';
 import { api, apiUpload } from '@elo/client/http/api-client';
 import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
@@ -7,36 +8,29 @@ import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { FIELD_RULES, fieldError } from '@elo/core/fields/field-rules';
 import {
     IMAGE_UPLOAD_MAX_BYTES,
-    IMAGE_UPLOAD_MAX_MB
+    MEDIA_PER_RESTAURANT
 } from '@elo/core/media/media-limits';
 import { Input, Spinner } from '@elo/ui/components/forms/fields';
-import { ImagePlus, Trash2, X } from 'lucide-react';
+import { ConfirmModal } from '@elo/ui/components/overlays/confirm';
+import { ImagePlus, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fieldMessage } from '#/_lib/messages/fields';
-import { unexpected } from '../_lib/use-form';
-
-interface MediaItem {
-    id: string;
-    url: string;
-    thumbUrl: string;
-    name: string;
-}
+import {
+    IMAGE_PICKER_TEXTS as T,
+    MEDIA_API_ERRORS,
+    MEDIA_ERRORS
+} from '#/_lib/messages/media';
+import { unexpected } from '#/_lib/use-form';
+import { LIBRARY_URL_PREFIX } from './media-constants';
+import { MediaLibrary } from './media-library';
 
 const reason = (e: unknown) => {
     if (!(e instanceof ApiError)) return unexpected(e);
-    if (e.status === HTTP_STATUS.PAYLOAD_TOO_LARGE)
-        return `A imagem passa de ${IMAGE_UPLOAD_MAX_MB} MB.`;
-    if (
-        e.code === ApiErrorCode.INVALID_IMAGE ||
-        e.code === ApiErrorCode.UNSUPPORTED_IMAGE_TYPE
-    )
-        return 'Use uma imagem JPG, PNG ou WebP.';
-    if (e.code === ApiErrorCode.IMAGE_IN_USE)
-        return 'Esta imagem está em uso por um produto.';
-    return unexpected(e);
+    if (e.status === HTTP_STATUS.PAYLOAD_TOO_LARGE) return MEDIA_ERRORS.tooLarge;
+    return MEDIA_API_ERRORS[e.code] ?? unexpected(e);
 };
 
-const isExternal = (url: string) => !!url && !url.startsWith('/api/media/');
+const isExternal = (url: string) => !!url && !url.startsWith(LIBRARY_URL_PREFIX);
 
 interface PickerProps {
     token: string;
@@ -51,7 +45,7 @@ interface PickerProps {
 }
 
 /**
- * Picks the product photo from the restaurant's image library, or uploads a new one.
+ * Picks an image from the restaurant's library, or uploads a new one.
  * A typed link is applied only while it passes the API rule.
  */
 export function ImagePicker({
@@ -62,10 +56,13 @@ export function ImagePicker({
     showErrors = false,
     onLinkError
 }: PickerProps) {
-    const [items, setItems] = useState<MediaItem[] | null>(null);
+    const [items, setItems] = useState<MediaView[] | null>(null);
     const [busy, setBusy] = useState(false);
     const [drag, setDrag] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [removing, setRemoving] = useState<MediaView | null>(null);
+    const [removeBusy, setRemoveBusy] = useState(false);
+    const [removeError, setRemoveError] = useState<string | null>(null);
     const input = useRef<HTMLInputElement>(null);
     const [link, setLink] = useState(isExternal(value) ? value : '');
     const [linkLeft, setLinkLeft] = useState(false);
@@ -101,7 +98,7 @@ export function ImagePicker({
 
     const load = useCallback(async () => {
         try {
-            setItems(await api<MediaItem[]>('/api/catalog/media', { token }));
+            setItems(await api<MediaView[]>('/api/catalog/media', { token }));
         } catch {
             setItems([]);
         }
@@ -110,16 +107,17 @@ export function ImagePicker({
         void load();
     }, [load]);
 
+    const full = (items?.length ?? 0) >= MEDIA_PER_RESTAURANT;
+
     const send = async (file?: File | null) => {
-        if (!file) return;
+        if (!file || busy) return;
         setError(null);
-        if (!file.type.startsWith('image/'))
-            return setError('Escolha um arquivo de imagem.');
-        if (file.size > IMAGE_UPLOAD_MAX_BYTES)
-            return setError(`A imagem passa de ${IMAGE_UPLOAD_MAX_MB} MB.`);
+        if (full) return setError(MEDIA_ERRORS.full);
+        if (!file.type.startsWith('image/')) return setError(MEDIA_ERRORS.notImage);
+        if (file.size > IMAGE_UPLOAD_MAX_BYTES) return setError(MEDIA_ERRORS.tooLarge);
         setBusy(true);
         try {
-            const created = await apiUpload<MediaItem>('/api/catalog/media', file, token);
+            const created = await apiUpload<MediaView>('/api/catalog/media', file, token);
             setItems((list) => [created, ...(list ?? [])]);
             onChange(created.url);
         } catch (e) {
@@ -129,14 +127,38 @@ export function ImagePicker({
         }
     };
 
-    const remove = async (item: MediaItem) => {
-        setError(null);
+    const askRemove = (item: MediaView) => {
+        setRemoveError(null);
+        setRemoving(item);
+    };
+
+    const remove = async () => {
+        const item = removing;
+        if (!item) return;
+        setRemoveBusy(true);
+        setRemoveError(null);
         try {
             await api(`/api/catalog/media/${item.id}`, { method: 'DELETE', token });
             setItems((list) => (list ?? []).filter((i) => i.id !== item.id));
             if (value === item.url) onChange('');
+            setRemoving(null);
         } catch (e) {
-            setError(reason(e));
+            const code = e instanceof ApiError ? e.code : null;
+            if (code === ApiErrorCode.MEDIA_NOT_FOUND) {
+                setItems((list) => (list ?? []).filter((i) => i.id !== item.id));
+                setRemoving(null);
+                return;
+            }
+            if (code === ApiErrorCode.IMAGE_IN_USE) {
+                const used = { ...item, inUse: true };
+                setItems((list) =>
+                    (list ?? []).map((i) => (i.id === item.id ? used : i))
+                );
+                setRemoving(used);
+            }
+            setRemoveError(reason(e));
+        } finally {
+            setRemoveBusy(false);
         }
     };
 
@@ -147,7 +169,7 @@ export function ImagePicker({
             <div
                 onDragOver={(e) => {
                     e.preventDefault();
-                    setDrag(true);
+                    if (!full) setDrag(true);
                 }}
                 onDragLeave={() => setDrag(false)}
                 onDrop={(e) => {
@@ -160,23 +182,25 @@ export function ImagePicker({
             >
                 {busy ? (
                     <Spinner />
+                ) : full ? (
+                    <>
+                        <ImagePlus className="text-muted" size={28} />
+                        <p className="text-sm text-muted">{MEDIA_ERRORS.full}</p>
+                    </>
                 ) : (
                     <>
                         <ImagePlus className="text-brand" size={28} />
                         <p className="text-sm">
-                            Arraste uma foto, cole ou{' '}
+                            {T.dropPrefix}{' '}
                             <button
                                 type="button"
                                 className="font-semibold text-brand underline"
                                 onClick={() => input.current?.click()}
                             >
-                                escolha no aparelho
+                                {T.dropChoose}
                             </button>
                         </p>
-                        <p className="text-xs text-muted">
-                            JPG, PNG ou WebP, até {IMAGE_UPLOAD_MAX_MB} MB. A imagem é
-                            reduzida automaticamente.
-                        </p>
+                        <p className="text-xs text-muted">{T.dropHint}</p>
                     </>
                 )}
                 <input
@@ -204,11 +228,11 @@ export function ImagePicker({
                         className="h-16 w-16 rounded-md object-cover"
                     />
                     <span className="min-w-0 flex-1 truncate text-sm text-muted">
-                        {external ? value : 'Foto escolhida'}
+                        {external ? value : T.chosen}
                     </span>
                     <button
                         type="button"
-                        aria-label="Tirar a foto do produto"
+                        aria-label={T.removeChosen}
                         onClick={() => onChange('')}
                         className="grid shrink-0 h-9 w-9 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"
                     >
@@ -217,46 +241,15 @@ export function ImagePicker({
                 </div>
             )}
 
-            <div>
-                <h3 className="mb-2 text-sm font-medium">Suas imagens</h3>
-                {items === null && <Spinner />}
-                {items?.length === 0 && (
-                    <p className="text-sm text-muted">Nenhuma imagem enviada ainda.</p>
-                )}
-                <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                    {items?.map((i) => (
-                        <li key={i.id} className="group relative">
-                            <button
-                                type="button"
-                                onClick={() => onChange(i.url)}
-                                aria-label={`Usar ${i.name}`}
-                                aria-pressed={value === i.url}
-                                className={`block aspect-square w-full overflow-hidden rounded-md border-2 transition ${value === i.url ? 'border-brand' : 'border-transparent hover:border-brand/50'}`}
-                            >
-                                <img
-                                    src={i.thumbUrl}
-                                    alt=""
-                                    loading="lazy"
-                                    className="h-full w-full object-cover"
-                                />
-                            </button>
-                            <button
-                                type="button"
-                                aria-label={`Apagar ${i.name}`}
-                                onClick={() => remove(i)}
-                                className="absolute right-1 top-1 grid shrink-0 h-7 w-7 place-items-center rounded-pill bg-black/55 text-white opacity-0 transition focus:opacity-100 group-hover:opacity-100"
-                            >
-                                <Trash2 size={14} />
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            </div>
+            <MediaLibrary
+                items={items}
+                value={value}
+                onPick={(item) => onChange(item.url)}
+                onRemove={askRemove}
+            />
 
             <details ref={details} className="text-sm">
-                <summary className="cursor-pointer text-muted">
-                    Usar o link de uma imagem
-                </summary>
+                <summary className="cursor-pointer text-muted">{T.linkSummary}</summary>
                 <div className="mt-2">
                     <Input
                         name="imageUrl"
@@ -268,7 +261,7 @@ export function ImagePicker({
                         invalid={!!linkMessage}
                         maxLength={FIELD_RULES.imageUrl.max}
                         placeholder="https://"
-                        aria-label="Link da imagem"
+                        aria-label={T.linkLabel}
                     />
                     {linkMessage && (
                         <p aria-live="polite" className="mt-1.5 text-xs text-danger">
@@ -277,6 +270,32 @@ export function ImagePicker({
                     )}
                 </div>
             </details>
+
+            <ConfirmModal
+                open={!!removing}
+                title={T.removeTitle}
+                confirmLabel={T.removeConfirm}
+                danger
+                loading={removeBusy}
+                disabled={!!removing?.inUse}
+                error={removeError}
+                onConfirm={() => void remove()}
+                onClose={() => !removeBusy && setRemoving(null)}
+            >
+                {removing && (
+                    <div className="flex items-center gap-3">
+                        <img
+                            src={removing.thumbUrl}
+                            alt=""
+                            className="h-14 w-14 shrink-0 rounded-md object-cover"
+                        />
+                        <span className="min-w-0 truncate font-medium">
+                            {removing.name}
+                        </span>
+                    </div>
+                )}
+                <p className="text-muted">{T.removeBody}</p>
+            </ConfirmModal>
         </div>
     );
 }

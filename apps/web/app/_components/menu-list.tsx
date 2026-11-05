@@ -9,6 +9,7 @@ import type { ProductTag } from '@elo/core/catalog/product-tags';
 import { flavorStartingPrice } from '@elo/core/catalog/pizza-pricing';
 import { startingPrice } from '@elo/core/catalog/product-pricing';
 import { formatBRL } from '@elo/core/money/cents';
+import { plainText } from '@elo/core/text/plain-text';
 import { Input } from '@elo/ui/components/forms/fields';
 import { motion } from '@elo/ui/components/motion/motion';
 import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
@@ -40,17 +41,15 @@ export function ProductPrice({
     );
 }
 
-const plain = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-
 /** Filters by name or description, ignoring accents and case. Categories without results are dropped. */
 export function filterMenu(menu: CategoryView[], query: string): CategoryView[] {
-    const q = plain(query.trim());
+    const q = plainText(query.trim());
     if (!q) return menu;
     return menu
         .map((c) => ({
             ...c,
             products: c.products.filter((p) =>
-                plain(`${p.name} ${p.description ?? ''}`).includes(q)
+                plainText(`${p.name} ${p.description ?? ''}`).includes(q)
             )
         }))
         .filter((c) => c.products.length > 0);

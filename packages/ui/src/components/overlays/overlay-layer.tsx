@@ -2,8 +2,9 @@
 
 import type { ReactNode } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isTopOverlay, popOverlay, pushOverlay } from './overlay-stack';
 import { lockScroll, unlockScroll } from './scroll-lock';
 
 /**
@@ -21,6 +22,7 @@ export function OverlayLayer({
 }) {
     const [mounted, setMounted] = useState(false);
     const close = useRef(onClose);
+    const id = useId();
 
     useEffect(() => setMounted(true), []);
     useEffect(() => {
@@ -29,14 +31,17 @@ export function OverlayLayer({
 
     useEffect(() => {
         if (!open) return;
-        const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
+        const onKey = (e: KeyboardEvent) =>
+            e.key === 'Escape' && isTopOverlay(id) && close.current();
+        pushOverlay(id);
         document.addEventListener('keydown', onKey);
         lockScroll();
         return () => {
+            popOverlay(id);
             document.removeEventListener('keydown', onKey);
             unlockScroll();
         };
-    }, [open]);
+    }, [open, id]);
 
     if (!mounted) return null;
     return createPortal(

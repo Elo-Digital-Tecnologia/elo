@@ -4,7 +4,9 @@ import { Button } from '@elo/ui/components/forms/button';
 import { Sheet } from '@elo/ui/components/overlays/sheet';
 import { ImageIcon, X } from 'lucide-react';
 import { useState } from 'react';
+import { IMAGE_FIELD_TEXTS as T } from '#/_lib/messages/media';
 import { ImagePicker } from './image-picker';
+import { LIBRARY_URL_PREFIX } from './media-constants';
 
 /** Form image field: thumbnail, a button to pick from the library and a button to remove it. */
 export function ImageField({
@@ -21,7 +23,7 @@ export function ImageField({
     wide?: boolean;
 }) {
     const [open, setOpen] = useState(false);
-    const thumb = value.startsWith('/api/media/')
+    const thumb = value.startsWith(LIBRARY_URL_PREFIX)
         ? value.replace(/\.webp$/, '-sm.webp')
         : value;
     return (
@@ -34,16 +36,16 @@ export function ImageField({
                     {value ? (
                         <img src={thumb} alt="" className="h-full w-full object-cover" />
                     ) : (
-                        <ImageIcon size={22} aria-label="Sem imagem" />
+                        <ImageIcon size={22} aria-label={T.none} />
                     )}
                 </div>
                 <Button type="button" variant="soft" onClick={() => setOpen(true)}>
-                    {value ? 'Trocar' : 'Escolher imagem'}
+                    {value ? T.change : T.choose}
                 </Button>
                 {value && (
                     <button
                         type="button"
-                        aria-label={`Tirar ${label.toLowerCase()}`}
+                        aria-label={T.remove(label)}
                         onClick={() => onChange('')}
                         className="grid shrink-0 h-10 w-10 place-items-center rounded-pill text-muted transition hover:bg-danger/10 hover:text-danger"
                     >
@@ -59,7 +61,7 @@ export function ImageField({
                         onChange={(url) => {
                             onChange(url);
                             // Picking from the library or uploading closes the window; typing a link does not.
-                            if (url.startsWith('/api/media/')) setOpen(false);
+                            if (url.startsWith(LIBRARY_URL_PREFIX)) setOpen(false);
                         }}
                     />
                 </div>

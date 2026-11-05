@@ -60,11 +60,12 @@ describe('catalog and public pages (e2e)', () => {
         await http()
             .get(`/media/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}.webp`)
             .expect(404);
-        expect(
-            (await http().get('/catalog/media').set(auth(admin)).expect(200)).body.map(
-                (m: { id: string }) => m.id
-            )
-        ).toContain(up.body.id);
+        expect(up.body.inUse).toBe(false);
+        const inUse = async () =>
+            (await http().get('/catalog/media').set(auth(admin)).expect(200)).body.find(
+                (m: { id: string; inUse: boolean }) => m.id === up.body.id
+            )?.inUse;
+        expect(await inUse()).toBe(false);
 
         // a product uses the library image; while in use it cannot be deleted
         const cat = await http()
@@ -92,11 +93,51 @@ describe('catalog and public pages (e2e)', () => {
                 imageUrl: 'javascript:alert(1)'
             })
             .expect(400);
+        expect(await inUse()).toBe(true);
         await http().delete(`/catalog/media/${up.body.id}`).set(auth(admin)).expect(409);
         await http()
             .delete(`/catalog/products/${prod.body.id}`)
             .set(auth(admin))
             .expect(204);
+
+        // an absolute link to the library image counts as in use
+        const linked = await http()
+            .post('/catalog/products')
+            .set(auth(admin))
+            .send({
+                categoryId: cat.body.id,
+                name: 'Com link',
+                priceCents: 1000,
+                imageUrl: `https://cardapio.example${up.body.url}`
+            })
+            .expect(201);
+        expect(await inUse()).toBe(true);
+        await http().delete(`/catalog/media/${up.body.id}`).set(auth(admin)).expect(409);
+        await http()
+            .delete(`/catalog/products/${linked.body.id}`)
+            .set(auth(admin))
+            .expect(204);
+
+        // the logo counts as in use too
+        const profile = {
+            name: 'Com logo',
+            managerName: 'Maria',
+            managerContact: '11999999999',
+            serviceFeeBps: 500
+        };
+        await http()
+            .patch('/restaurant/settings')
+            .set(auth(admin))
+            .send({ ...profile, logoUrl: up.body.url })
+            .expect(200);
+        expect(await inUse()).toBe(true);
+        await http().delete(`/catalog/media/${up.body.id}`).set(auth(admin)).expect(409);
+        await http()
+            .patch('/restaurant/settings')
+            .set(auth(admin))
+            .send({ ...profile, logoUrl: '' })
+            .expect(200);
+        expect(await inUse()).toBe(false);
         await http().delete(`/catalog/media/${up.body.id}`).set(auth(admin)).expect(204);
         await http().get(up.body.url.replace('/api', '')).expect(404);
     }, 30_000);

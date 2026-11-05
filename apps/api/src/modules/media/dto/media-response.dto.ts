@@ -1,7 +1,8 @@
+import type { MediaView } from '@elo/core/api/views/media.view';
 import { Exclude, Expose, plainToInstance } from 'class-transformer';
 
 @Exclude()
-export class MediaResponseDTO {
+export class MediaResponseDTO implements MediaView {
     @Expose()
     public id: string;
 
@@ -22,6 +23,9 @@ export class MediaResponseDTO {
 
     @Expose()
     public name: string;
+
+    @Expose()
+    public inUse: boolean;
 
     public static from(source: MediaResponseDTO): MediaResponseDTO {
         return plainToInstance(MediaResponseDTO, source);

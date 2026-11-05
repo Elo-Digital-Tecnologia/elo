@@ -20,7 +20,7 @@ import { FEEDBACK_MS } from '#/_lib/constants/timing';
 import { bpsToPercent, percentToBps } from '#/_lib/format';
 import { serviceFeeHint, settingsFormMessages } from '#/_lib/messages/errors';
 import { WEEKDAYS } from '#/_lib/messages/opening-hours';
-import { ImageField } from '../../../../../_components/image-field';
+import { ImageField } from '#/_components/media/image-field';
 import { rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import {
     HoursEditor,

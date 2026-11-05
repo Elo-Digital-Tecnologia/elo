@@ -53,7 +53,7 @@ import {
     PRODUCT_TAG_LABEL
 } from '#/_lib/messages/catalog';
 import { MENU_ERRORS, PRODUCT_FORM_MESSAGES } from '#/_lib/messages/errors';
-import { ImagePicker } from '../../../../../_components/image-picker';
+import { ImagePicker } from '#/_components/media/image-picker';
 import { ProductPrice } from '../../../../../_components/menu-list';
 import { money, rule, unexpected, useForm } from '../../../../../_lib/use-form';
 import { RequireRoles, useStaff } from '../../../_components/shell';
