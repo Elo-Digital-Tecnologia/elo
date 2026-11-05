@@ -24,6 +24,10 @@
     --elo-teal: 178 56% 38%;
     --elo-sun: 42 92% 56%;
 
+    /* Logo (verdes da marca, um pouco mais vivos que a rampa) */
+    --elo-logo-deep: 162 76% 20%;
+    --elo-logo-bright: 151 66% 42%;
+
     /* Superfícies e texto (brancos puxados ao verde, nunca branco puro) */
     --elo-bg: 140 32% 95%;
     --elo-bg-soft: 140 28% 91%;
@@ -108,6 +112,8 @@
     --elo-leaf-300: 152 34% 29%;
 
     --elo-brand: 150 58% 52%;
+    --elo-logo-deep: 160 58% 34%;
+    --elo-logo-bright: 151 66% 50%;
     --elo-brand-hover: 150 62% 60%;
     --elo-brand-fg: 160 70% 6%;
     --elo-accent-fg: 160 70% 6%;
