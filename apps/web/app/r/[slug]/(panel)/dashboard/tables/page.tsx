@@ -225,7 +225,7 @@ function View() {
                             {...form.bind('name')}
                             maxLength={FIELD_RULES.tableName.max}
                             placeholder="Mesa 01"
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     {createError && (

@@ -677,7 +677,7 @@ export function useBilling({
                                 {...voidForm.bind('reason')}
                                 maxLength={FIELD_RULES.reason.max}
                                 rows={3}
-                                autoFocus
+                                data-autofocus
                             />
                         </Field>
                         {errorLine}

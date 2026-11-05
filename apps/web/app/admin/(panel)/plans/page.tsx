@@ -236,7 +236,7 @@ function View() {
                         <Input
                             {...form.bind('name')}
                             maxLength={FIELD_RULES.planName.max}
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     <div className="grid gap-4 sm:grid-cols-2">

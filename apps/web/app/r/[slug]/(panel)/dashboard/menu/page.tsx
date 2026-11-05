@@ -562,7 +562,7 @@ function View() {
                             {...catForm.bind('name')}
                             placeholder="Pizzas"
                             maxLength={FIELD_RULES.categoryName.max}
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     {error && (
@@ -620,7 +620,7 @@ function View() {
                                     <Input
                                         {...form.bind('name')}
                                         maxLength={FIELD_RULES.productName.max}
-                                        autoFocus
+                                        data-autofocus
                                     />
                                 </Field>
                                 <Field label="Preço" error={form.errors.price}>

@@ -769,7 +769,7 @@ function View({ id }: { id: string }) {
                             <Input
                                 {...editForm.bind('name')}
                                 maxLength={FIELD_RULES.restaurantName.max}
-                                autoFocus
+                                data-autofocus
                             />
                         </Field>
                         <div className="grid gap-4 sm:grid-cols-2">
@@ -872,7 +872,7 @@ function View({ id }: { id: string }) {
                                 maxLength={FIELD_RULES.slug.max}
                                 autoCapitalize="none"
                                 spellCheck={false}
-                                autoFocus
+                                data-autofocus
                             />
                         </Field>
                         <Field
@@ -930,7 +930,7 @@ function View({ id }: { id: string }) {
                         autoComplete="off"
                         spellCheck={false}
                         aria-label="Link do restaurante"
-                        autoFocus
+                        data-autofocus
                     />
                     {error && (
                         <p role="alert" className="text-sm text-danger">

@@ -463,7 +463,7 @@ function View() {
                         <Input
                             {...form.bind('name')}
                             maxLength={FIELD_RULES.personName.max}
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     <Field
@@ -573,7 +573,7 @@ function View() {
                             {...resetForm.bind('password')}
                             maxLength={FIELD_RULES.password.max}
                             autoComplete="new-password"
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     {error && (
@@ -632,7 +632,7 @@ function View() {
                             onChange={(e) => setOwnerPassword(e.target.value)}
                             maxLength={CREDENTIAL_INPUT_LIMITS.password}
                             required
-                            autoFocus
+                            data-autofocus
                         />
                     </Field>
                     {error && (

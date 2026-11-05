@@ -142,49 +142,44 @@ export function ActionMenu({
                 <MoreHorizontal size={19} />
             </button>
             {/* Rendered at the body: glass cards blur their background, which would trap a fixed menu inside them. */}
-            {typeof document !== 'undefined' && phone
-                ? createPortal(
-                      <Sheet
-                          open={open}
-                          onClose={() => setOpen(false)}
-                          title={title ?? label}
-                      >
-                          <div className="mt-4">
-                              <Items items={visible} onPick={pick} />
-                          </div>
-                      </Sheet>,
-                      document.body
-                  )
-                : typeof document !== 'undefined' &&
-                  createPortal(
-                      <AnimatePresence>
-                          {open && place && (
-                              <>
-                                  <div
-                                      className="fixed inset-0 z-40"
-                                      onClick={() => setOpen(false)}
-                                      aria-hidden
-                                  />
-                                  <motion.div
-                                      className="glass glass-strong fixed z-50 p-2"
-                                      style={{
-                                          top: place.top,
-                                          left: place.left,
-                                          width: MENU_WIDTH,
-                                          translateY: place.up ? '-100%' : 0
-                                      }}
-                                      initial={{ opacity: 0, scale: 0.96 }}
-                                      animate={{ opacity: 1, scale: 1 }}
-                                      exit={{ opacity: 0, scale: 0.96 }}
-                                      transition={{ duration: MOTION_DURATIONS.instant }}
-                                  >
-                                      <Items items={visible} onPick={pick} />
-                                  </motion.div>
-                              </>
-                          )}
-                      </AnimatePresence>,
-                      document.body
-                  )}
+            {phone ? (
+                <Sheet open={open} onClose={() => setOpen(false)} title={title ?? label}>
+                    <div className="mt-4">
+                        <Items items={visible} onPick={pick} />
+                    </div>
+                </Sheet>
+            ) : (
+                typeof document !== 'undefined' &&
+                createPortal(
+                    <AnimatePresence>
+                        {open && place && (
+                            <>
+                                <div
+                                    className="fixed inset-0 z-40"
+                                    onClick={() => setOpen(false)}
+                                    aria-hidden
+                                />
+                                <motion.div
+                                    className="glass glass-strong fixed z-50 p-2"
+                                    style={{
+                                        top: place.top,
+                                        left: place.left,
+                                        width: MENU_WIDTH,
+                                        translateY: place.up ? '-100%' : 0
+                                    }}
+                                    initial={{ opacity: 0, scale: 0.96 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.96 }}
+                                    transition={{ duration: MOTION_DURATIONS.instant }}
+                                >
+                                    <Items items={visible} onPick={pick} />
+                                </motion.div>
+                            </>
+                        )}
+                    </AnimatePresence>,
+                    document.body
+                )
+            )}
         </>
     );
 }

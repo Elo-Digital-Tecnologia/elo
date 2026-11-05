@@ -14,6 +14,7 @@ import { Logo, LogoMark } from '../brand/logo';
 import { Avatar } from '../data/avatar';
 import { Aurora } from '../motion/aurora';
 import { PageTransition } from '../motion/motion';
+import { lockScroll, unlockScroll } from '../overlays/scroll-lock';
 
 export interface NavItem {
     href: string;
@@ -211,11 +212,8 @@ export function AppShell({
     // Menu open on a phone: the page behind does not scroll.
     useEffect(() => {
         if (!drawer) return;
-        const previous = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => {
-            document.body.style.overflow = previous;
-        };
+        lockScroll();
+        return unlockScroll;
     }, [drawer]);
 
     const toggleCollapsed = () =>

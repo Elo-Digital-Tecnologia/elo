@@ -1,11 +1,11 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { AnimatePresence, m as motion } from 'framer-motion';
+import { m as motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { useEffect } from 'react';
 import { useUiTexts } from '../../texts/ui-texts';
 import { MOTION_SPRINGS } from '../../theme/motion';
+import { OverlayLayer } from './overlay-layer';
 
 /**
  * Window that rises from the bottom of the screen (centered on wide screens).
@@ -27,68 +27,52 @@ export function Sheet({
     children: ReactNode;
 }) {
     const t = useUiTexts();
-    useEffect(() => {
-        if (!open) return;
-        const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-        document.addEventListener('keydown', onKey);
-        const previous = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
-        return () => {
-            document.removeEventListener('keydown', onKey);
-            document.body.style.overflow = previous;
-        };
-    }, [open, onClose]);
-
     return (
-        <AnimatePresence>
-            {open && (
+        <OverlayLayer open={open} onClose={onClose}>
+            <motion.div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
                 <motion.div
-                    className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+                    className="modal-backdrop absolute inset-0 touch-none bg-leaf-900/45"
+                    onClick={onClose}
+                    aria-hidden
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
+                />
+                <motion.div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={title}
+                    className="sheet relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] sm:rounded-[28px]"
+                    initial={{ y: '100%' }}
+                    animate={{ y: 0 }}
+                    exit={{ y: '100%' }}
+                    transition={{ ...MOTION_SPRINGS.sheet }}
                 >
-                    <div
-                        className="modal-backdrop absolute inset-0 bg-leaf-900/45"
+                    <button
                         onClick={onClose}
-                        aria-hidden
-                    />
-                    <motion.div
-                        role="dialog"
-                        aria-modal="true"
-                        aria-label={title}
-                        className="sheet relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] sm:rounded-[28px]"
-                        initial={{ y: '100%' }}
-                        animate={{ y: 0 }}
-                        exit={{ y: '100%' }}
-                        transition={{ ...MOTION_SPRINGS.sheet }}
+                        aria-label={t.close}
+                        className="absolute right-3 top-3 z-10 grid shrink-0 h-9 w-9 place-items-center rounded-pill bg-black/50 text-white transition hover:bg-black/65"
                     >
-                        <button
-                            onClick={onClose}
-                            aria-label={t.close}
-                            className="absolute right-3 top-3 z-10 grid shrink-0 h-9 w-9 place-items-center rounded-pill bg-black/50 text-white transition hover:bg-black/65"
-                        >
-                            <X size={18} />
-                        </button>
-                        <div className="scroll-soft min-h-0 flex-1 overflow-y-auto">
-                            {media}
-                            <div className="p-5">
-                                {title && (
-                                    <h2 className="pr-10 text-xl font-bold leading-tight">
-                                        {title}
-                                    </h2>
-                                )}
-                                {children}
-                            </div>
+                        <X size={18} />
+                    </button>
+                    <div className="scroll-soft min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                        {media}
+                        <div className="p-5">
+                            {title && (
+                                <h2 className="pr-10 text-xl font-bold leading-tight">
+                                    {title}
+                                </h2>
+                            )}
+                            {children}
                         </div>
-                        {footer && (
-                            <div className="border-t border-line/40 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                                {footer}
-                            </div>
-                        )}
-                    </motion.div>
+                    </div>
+                    {footer && (
+                        <div className="border-t border-line/40 p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                            {footer}
+                        </div>
+                    )}
                 </motion.div>
-            )}
-        </AnimatePresence>
+            </motion.div>
+        </OverlayLayer>
     );
 }
