@@ -1,5 +1,5 @@
-import type { FlavorPricing, OptionGroupKind } from '@elo/core/catalog/option-kinds';
-import { FLAVOR_PRICINGS, OPTION_GROUP_KINDS } from '@elo/core/catalog/option-kinds';
+import type { ProductGroupKind } from '@elo/core/catalog/option-kinds';
+import { PRODUCT_GROUP_KINDS } from '@elo/core/catalog/option-kinds';
 import { FIELD_RULES } from '@elo/core/fields/field-rules';
 import { Type } from 'class-transformer';
 import {
@@ -21,18 +21,14 @@ export class OptionGroupDTO {
 
     /** Absent means an extra, as before kinds existed. */
     @IsOptional()
-    @IsIn(OPTION_GROUP_KINDS)
-    public kind?: OptionGroupKind;
+    @IsIn(PRODUCT_GROUP_KINDS)
+    public kind?: ProductGroupKind;
 
     @IsBoolean()
     public required: boolean;
 
     @IsBoolean()
     public multiple: boolean;
-
-    @IsOptional()
-    @IsIn(FLAVOR_PRICINGS)
-    public flavorPricing?: FlavorPricing;
 
     @IsArray()
     @ArrayMinSize(1)

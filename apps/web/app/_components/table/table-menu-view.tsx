@@ -52,7 +52,8 @@ import { RestaurantInfo } from '../menu/info';
 import { ReviewForm } from '../menu/review-form';
 import { Notice } from '../notice';
 import { OrderTracker } from '../order-tracker';
-import { ProductSheet, lineUnit } from '../product-sheet';
+import { PizzaSheet } from '../pizza-sheet';
+import { ProductSheet, lineUnit, pizzaAddons } from '../product-sheet';
 
 type Phase = 'ready' | 'taken' | 'rejected' | 'expired' | 'ended';
 type View = 'menu' | 'orders' | 'bill';
@@ -232,6 +233,7 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                 quantity: number;
                 notes: string;
                 options: CartLine['options'];
+                pizza?: CartLine['pizza'];
             }[];
             const products = new Map(
                 state.menu.flatMap((c) => c.products).map((p) => [p.id, p])
@@ -244,7 +246,8 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                                   product: products.get(l.productId)!,
                                   quantity: l.quantity,
                                   notes: l.notes,
-                                  options: l.options
+                                  options: l.options,
+                                  pizza: l.pizza
                               }
                           ]
                         : []
@@ -266,7 +269,8 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                         productId: l.product.id,
                         quantity: l.quantity,
                         notes: l.notes,
-                        options: l.options
+                        options: l.options,
+                        pizza: l.pizza
                     }))
                 )
             );
@@ -359,9 +363,16 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
     // Once the bill is asked for, the menu is only for reading: nothing more can be ordered.
     const billRequested = tableState === 'pending_close';
     const pick = billRequested ? undefined : setPicked;
+    const pickedCategory = picked
+        ? (state.menu.find((c) => c.id === picked.categoryId) ?? null)
+        : null;
+    const addLine = (line: CartLine) => {
+        setCart((c) => (c.length >= MAX_CART_LINES ? c : [...c, line]));
+        setPicked(null);
+    };
     const billReady = canRequestBill(state.orders.map((o) => o.status));
     const visible = filterMenu(state.menu, query);
-    const total = cart.reduce((s, l) => s + lineUnit(l) * l.quantity, 0);
+    const total = cart.reduce((s, l) => s + lineUnit(l, state.menu) * l.quantity, 0);
     const cartCount = cart.reduce((s, l) => s + l.quantity, 0);
     const activeOrders = state.orders.filter(
         (o) => !['ready', 'cancelled', 'returned'].includes(o.status)
@@ -377,10 +388,14 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                             productId: l.product.id,
                             quantity: l.quantity,
                             notes: l.notes || undefined,
-                            options: l.options.map((o) => ({
-                                group: o.group,
-                                label: o.label
-                            }))
+                            // A pizza sends its size and flavors apart; its options are the add-ons.
+                            options: l.pizza
+                                ? pizzaAddons(l)
+                                : l.options.map((o) => ({
+                                      group: o.group,
+                                      label: o.label
+                                  })),
+                            pizza: l.pizza
                         }))
                     }
                 }),
@@ -627,15 +642,22 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                 )}
             </AnimatePresence>
 
-            <ProductSheet
-                product={billRequested ? null : picked}
-                blocked={cart.length >= MAX_CART_LINES ? CART_FULL : null}
-                onClose={() => setPicked(null)}
-                onAdd={(line) => {
-                    setCart((c) => (c.length >= MAX_CART_LINES ? c : [...c, line]));
-                    setPicked(null);
-                }}
-            />
+            {pickedCategory?.pizza ? (
+                <PizzaSheet
+                    product={billRequested ? null : picked}
+                    category={pickedCategory}
+                    blocked={cart.length >= MAX_CART_LINES ? CART_FULL : null}
+                    onClose={() => setPicked(null)}
+                    onAdd={addLine}
+                />
+            ) : (
+                <ProductSheet
+                    product={billRequested ? null : picked}
+                    blocked={cart.length >= MAX_CART_LINES ? CART_FULL : null}
+                    onClose={() => setPicked(null)}
+                    onAdd={addLine}
+                />
+            )}
 
             <Sheet
                 open={cartOpen}
@@ -724,7 +746,13 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                     {cart.map((l, idx) => (
                         <li key={idx} className="flex items-start gap-3 py-3">
                             <div className="min-w-0 flex-1 text-sm">
-                                <div className="font-semibold">{l.product.name}</div>
+                                <div className="font-semibold">
+                                    {l.pizza
+                                        ? (state.menu.find(
+                                              (c) => c.id === l.product.categoryId
+                                          )?.name ?? l.product.name)
+                                        : l.product.name}
+                                </div>
                                 {l.options.length > 0 && (
                                     <div className="text-muted">
                                         {summarizeOptions(l.options)
@@ -736,7 +764,7 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                                     <div className="text-muted">Obs.: {l.notes}</div>
                                 )}
                                 <div className="mt-1 font-semibold tabular-nums text-brand">
-                                    {formatBRL(lineUnit(l) * l.quantity)}
+                                    {formatBRL(lineUnit(l, state.menu) * l.quantity)}
                                 </div>
                             </div>
                             <div className="surface flex items-center !rounded-pill p-0.5">

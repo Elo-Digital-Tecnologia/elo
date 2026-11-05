@@ -44,7 +44,6 @@ export type FieldErrorCode =
     | 'unknown_field'
     | 'duplicate'
     | 'one_per_product'
-    | 'needs_size'
     | 'invalid';
 
 export interface FieldError {

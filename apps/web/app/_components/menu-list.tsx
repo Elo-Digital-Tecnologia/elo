@@ -1,7 +1,12 @@
 'use client';
 
-import type { CategoryView, ProductView } from '@elo/core/api/views/catalog.view';
+import type {
+    CategoryView,
+    PizzaSetup,
+    ProductView
+} from '@elo/core/api/views/catalog.view';
 import type { ProductTag } from '@elo/core/catalog/product-tags';
+import { flavorStartingPrice } from '@elo/core/catalog/pizza-pricing';
 import { startingPrice } from '@elo/core/catalog/product-pricing';
 import { formatBRL } from '@elo/core/money/cents';
 import { Input } from '@elo/ui/components/forms/fields';
@@ -12,8 +17,17 @@ import { useEffect, useRef, useState } from 'react';
 import { CATALOG_TEXTS, PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
 
 /** Price on a menu card: the cheapest one, with "from" when the choices change it. */
-export function ProductPrice({ product }: { product: ProductView }) {
-    const { cents, varies } = startingPrice(product);
+export function ProductPrice({
+    product,
+    pizza
+}: {
+    product: ProductView;
+    /** Setup of the product's pizza category, when it is a flavor. */
+    pizza?: PizzaSetup | null;
+}) {
+    const { cents, varies } = pizza
+        ? flavorStartingPrice(pizza, product)
+        : startingPrice(product);
     return (
         <>
             {varies && (
@@ -101,6 +115,8 @@ export function Highlights({
     onPick?: (p: ProductView) => void;
 }) {
     const items = menu.flatMap((c) => c.products).filter((p) => p.featured);
+    const pizzaOf = (p: ProductView) =>
+        menu.find((c) => c.id === p.categoryId)?.pizza ?? null;
     if (!items.length) return null;
     return (
         <section aria-label="Destaques" className="py-3 pt-5">
@@ -138,7 +154,7 @@ export function Highlights({
                                 {p.name}
                             </h3>
                             <p className="text-sm font-semibold text-brand">
-                                <ProductPrice product={p} />
+                                <ProductPrice product={p} pizza={pizzaOf(p)} />
                             </p>
                         </>
                     );
@@ -267,9 +283,11 @@ function Photo({ product }: { product: ProductView }) {
 
 function Row({
     product,
+    pizza,
     onPick
 }: {
     product: ProductView;
+    pizza: PizzaSetup | null;
     onPick?: (p: ProductView) => void;
 }) {
     const content = (
@@ -283,7 +301,7 @@ function Row({
                 )}
                 <TagChips tags={product.tags} />
                 <p className="mt-2 font-semibold text-brand">
-                    <ProductPrice product={product} />
+                    <ProductPrice product={product} pizza={pizza} />
                 </p>
             </div>
             <div className="relative shrink-0">
@@ -335,7 +353,7 @@ export function MenuList({
                     <ul className="cv-auto mt-1 divide-y divide-line/40">
                         {cat.products.map((p) => (
                             <li key={p.id}>
-                                <Row product={p} onPick={onPick} />
+                                <Row product={p} pizza={cat.pizza} onPick={onPick} />
                             </li>
                         ))}
                     </ul>

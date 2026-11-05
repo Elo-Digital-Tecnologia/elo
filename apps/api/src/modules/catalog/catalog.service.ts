@@ -1,5 +1,13 @@
+import type { SetupProblem } from '@elo/core/catalog/product-pricing';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { CategoryKind } from '@elo/core/catalog/category-kinds';
+import {
+    flavorPriceProblems,
+    knownSizePrices,
+    normalizePizzaSetup,
+    pizzaSetupProblems
+} from '@elo/core/catalog/pizza-pricing';
 import {
     normalizeOptions,
     optionsProblems,
@@ -17,6 +25,13 @@ import { CategoryNotFoundException } from './exceptions/category-not-found.excep
 import { InvalidCategoryException } from './exceptions/invalid-category.exception.js';
 import { InvalidOrderException } from './exceptions/invalid-order.exception.js';
 import { ProductNotFoundException } from './exceptions/product-not-found.exception.js';
+
+const refuse = (problems: SetupProblem[]) => {
+    if (problems.length)
+        throw new ValidationFailedException(
+            problems.map((p) => ({ field: p.path, ...p.error }))
+        );
+};
 
 const sameSet = (a: string[], b: string[]) =>
     a.length === b.length &&
@@ -44,7 +59,27 @@ export class CatalogService {
             (max, c) => Math.max(max, c.position + 1),
             0
         );
-        return this.cats(rid).create({ name: dto.name, position: dto.position ?? last });
+        const kind = dto.kind ?? CategoryKind.STANDARD;
+        return this.cats(rid).create({
+            name: dto.name,
+            position: dto.position ?? last,
+            kind,
+            pizza: this.pizzaSetup(kind, dto)
+        });
+    }
+
+    /** A pizza category needs its setup; any other has none. */
+    private pizzaSetup(kind: CategoryKind, dto: CategoryDTO) {
+        if (kind !== CategoryKind.PIZZA) {
+            refuse(
+                dto.pizza ? [{ path: 'pizza', error: { code: 'unknown_field' } }] : []
+            );
+            return null;
+        }
+        if (!dto.pizza)
+            throw new ValidationFailedException([{ field: 'pizza', code: 'required' }]);
+        refuse(pizzaSetupProblems(dto.pizza));
+        return normalizePizzaSetup(dto.pizza);
     }
 
     public async updateCategory(rid: string, id: string, dto: CategoryDTO) {
@@ -53,6 +88,7 @@ export class CatalogService {
         if (!cat) throw new CategoryNotFoundException();
         cat.name = dto.name;
         if (dto.position !== undefined) cat.position = dto.position;
+        cat.pizza = this.pizzaSetup(cat.kind, dto);
         return repo.save(cat);
     }
 
@@ -87,8 +123,7 @@ export class CatalogService {
     }
 
     public async createProduct(rid: string, dto: ProductDTO) {
-        await this.assertCategory(rid, dto.categoryId);
-        const pricing = this.pricing(dto);
+        const pricing = this.pricing(await this.categoryOf(rid, dto.categoryId), dto);
         return this.prods(rid).create({
             categoryId: dto.categoryId,
             name: dto.name,
@@ -99,7 +134,8 @@ export class CatalogService {
             featured: dto.featured ?? false,
             tags: dto.tags ?? [],
             position: await this.nextPosition(rid, dto.categoryId),
-            options: pricing.options
+            options: pricing.options,
+            sizePrices: pricing.sizePrices
         });
     }
 
@@ -107,8 +143,7 @@ export class CatalogService {
         const repo = this.prods(rid);
         const p = await repo.findOne({ id });
         if (!p) throw new ProductNotFoundException();
-        await this.assertCategory(rid, dto.categoryId);
-        const pricing = this.pricing(dto);
+        const pricing = this.pricing(await this.categoryOf(rid, dto.categoryId), dto);
         Object.assign(p, {
             categoryId: dto.categoryId,
             name: dto.name,
@@ -118,28 +153,42 @@ export class CatalogService {
             available: dto.available ?? p.available,
             featured: dto.featured ?? false,
             tags: dto.tags ?? [],
-            options: pricing.options
+            options: pricing.options,
+            sizePrices: pricing.sizePrices
         });
         return repo.save(p);
     }
 
     /**
-     * The option setup as stored, checked as a whole (sizes, flavors, repeated names).
-     * A product priced by its size keeps no price of its own; any other needs one.
+     * Price and options as stored, checked against the category. A pizza flavor has
+     * prices per size and no options of its own; a product priced by its size keeps
+     * no price of its own; any other needs one.
      */
-    private pricing(dto: ProductDTO) {
+    private pricing(category: CategoryEntity, dto: ProductDTO) {
+        if (category.kind === CategoryKind.PIZZA && category.pizza) {
+            const sizePrices = dto.sizePrices ?? {};
+            refuse([
+                ...flavorPriceProblems(category.pizza, sizePrices),
+                ...(dto.options?.length
+                    ? [{ path: 'options', error: { code: 'unknown_field' as const } }]
+                    : [])
+            ]);
+            return {
+                priceCents: 0,
+                options: [],
+                sizePrices: knownSizePrices(category.pizza, sizePrices)
+            };
+        }
         const groups = dto.options ?? [];
         const problems = optionsProblems(groups);
         const bySize = pricedBySize(groups);
         if (!bySize && dto.priceCents === undefined)
             problems.push({ path: 'priceCents', error: { code: 'required' } });
-        if (problems.length)
-            throw new ValidationFailedException(
-                problems.map((p) => ({ field: p.path, ...p.error }))
-            );
+        refuse(problems);
         return {
             priceCents: bySize ? 0 : (dto.priceCents ?? 0),
-            options: normalizeOptions(groups)
+            options: normalizeOptions(groups),
+            sizePrices: {}
         };
     }
 
@@ -209,8 +258,25 @@ export class CatalogService {
     }
 
     private async assertCategory(rid: string, categoryId: string) {
-        if (!(await this.cats(rid).findOne({ id: categoryId }))) {
-            throw new InvalidCategoryException();
-        }
+        await this.categoryOf(rid, categoryId);
+    }
+
+    private async categoryOf(rid: string, categoryId: string): Promise<CategoryEntity> {
+        const category = await this.cats(rid).findOne({ id: categoryId });
+        if (!category) throw new InvalidCategoryException();
+        return category;
+    }
+
+    /** Categories by id, always from the given restaurant. */
+    public categoriesByIds(rid: string, ids: string[]): Promise<CategoryEntity[]> {
+        return this.categories
+            .createQueryBuilder('c')
+            .where('c.restaurant_id = :rid AND c.id IN (:...ids)', { rid, ids })
+            .getMany();
+    }
+
+    /** All products of one category of the restaurant. */
+    public productsOfCategory(rid: string, categoryId: string): Promise<ProductEntity[]> {
+        return this.prods(rid).find({ categoryId });
     }
 }

@@ -1,12 +1,9 @@
 'use client';
 
 import type { OptionGroup } from '@elo/core/api/views/catalog.view';
+import type { ProductGroupKind } from '@elo/core/catalog/option-kinds';
 import type { FieldError } from '@elo/core/fields/field-rules';
-import {
-    FLAVORS_DEFAULT,
-    FlavorPricing,
-    OptionGroupKind
-} from '@elo/core/catalog/option-kinds';
+import { OptionGroupKind } from '@elo/core/catalog/option-kinds';
 import { kindOf, optionsProblems } from '@elo/core/catalog/product-pricing';
 import { FIELD_RULES, fieldError, moneyError } from '@elo/core/fields/field-rules';
 import { parseCents } from '@elo/core/money/cents';
@@ -19,85 +16,38 @@ import { centsToInput } from '#/_lib/format';
 import { OPTION_EDITOR_TEXTS as T } from '#/_lib/messages/catalog';
 import { fieldMessage } from '#/_lib/messages/fields';
 
-/** Choice being edited. `key` stays when the label changes, so flavor prices follow a renamed size. */
-export interface DraftChoice {
-    key: string;
-    label: string;
-    price: string;
-    maxFlavors: string;
-    /** Flavor prices by size key. */
-    sizePrices: Record<string, string>;
-}
-
 /** Group being edited: prices stay as typed text until saving. */
 export interface DraftGroup {
-    kind: OptionGroupKind;
+    kind: ProductGroupKind;
     name: string;
     required: boolean;
     multiple: boolean;
-    flavorPricing: FlavorPricing;
-    choices: DraftChoice[];
-}
-
-interface RowErrors {
-    label?: FieldError;
-    price?: FieldError;
-    maxFlavors?: FieldError;
-    /** By size key. */
-    sizePrices?: Record<string, FieldError>;
+    choices: { label: string; price: string }[];
 }
 
 /** Problems of one draft group: its name, "no choice at all", and each choice row by its draft position. */
 export interface GroupErrors {
     name?: FieldError;
     choices?: FieldError;
-    rows: RowErrors[];
+    rows: { label?: FieldError; price?: FieldError }[];
 }
 
 const MAX_GROUPS = 20;
 const MAX_CHOICES = 40;
 
-let keySeq = 0;
-const newKey = () => `c${++keySeq}`;
-
 const priceText = (cents: number) => (cents ? centsToInput(cents) : '');
 
-const blankChoice = (): DraftChoice => ({
-    key: newKey(),
-    label: '',
-    price: '',
-    maxFlavors: String(FLAVORS_DEFAULT),
-    sizePrices: {}
-});
-
-export const toDraft = (groups: OptionGroup[]): DraftGroup[] => {
-    const drafts = groups.map((g): DraftGroup => ({
+export const toDraft = (groups: OptionGroup[]): DraftGroup[] =>
+    groups.map((g) => ({
         kind: kindOf(g),
         name: g.name,
         required: g.required,
         multiple: g.multiple,
-        flavorPricing: g.flavorPricing ?? FlavorPricing.HIGHEST,
         choices: g.choices.map((c) => ({
-            key: newKey(),
             label: c.label,
-            price: priceText(c.priceCents),
-            maxFlavors: String(c.maxFlavors ?? FLAVORS_DEFAULT),
-            sizePrices: {}
+            price: priceText(c.priceCents)
         }))
     }));
-    const sizes = drafts.find((g) => g.kind === OptionGroupKind.SIZE)?.choices ?? [];
-    groups.forEach((g, i) => {
-        if (kindOf(g) !== OptionGroupKind.FLAVOR) return;
-        g.choices.forEach((c, j) => {
-            for (const s of sizes) {
-                const cents = c.sizePrices?.[s.label];
-                if (cents !== undefined)
-                    drafts[i].choices[j].sizePrices[s.key] = centsToInput(cents);
-            }
-        });
-    });
-    return drafts;
-};
 
 /** What is sent, with draft positions: fully blank groups and choices without a name are left out. */
 function kept(drafts: DraftGroup[]) {
@@ -107,13 +57,6 @@ function kept(drafts: DraftGroup[]) {
     });
 }
 
-const sizeRows = (drafts: DraftGroup[]) =>
-    kept(drafts)
-        .find((k) => k.g.kind === OptionGroupKind.SIZE)
-        ?.choices.map(({ c }) => c) ?? [];
-const hasFlavors = (drafts: DraftGroup[]) =>
-    drafts.some((g) => g.kind === OptionGroupKind.FLAVOR);
-
 /** The product's price comes from its sizes. */
 export const draftPricedBySize = (drafts: DraftGroup[]) =>
     drafts.some((g) => g.kind === OptionGroupKind.SIZE);
@@ -121,62 +64,28 @@ export const draftPricedBySize = (drafts: DraftGroup[]) =>
 const blank = (drafts: DraftGroup[]): GroupErrors[] =>
     drafts.map((g) => ({ rows: g.choices.map(() => ({})) }));
 
-const optionalPrice = (price: string) =>
-    price.trim() ? moneyError(FIELD_RULES.priceCents, price) : null;
-const requiredPrice = (price: string) => moneyError(FIELD_RULES.priceCents, price);
-const intOf = (text: string) => (/^\s*\d+\s*$/.test(text) ? Number(text) : text);
-
 /** The API body. Call only when `draftErrors` finds nothing. */
-export const fromDraft = (drafts: DraftGroup[]): OptionGroup[] => {
-    const sizes = sizeRows(drafts);
-    const flavors = hasFlavors(drafts);
-    return kept(drafts).map(({ g, choices }) => ({
+export const fromDraft = (drafts: DraftGroup[]): OptionGroup[] =>
+    kept(drafts).map(({ g, choices }) => ({
         name: g.name.trim(),
         kind: g.kind,
         required: g.required,
         multiple: g.multiple,
-        ...(g.kind === OptionGroupKind.FLAVOR ? { flavorPricing: g.flavorPricing } : {}),
         choices: choices.map(({ c }) => ({
             label: c.label.trim(),
-            priceCents:
-                g.kind === OptionGroupKind.FLAVOR ||
-                (g.kind === OptionGroupKind.SIZE && flavors)
-                    ? 0
-                    : c.price.trim()
-                      ? (parseCents(c.price) ?? 0)
-                      : 0,
-            ...(g.kind === OptionGroupKind.SIZE && flavors
-                ? { maxFlavors: Number(intOf(c.maxFlavors)) || 0 }
-                : {}),
-            ...(g.kind === OptionGroupKind.FLAVOR
-                ? {
-                      sizePrices: Object.fromEntries(
-                          sizes.flatMap((s) => {
-                              const cents = parseCents(c.sizePrices[s.key] ?? '');
-                              return cents === null ? [] : [[s.label.trim(), cents]];
-                          })
-                      )
-                  }
-                : {})
+            priceCents: c.price.trim() ? (parseCents(c.price) ?? 0) : 0
         }))
     }));
-};
 
-const SERVER_PATH =
-    /^options\.(\d+)\.(name|choices)(?:\.(\d+)\.(label|priceCents|maxFlavors|sizePrices)(?:\.(.+))?)?$/;
+const SERVER_PATH = /^options\.(\d+)\.(name|choices)(?:\.(\d+)\.(label|priceCents))?$/;
 
-/**
- * Errors on `options.N.…` paths moved to the draft rows they came from. Positions
- * count the sent list, which skips blank groups and choices; flavor prices are
- * keyed by size label there and by size key here.
- */
+/** Errors on `options.N.…` paths moved to the draft rows they came from (positions count the sent list). */
 function place(
     drafts: DraftGroup[],
     out: GroupErrors[],
     fields: Record<string, FieldError>
 ): boolean {
     const sent = kept(drafts);
-    const sizes = sizeRows(drafts);
     let landed = false;
     for (const [path, error] of Object.entries(fields)) {
         const m = SERVER_PATH.exec(path);
@@ -190,12 +99,7 @@ function place(
             if (!choice) continue;
             const row = target.rows[choice.j];
             if (m[4] === 'label') row.label ??= error;
-            else if (m[4] === 'maxFlavors') row.maxFlavors ??= error;
-            else if (m[4] === 'sizePrices') {
-                const size = sizes.find((s) => s.label.trim() === m[5]);
-                if (!size) continue;
-                row.sizePrices = { [size.key]: error, ...row.sizePrices };
-            } else row.price ??= error;
+            else row.price ??= error;
         }
         landed = true;
     }
@@ -205,37 +109,19 @@ function place(
 /** Each group's problems, checked with the same rules as the API. An extra without a value costs nothing. */
 export function draftErrors(drafts: DraftGroup[]): GroupErrors[] {
     const out = blank(drafts);
-    const sizes = sizeRows(drafts);
-    const flavors = hasFlavors(drafts);
     for (const { g, i, choices } of kept(drafts)) {
         out[i].name = fieldError(FIELD_RULES.optionName, g.name) ?? undefined;
         if (!choices.length) out[i].choices = { code: 'too_few', params: { min: 1 } };
-        for (const { c, j } of choices) {
-            const row: RowErrors = {
-                label: fieldError(FIELD_RULES.optionName, c.label) ?? undefined
+        for (const { c, j } of choices)
+            out[i].rows[j] = {
+                label: fieldError(FIELD_RULES.optionName, c.label) ?? undefined,
+                price:
+                    (g.kind === OptionGroupKind.SIZE || c.price.trim()
+                        ? moneyError(FIELD_RULES.priceCents, c.price)
+                        : null) ?? undefined
             };
-            if (g.kind === OptionGroupKind.EXTRA)
-                row.price = optionalPrice(c.price) ?? undefined;
-            if (g.kind === OptionGroupKind.SIZE && !flavors)
-                row.price = requiredPrice(c.price) ?? undefined;
-            if (g.kind === OptionGroupKind.SIZE && flavors)
-                row.maxFlavors =
-                    fieldError(FIELD_RULES.flavorsPerSize, intOf(c.maxFlavors)) ??
-                    undefined;
-            if (g.kind === OptionGroupKind.FLAVOR) {
-                const bad = sizes.flatMap((s) => {
-                    const e = requiredPrice(c.sizePrices[s.key] ?? '');
-                    return e ? [[s.key, e] as const] : [];
-                });
-                if (bad.length) row.sizePrices = Object.fromEntries(bad);
-            }
-            out[i].rows[j] = row;
-        }
     }
-    // Rules about the setup as a whole (one size group, flavors need sizes, repeated names).
-    const whole = optionsProblems(fromDraft(drafts)).filter(
-        (p) => !p.path.includes('.sizePrices.') && !p.path.endsWith('.maxFlavors')
-    );
+    const whole = optionsProblems(fromDraft(drafts));
     place(drafts, out, Object.fromEntries(whole.map((p) => [p.path, p.error])));
     return out;
 }
@@ -246,12 +132,8 @@ export function firstInvalid(errors: GroupErrors[] | null): string | null {
         if (g.name) return `options.${i}.name`;
         if (g.choices) return `options.${i}.choices.0.label`;
         for (const [j, r] of g.rows.entries()) {
-            const row = `options.${i}.choices.${j}`;
-            if (r.label) return `${row}.label`;
-            if (r.price) return `${row}.priceCents`;
-            if (r.maxFlavors) return `${row}.maxFlavors`;
-            const size = Object.keys(r.sizePrices ?? {})[0];
-            if (size) return `${row}.sizePrices.${size}`;
+            if (r.label) return `options.${i}.choices.${j}.label`;
+            if (r.price) return `options.${i}.choices.${j}.priceCents`;
         }
     }
     return null;
@@ -266,28 +148,21 @@ export function draftErrorsFromServer(
     return place(drafts, out, fields as Record<string, FieldError>) ? out : null;
 }
 
-const newGroup = (kind: OptionGroupKind): DraftGroup => ({
+const newGroup = (kind: ProductGroupKind): DraftGroup => ({
     kind,
-    name:
-        kind === OptionGroupKind.SIZE
-            ? T.sizeName
-            : kind === OptionGroupKind.FLAVOR
-              ? T.flavorName
-              : '',
-    required: kind !== OptionGroupKind.EXTRA,
-    multiple: kind === OptionGroupKind.FLAVOR,
-    flavorPricing: FlavorPricing.HIGHEST,
-    choices: [blankChoice()]
+    name: kind === OptionGroupKind.SIZE ? T.sizeName : '',
+    required: kind === OptionGroupKind.SIZE,
+    multiple: false,
+    choices: [{ label: '', price: '' }]
 });
 
 const choicesMessage = (e: FieldError) =>
     e.code === 'too_few' ? T.atLeastOneChoice : fieldMessage(e);
 
 /**
- * Option groups editor: sizes (they set the price), flavors for half-and-half (a
- * price per size) and extras (they add to it). Shows each problem under its own
- * input once it was left, or all of them when `showAll`; `server` holds what the
- * API refused, until the next change.
+ * Option groups editor: sizes (they set the price) and extras (they add to it).
+ * Shows each problem under its own input once it was left, or all of them when
+ * `showAll`; `server` holds what the API refused, until the next change.
  */
 export function OptionsEditor({
     value,
@@ -306,26 +181,14 @@ export function OptionsEditor({
     const live = draftErrors(value);
     const shown = (name: string, own?: FieldError, fromServer?: FieldError) =>
         (showAll || touched.has(name) ? own : undefined) ?? fromServer;
-
-    const sizeGroup = value.find((g) => g.kind === OptionGroupKind.SIZE);
-    const sizes = (sizeGroup?.choices ?? []).filter((c) => c.label.trim());
-    const flavors = hasFlavors(value);
+    const hasSizes = draftPricedBySize(value);
 
     const patch = (i: number, g: Partial<DraftGroup>) =>
         onChange(value.map((x, k) => (k === i ? { ...x, ...g } : x)));
-    const setChoice = (i: number, j: number, c: Partial<DraftChoice>) =>
+    const setChoice = (i: number, j: number, c: Partial<DraftGroup['choices'][number]>) =>
         patch(i, {
             choices: value[i].choices.map((x, k) => (k === j ? { ...x, ...c } : x))
         });
-
-    const kindHint = (kind: OptionGroupKind) =>
-        kind === OptionGroupKind.SIZE
-            ? flavors
-                ? T.sizeHintFlavors
-                : T.sizeHint
-            : kind === OptionGroupKind.FLAVOR
-              ? T.flavorHint
-              : T.extraHint;
 
     return (
         <div className="space-y-4">
@@ -340,9 +203,6 @@ export function OptionsEditor({
                     )
                         ? live[i].choices
                         : undefined) ?? server?.[i]?.choices;
-                const showPrice =
-                    g.kind === OptionGroupKind.EXTRA ||
-                    (g.kind === OptionGroupKind.SIZE && !flavors);
                 return (
                     <fieldset
                         key={i}
@@ -376,8 +236,7 @@ export function OptionsEditor({
                                 <Trash2 size={17} />
                             </button>
                         </div>
-                        <p className="text-xs text-muted">{kindHint(g.kind)}</p>
-
+                        <p className="text-xs text-muted">{T.kindHint[g.kind]}</p>
                         {g.kind === OptionGroupKind.EXTRA && (
                             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
                                 <label className="flex items-center gap-2.5">
@@ -398,72 +257,22 @@ export function OptionsEditor({
                                 </label>
                             </div>
                         )}
-
-                        {g.kind === OptionGroupKind.FLAVOR && (
-                            <div
-                                role="radiogroup"
-                                aria-label={T.flavorPricingLabel}
-                                className="flex flex-wrap gap-2"
-                            >
-                                {[FlavorPricing.HIGHEST, FlavorPricing.AVERAGE].map(
-                                    (rule) => {
-                                        const on = g.flavorPricing === rule;
-                                        return (
-                                            <button
-                                                key={rule}
-                                                type="button"
-                                                role="radio"
-                                                aria-checked={on}
-                                                onClick={() =>
-                                                    patch(i, { flavorPricing: rule })
-                                                }
-                                                className={`rounded-pill border px-3.5 py-1.5 text-sm font-medium transition ${on ? 'border-brand bg-brand text-brand-fg' : 'border-line/70 hover:border-brand/60'}`}
-                                            >
-                                                {T.flavorPricing[rule]}
-                                            </button>
-                                        );
-                                    }
-                                )}
-                            </div>
-                        )}
-                        {g.kind === OptionGroupKind.FLAVOR && !sizes.length && (
-                            <p className="text-xs text-warning">{T.flavorNeedsSizes}</p>
-                        )}
-
-                        <ul className="space-y-3">
+                        <ul className="space-y-2">
                             {g.choices.map((c, j) => {
-                                const row = `options.${i}.choices.${j}`;
-                                const labelKey = `${row}.label`;
-                                const priceKey = `${row}.priceCents`;
-                                const maxKey = `${row}.maxFlavors`;
-                                const own = live[i].rows[j] ?? {};
-                                const fromServer = server?.[i]?.rows[j] ?? {};
+                                const labelKey = `options.${i}.choices.${j}.label`;
+                                const priceKey = `options.${i}.choices.${j}.priceCents`;
                                 const labelError = shown(
                                     labelKey,
-                                    own.label,
-                                    fromServer.label
+                                    live[i].rows[j]?.label,
+                                    server?.[i]?.rows[j]?.label
                                 );
                                 const priceError = shown(
                                     priceKey,
-                                    own.price,
-                                    fromServer.price
+                                    live[i].rows[j]?.price,
+                                    server?.[i]?.rows[j]?.price
                                 );
-                                const maxError = shown(
-                                    maxKey,
-                                    own.maxFlavors,
-                                    fromServer.maxFlavors
-                                );
-                                const sizeErrors = sizes.flatMap((s) => {
-                                    const key = `${row}.sizePrices.${s.key}`;
-                                    const e = shown(
-                                        key,
-                                        own.sizePrices?.[s.key],
-                                        fromServer.sizePrices?.[s.key]
-                                    );
-                                    return e ? [{ size: s, e }] : [];
-                                });
                                 return (
-                                    <li key={c.key}>
+                                    <li key={j}>
                                         <div className="flex items-center gap-2">
                                             <Input
                                                 name={labelKey}
@@ -479,43 +288,20 @@ export function OptionsEditor({
                                                 aria-label={T.choiceName}
                                                 maxLength={FIELD_RULES.optionName.max}
                                             />
-                                            {showPrice && (
-                                                <div className="w-32 shrink-0">
-                                                    <MoneyInput
-                                                        name={priceKey}
-                                                        value={c.price}
-                                                        onChange={(e) =>
-                                                            setChoice(i, j, {
-                                                                price: e.target.value
-                                                            })
-                                                        }
-                                                        onBlur={() => touch(priceKey)}
-                                                        invalid={!!priceError}
-                                                        aria-label={T.priceLabel[g.kind]}
-                                                    />
-                                                </div>
-                                            )}
-                                            {g.kind === OptionGroupKind.SIZE &&
-                                                flavors && (
-                                                    <label className="flex w-28 shrink-0 items-center gap-2 text-xs text-muted">
-                                                        <Input
-                                                            name={maxKey}
-                                                            value={c.maxFlavors}
-                                                            inputMode="numeric"
-                                                            onChange={(e) =>
-                                                                setChoice(i, j, {
-                                                                    maxFlavors:
-                                                                        e.target.value
-                                                                })
-                                                            }
-                                                            onBlur={() => touch(maxKey)}
-                                                            invalid={!!maxError}
-                                                            aria-label={T.maxFlavors}
-                                                            className="text-center"
-                                                        />
-                                                        {T.flavorsShort}
-                                                    </label>
-                                                )}
+                                            <div className="w-32 shrink-0">
+                                                <MoneyInput
+                                                    name={priceKey}
+                                                    value={c.price}
+                                                    onChange={(e) =>
+                                                        setChoice(i, j, {
+                                                            price: e.target.value
+                                                        })
+                                                    }
+                                                    onBlur={() => touch(priceKey)}
+                                                    invalid={!!priceError}
+                                                    aria-label={T.priceLabel[g.kind]}
+                                                />
+                                            </div>
                                             <button
                                                 type="button"
                                                 aria-label={T.removeChoice}
@@ -532,56 +318,6 @@ export function OptionsEditor({
                                                 <Trash2 size={16} />
                                             </button>
                                         </div>
-                                        {g.kind === OptionGroupKind.FLAVOR &&
-                                            sizes.length > 0 && (
-                                                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                                    {sizes.map((s) => {
-                                                        const key = `${row}.sizePrices.${s.key}`;
-                                                        return (
-                                                            <label
-                                                                key={s.key}
-                                                                className="block"
-                                                            >
-                                                                <span className="mb-1 block truncate text-xs text-muted">
-                                                                    {s.label}
-                                                                </span>
-                                                                <MoneyInput
-                                                                    name={key}
-                                                                    value={
-                                                                        c.sizePrices[
-                                                                            s.key
-                                                                        ] ?? ''
-                                                                    }
-                                                                    onChange={(e) =>
-                                                                        setChoice(i, j, {
-                                                                            sizePrices: {
-                                                                                ...c.sizePrices,
-                                                                                [s.key]:
-                                                                                    e
-                                                                                        .target
-                                                                                        .value
-                                                                            }
-                                                                        })
-                                                                    }
-                                                                    onBlur={() =>
-                                                                        touch(key)
-                                                                    }
-                                                                    invalid={sizeErrors.some(
-                                                                        (x) =>
-                                                                            x.size.key ===
-                                                                            s.key
-                                                                    )}
-                                                                    aria-label={T.flavorPriceAt(
-                                                                        c.label ||
-                                                                            T.flavorName,
-                                                                        s.label
-                                                                    )}
-                                                                />
-                                                            </label>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
                                         <span
                                             aria-live="polite"
                                             className="block text-xs text-danger"
@@ -598,20 +334,6 @@ export function OptionsEditor({
                                                     {fieldMessage(priceError)}
                                                 </span>
                                             )}
-                                            {maxError && (
-                                                <span className="mt-1 block">
-                                                    {T.maxFlavors}:{' '}
-                                                    {fieldMessage(maxError)}
-                                                </span>
-                                            )}
-                                            {sizeErrors.map(({ size, e }) => (
-                                                <span
-                                                    key={size.key}
-                                                    className="mt-1 block"
-                                                >
-                                                    {size.label}: {fieldMessage(e)}
-                                                </span>
-                                            ))}
                                         </span>
                                     </li>
                                 );
@@ -627,7 +349,9 @@ export function OptionsEditor({
                             variant="ghost"
                             disabled={g.choices.length >= MAX_CHOICES}
                             onClick={() =>
-                                patch(i, { choices: [...g.choices, blankChoice()] })
+                                patch(i, {
+                                    choices: [...g.choices, { label: '', price: '' }]
+                                })
                             }
                         >
                             <Plus size={16} /> {T.addChoice[g.kind]}
@@ -639,26 +363,10 @@ export function OptionsEditor({
                 <Button
                     type="button"
                     variant="soft"
-                    disabled={value.length >= MAX_GROUPS || !!sizeGroup}
+                    disabled={value.length >= MAX_GROUPS || hasSizes}
                     onClick={() => onChange([newGroup(OptionGroupKind.SIZE), ...value])}
                 >
                     <Plus size={16} /> {T.addGroup[OptionGroupKind.SIZE]}
-                </Button>
-                <Button
-                    type="button"
-                    variant="soft"
-                    disabled={value.length >= MAX_GROUPS || !sizeGroup || flavors}
-                    title={sizeGroup ? undefined : T.flavorNeedsSizes}
-                    onClick={() => {
-                        const at = value.indexOf(sizeGroup!) + 1;
-                        onChange([
-                            ...value.slice(0, at),
-                            newGroup(OptionGroupKind.FLAVOR),
-                            ...value.slice(at)
-                        ]);
-                    }}
-                >
-                    <Plus size={16} /> {T.addGroup[OptionGroupKind.FLAVOR]}
                 </Button>
                 <Button
                     type="button"

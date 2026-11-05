@@ -42,4 +42,8 @@ export class ProductEntity {
 
     @Column({ name: 'options', type: 'jsonb', default: () => "'[]'" })
     public options: OptionGroup[];
+
+    /** Pizza flavor: its price by size id of the category. */
+    @Column({ name: 'size_prices', type: 'jsonb', default: () => "'{}'" })
+    public sizePrices: Record<string, number>;
 }

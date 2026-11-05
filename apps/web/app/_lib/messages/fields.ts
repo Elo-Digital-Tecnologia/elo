@@ -67,8 +67,6 @@ export function fieldMessage(error: FieldError): string {
             return 'Este nome já foi usado aqui.';
         case 'one_per_product':
             return 'Só pode haver um grupo deste tipo por produto.';
-        case 'needs_size':
-            return 'Adicione os tamanhos antes dos sabores.';
         default:
             return 'Valor inválido.';
     }

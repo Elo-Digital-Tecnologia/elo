@@ -8,6 +8,8 @@ import type { OrderItem } from '#/modules/orders/types/order-item.type.js';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { CategoryKind } from '@elo/core/catalog/category-kinds';
+import { FlavorPricing } from '@elo/core/catalog/option-kinds';
 import { businessDay } from '@elo/core/contracts/contracts';
 import { OrderStatus } from '@elo/core/orders/order-status';
 import { Role } from '@elo/core/roles/roles';
@@ -25,6 +27,7 @@ import { StaffService } from '#/modules/staff/staff.service.js';
 import { DiningTableEntity } from '#/modules/tables/entities/dining-table.entity.js';
 import { TableSessionEntity } from '#/modules/tables/entities/table-session.entity.js';
 import { newToken } from '#/modules/tables/table.service.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Demo data for local development: two restaurants with menu, tables, a full team
@@ -52,7 +55,17 @@ interface DemoRestaurant {
         category: string;
         products: { name: string; priceCents: number; description?: string }[];
     }[];
+    /** Adds a pizza category with half-and-half. */
+    pizzas?: boolean;
 }
+
+/** Flavors of the demo pizza category: name and price at the medium and large sizes. */
+const PIZZA_FLAVORS: [string, number, number][] = [
+    ['Margherita', 5490, 6990],
+    ['Calabresa', 5290, 6790],
+    ['Quatro queijos', 5990, 7490],
+    ['Camarão', 7490, 8990]
+];
 
 const RESTAURANTS: DemoRestaurant[] = [
     {
@@ -64,6 +77,7 @@ const RESTAURANTS: DemoRestaurant[] = [
         paidDaysAgo: 10,
         contract: 'pilot',
         prefix: 'bm',
+        pizzas: true,
         menu: [
             {
                 category: 'Entradas',
@@ -320,6 +334,43 @@ async function main() {
                             ...p
                         })
                     );
+            }
+
+            if (demo.pizzas) {
+                const medium = randomUUID();
+                const large = randomUUID();
+                const pizzas = await catalog.createCategory(r.id, {
+                    name: 'Pizzas',
+                    kind: CategoryKind.PIZZA,
+                    pizza: {
+                        sizesName: 'Tamanho',
+                        flavorsName: 'Sabores',
+                        flavorPricing: FlavorPricing.AVERAGE,
+                        sizes: [
+                            { id: medium, label: 'Média', maxFlavors: 2 },
+                            { id: large, label: 'Grande', maxFlavors: 3 }
+                        ],
+                        addons: [
+                            {
+                                name: 'Borda',
+                                required: false,
+                                multiple: false,
+                                choices: [
+                                    {
+                                        label: 'Catupiry',
+                                        sizePrices: { [medium]: 800, [large]: 1000 }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                });
+                for (const [name, m, g] of PIZZA_FLAVORS)
+                    await catalog.createProduct(r.id, {
+                        categoryId: pizzas.id,
+                        name,
+                        sizePrices: { [medium]: m, [large]: g }
+                    });
             }
 
             const tables = await repo(DiningTableEntity).save(

@@ -13,6 +13,7 @@ import {
 import { Field } from '#/common/decorators/field.decorator.js';
 import { ORDER_LIMITS } from '../order.constants.js';
 import { ChosenOptionDTO } from './chosen-option.dto.js';
+import { OrderPizzaDTO } from './order-pizza.dto.js';
 
 export class OrderItemDTO {
     @IsUUID()
@@ -32,4 +33,10 @@ export class OrderItemDTO {
     @ValidateNested({ each: true })
     @Type(() => ChosenOptionDTO)
     public options?: ChosenOptionDTO[];
+
+    /** Required when the product is a flavor of a pizza category; `options` then holds its add-ons. */
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => OrderPizzaDTO)
+    public pizza?: OrderPizzaDTO;
 }

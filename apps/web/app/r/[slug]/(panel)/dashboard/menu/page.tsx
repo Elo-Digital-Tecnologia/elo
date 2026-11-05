@@ -4,12 +4,14 @@ import type { CategoryView, ProductView } from '@elo/core/api/views/catalog.view
 import type { ProductTag } from '@elo/core/catalog/product-tags';
 import type { FieldError } from '@elo/core/fields/field-rules';
 import type { DraftGroup, GroupErrors } from './options-editor';
+import type { PizzaDraft, PizzaErrors } from './pizza-setup-editor';
 import { api } from '@elo/client/http/api-client';
 import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
+import { CATEGORY_KINDS, CategoryKind } from '@elo/core/catalog/category-kinds';
 import { PRODUCT_TAGS } from '@elo/core/catalog/product-tags';
-import { FIELD_RULES } from '@elo/core/fields/field-rules';
+import { FIELD_RULES, moneyError } from '@elo/core/fields/field-rules';
 import { parseCents } from '@elo/core/money/cents';
 import { Badge } from '@elo/ui/components/feedback/badge';
 import {
@@ -45,7 +47,11 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { centsToInput } from '#/_lib/format';
-import { PRODUCT_PRICE_TEXTS, PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
+import {
+    CATEGORY_KIND_TEXTS,
+    PRODUCT_PRICE_TEXTS,
+    PRODUCT_TAG_LABEL
+} from '#/_lib/messages/catalog';
 import { MENU_ERRORS, PRODUCT_FORM_MESSAGES } from '#/_lib/messages/errors';
 import { ImagePicker } from '../../../../../_components/image-picker';
 import { ProductPrice } from '../../../../../_components/menu-list';
@@ -60,13 +66,27 @@ import {
     fromDraft,
     toDraft
 } from './options-editor';
+import {
+    PizzaSetupEditor,
+    firstPizzaInvalid,
+    fromPizzaDraft,
+    pizzaDraftErrors,
+    toPizzaDraft
+} from './pizza-setup-editor';
 
 const STEPS = ['Dados', 'Foto', 'Opções'] as const;
+
+/** Sizes of the chosen pizza category, whose flavors are priced per size. */
+type PizzaSizes = { id: string; label: string }[] | null;
 
 interface Form {
     categoryId: string;
     name: string;
     price: string;
+    /** Set while the chosen category is a pizza one. */
+    pizzaSizes: PizzaSizes;
+    /** Pizza flavor prices by size id, as typed. */
+    sizePrices: Record<string, string>;
     description: string;
     imageUrl: string;
     featured: boolean;
@@ -77,6 +97,8 @@ const EMPTY: Form = {
     categoryId: '',
     name: '',
     price: '',
+    pizzaSizes: null,
+    sizePrices: {},
     description: '',
     imageUrl: '',
     featured: false,
@@ -96,12 +118,35 @@ const messageOf = (e: unknown) =>
 
 const CATEGORY_CHECKS = { name: rule(FIELD_RULES.categoryName) };
 
+/** A flavor is made in at least one size, and every typed price is a valid amount. */
+function flavorPricesError(
+    sizes: NonNullable<PizzaSizes>,
+    prices: Record<string, string>
+): FieldError | null {
+    const typed = sizes.filter((s) => prices[s.id]?.trim());
+    if (!typed.length) return { code: 'too_few', params: { min: 1 } };
+    for (const s of typed) {
+        const e = moneyError(FIELD_RULES.priceCents, prices[s.id]);
+        if (e) return e;
+    }
+    return null;
+}
+
+const sizesOf = (menu: CategoryView[] | null, categoryId: string): PizzaSizes => {
+    const pizza = menu?.find((c) => c.id === categoryId)?.pizza;
+    return pizza ? pizza.sizes.map((s) => ({ id: s.id, label: s.label })) : null;
+};
+
 const PRODUCT_CHECKS = {
     categoryId: (v: string): FieldError | null => (v ? null : { code: 'invalid_option' }),
     name: rule(FIELD_RULES.productName),
-    // A product priced by its sizes has no price of its own.
+    // A product priced by its sizes, or a pizza flavor, has no price of its own.
     price: (v: string, all: Form) =>
-        draftPricedBySize(all.options) ? null : money(FIELD_RULES.priceCents)(v),
+        all.pizzaSizes || draftPricedBySize(all.options)
+            ? null
+            : money(FIELD_RULES.priceCents)(v),
+    sizePrices: (v: Record<string, string>, all: Form) =>
+        all.pizzaSizes ? flavorPricesError(all.pizzaSizes, v) : null,
     description: rule(FIELD_RULES.productDescription),
     imageUrl: rule(FIELD_RULES.imageUrl)
 };
@@ -125,6 +170,10 @@ function View() {
     const [prodOpen, setProdOpen] = useState(false);
     const catForm = useForm({ name: '' }, CATEGORY_CHECKS);
     const [editCat, setEditCat] = useState<string | null>(null);
+    const [catKind, setCatKind] = useState<CategoryKind>(CategoryKind.STANDARD);
+    const [pizzaDraft, setPizzaDraft] = useState<PizzaDraft>(() => toPizzaDraft(null));
+    const [pizzaServer, setPizzaServer] = useState<PizzaErrors | null>(null);
+    const [catSubmitted, setCatSubmitted] = useState(false);
     const [editProd, setEditProd] = useState<string | null>(null);
     const form = useForm<Form>(EMPTY, PRODUCT_CHECKS, PRODUCT_FORM_MESSAGES);
     const [submitted, setSubmitted] = useState(false);
@@ -183,6 +232,10 @@ function View() {
         setError(null);
         setEditCat(c?.id ?? null);
         catForm.reset({ name: c?.name ?? '' });
+        setCatKind(c?.kind ?? CategoryKind.STANDARD);
+        setPizzaDraft(toPizzaDraft(c?.pizza ?? null));
+        setPizzaServer(null);
+        setCatSubmitted(false);
         setCatOpen(true);
     };
 
@@ -199,21 +252,42 @@ function View() {
                       categoryId: p.categoryId,
                       name: copy ? `${p.name} (cópia)` : p.name,
                       price: priceText(p.priceCents),
+                      pizzaSizes: sizesOf(menu, p.categoryId),
+                      sizePrices: Object.fromEntries(
+                          Object.entries(p.sizePrices).map(([id, cents]) => [
+                              id,
+                              priceText(cents)
+                          ])
+                      ),
                       description: p.description ?? '',
                       imageUrl: p.imageUrl ?? '',
                       featured: p.featured,
                       tags: p.tags,
                       options: toDraft(p.options)
                   }
-                : { ...EMPTY, categoryId: menu?.length === 1 ? menu[0].id : '' }
+                : {
+                      ...EMPTY,
+                      categoryId: menu?.length === 1 ? menu[0].id : '',
+                      pizzaSizes: menu?.length === 1 ? sizesOf(menu, menu[0].id) : null
+                  }
         );
         setProdOpen(true);
     };
 
     const saveCategory = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!catForm.validate()) return;
-        const body = { name: catForm.values.name };
+        setCatSubmitted(true);
+        const pizza = catKind === CategoryKind.PIZZA;
+        const nameOk = catForm.validate();
+        const pizzaBad = pizza ? firstPizzaInvalid(pizzaDraftErrors(pizzaDraft)) : null;
+        if (pizzaBad)
+            document.querySelector<HTMLElement>(`[name="${pizzaBad}"]`)?.focus();
+        if (!nameOk || pizzaBad) return;
+        const body = {
+            name: catForm.values.name,
+            ...(editCat ? {} : { kind: catKind }),
+            ...(pizza ? { pizza: fromPizzaDraft(pizzaDraft) } : {})
+        };
         const call = editCat
             ? () =>
                   api(`/api/catalog/categories/${editCat}`, {
@@ -222,7 +296,17 @@ function View() {
                       token
                   })
             : () => api('/api/catalog/categories', { body, token });
-        if (await guard(call, (err) => catForm.fromServer(err))) {
+        const fromServer = (err: unknown) => {
+            const landed = catForm.fromServer(err);
+            if (!(err instanceof ApiError)) return landed;
+            const onPizza = Object.fromEntries(
+                Object.entries(err.fields).filter(([path]) => path.startsWith('pizza'))
+            ) as PizzaErrors;
+            const any = Object.keys(onPizza).length > 0;
+            setPizzaServer(any ? onPizza : null);
+            return landed || any;
+        };
+        if (await guard(call, fromServer)) {
             setEditCat(null);
             setCatOpen(false);
         }
@@ -236,7 +320,13 @@ function View() {
     /** Field errors sent back by the API, under their inputs, opening the step of the first one. */
     const productFromServer = (err: unknown) => {
         if (!(err instanceof ApiError)) return false;
-        const landed = form.fromServer(err, { priceCents: 'price' });
+        const sizePaths = Object.fromEntries(
+            (form.values.pizzaSizes ?? []).map((s) => [
+                `sizePrices.${s.id}`,
+                'sizePrices' as const
+            ])
+        );
+        const landed = form.fromServer(err, { priceCents: 'price', ...sizePaths });
         const options = draftErrorsFromServer(form.values.options, err.fields);
         setOptionsServer(options);
         const field =
@@ -248,6 +338,12 @@ function View() {
         return landed || !!options;
     };
 
+    // A pizza flavor has no options step: its choices come from the category.
+    const steps = form.values.pizzaSizes ? STEPS.slice(0, 2) : STEPS;
+    useEffect(() => {
+        if (step >= steps.length) setStep(steps.length - 1);
+    }, [step, steps.length]);
+
     const saveProduct = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
@@ -257,20 +353,34 @@ function View() {
         const bad =
             firstBad(v) ??
             (linkBad ? 'imageUrl' : null) ??
-            firstInvalid(draftErrors(v.options));
+            (v.pizzaSizes ? null : firstInvalid(draftErrors(v.options)));
         if (bad) return goTo(bad);
-        const body = {
+        const common = {
             categoryId: v.categoryId,
             name: v.name.trim(),
-            priceCents: draftPricedBySize(v.options)
-                ? undefined
-                : (parseCents(v.price) ?? 0),
             description: v.description.trim() || undefined,
             imageUrl: v.imageUrl.trim() || undefined,
             featured: v.featured,
-            tags: v.tags,
-            options: fromDraft(v.options)
+            tags: v.tags
         };
+        // A pizza flavor sends its prices per size and no options of its own.
+        const body = v.pizzaSizes
+            ? {
+                  ...common,
+                  sizePrices: Object.fromEntries(
+                      v.pizzaSizes.flatMap((s) => {
+                          const cents = parseCents(v.sizePrices[s.id] ?? '');
+                          return cents === null ? [] : [[s.id, cents]];
+                      })
+                  )
+              }
+            : {
+                  ...common,
+                  priceCents: draftPricedBySize(v.options)
+                      ? undefined
+                      : (parseCents(v.price) ?? 0),
+                  options: fromDraft(v.options)
+              };
         const call = editProd
             ? () =>
                   api(`/api/catalog/products/${editProd}`, { method: 'PUT', body, token })
@@ -448,7 +558,10 @@ function View() {
                                                     {p.name}
                                                 </h3>
                                                 <span className="font-display font-bold text-brand">
-                                                    <ProductPrice product={p} />
+                                                    <ProductPrice
+                                                        product={p}
+                                                        pizza={c.pizza}
+                                                    />
                                                 </span>
                                             </div>
                                             {p.description && (
@@ -566,11 +679,47 @@ function View() {
                     <Field label="Nome" error={catForm.errors.name}>
                         <Input
                             {...catForm.bind('name')}
-                            placeholder="Pizzas"
+                            placeholder="Bebidas"
                             maxLength={FIELD_RULES.categoryName.max}
                             data-autofocus
                         />
                     </Field>
+                    <div className="space-y-2">
+                        <p className="text-sm font-medium">{CATEGORY_KIND_TEXTS.label}</p>
+                        <div role="radiogroup" className="flex flex-wrap gap-2">
+                            {CATEGORY_KINDS.map((k) => {
+                                const on = catKind === k;
+                                return (
+                                    <button
+                                        key={k}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={on}
+                                        disabled={!!editCat && !on}
+                                        onClick={() => setCatKind(k)}
+                                        className={`rounded-pill border px-3.5 py-1.5 text-sm font-medium transition disabled:opacity-40 ${on ? 'border-brand bg-brand text-brand-fg' : 'border-line/70 hover:border-brand/60'}`}
+                                    >
+                                        {CATEGORY_KIND_TEXTS.kinds[k]}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-xs text-muted">
+                            {CATEGORY_KIND_TEXTS.hints[catKind]}
+                            {editCat && ` ${CATEGORY_KIND_TEXTS.fixed}`}
+                        </p>
+                    </div>
+                    {catKind === CategoryKind.PIZZA && (
+                        <PizzaSetupEditor
+                            value={pizzaDraft}
+                            onChange={(d) => {
+                                setPizzaDraft(d);
+                                setPizzaServer(null);
+                            }}
+                            showAll={catSubmitted}
+                            server={pizzaServer}
+                        />
+                    )}
                     {error && (
                         <p role="alert" className="text-sm text-danger">
                             {error}
@@ -595,7 +744,7 @@ function View() {
                         className="glass flex !rounded-pill p-1 text-sm font-semibold"
                         role="tablist"
                     >
-                        {STEPS.map((label, i) => (
+                        {steps.map((label, i) => (
                             <button
                                 key={label}
                                 type="button"
@@ -612,7 +761,16 @@ function View() {
                     {step === 0 && (
                         <div className="space-y-4">
                             <Field label="Categoria" error={form.errors.categoryId}>
-                                <Select {...form.bind('categoryId')}>
+                                <Select
+                                    {...form.bind('categoryId')}
+                                    onChange={(e) => {
+                                        form.set('categoryId', e.target.value);
+                                        form.set(
+                                            'pizzaSizes',
+                                            sizesOf(menu, e.target.value)
+                                        );
+                                    }}
+                                >
                                     <option value="">Escolha uma categoria</option>
                                     {menu?.map((c) => (
                                         <option key={c.id} value={c.id}>
@@ -629,7 +787,9 @@ function View() {
                                         data-autofocus
                                     />
                                 </Field>
-                                {draftPricedBySize(form.values.options) ? (
+                                {form.values.pizzaSizes ? null : draftPricedBySize(
+                                      form.values.options
+                                  ) ? (
                                     <Field label="Preço">
                                         <p className="pt-2 text-sm text-muted">
                                             {PRODUCT_PRICE_TEXTS.bySize}
@@ -641,10 +801,54 @@ function View() {
                                     </Field>
                                 )}
                             </div>
-                            {!draftPricedBySize(form.values.options) && (
-                                <p className="-mt-2 text-xs text-muted">
-                                    {PRODUCT_PRICE_TEXTS.hint}
-                                </p>
+                            {form.values.pizzaSizes ? (
+                                <fieldset>
+                                    <legend className="mb-1 text-sm font-medium">
+                                        {PRODUCT_PRICE_TEXTS.pizzaTitle}
+                                    </legend>
+                                    <p className="mb-2 text-xs text-muted">
+                                        {PRODUCT_PRICE_TEXTS.pizzaHint}
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                        {form.values.pizzaSizes.map((s, i) => (
+                                            <label key={s.id} className="block">
+                                                <span className="mb-1 block truncate text-xs text-muted">
+                                                    {s.label}
+                                                </span>
+                                                <MoneyInput
+                                                    name={
+                                                        i === 0 ? 'sizePrices' : undefined
+                                                    }
+                                                    value={
+                                                        form.values.sizePrices[s.id] ?? ''
+                                                    }
+                                                    invalid={!!form.errors.sizePrices}
+                                                    aria-label={`${PRODUCT_PRICE_TEXTS.pizzaTitle}: ${s.label}`}
+                                                    onChange={(e) =>
+                                                        form.set('sizePrices', {
+                                                            ...form.values.sizePrices,
+                                                            [s.id]: e.target.value
+                                                        })
+                                                    }
+                                                />
+                                            </label>
+                                        ))}
+                                    </div>
+                                    {form.errors.sizePrices && (
+                                        <p
+                                            aria-live="polite"
+                                            className="mt-2 text-xs text-danger"
+                                        >
+                                            {form.errors.sizePrices}
+                                        </p>
+                                    )}
+                                </fieldset>
+                            ) : (
+                                !draftPricedBySize(form.values.options) && (
+                                    <p className="-mt-2 text-xs text-muted">
+                                        {PRODUCT_PRICE_TEXTS.hint}
+                                    </p>
+                                )
                             )}
                             <label className="flex items-center gap-3 text-sm font-medium">
                                 <Switch
@@ -718,7 +922,7 @@ function View() {
                             onLinkError={setLinkBad}
                         />
                     )}
-                    {step === 2 && (
+                    {step === 2 && !form.values.pizzaSizes && (
                         <>
                             <OptionsEditor
                                 value={form.values.options}
@@ -748,7 +952,7 @@ function View() {
                         >
                             Voltar
                         </Button>
-                        {step < STEPS.length - 1 ? (
+                        {step < steps.length - 1 ? (
                             <span className="flex gap-2">
                                 <Button type="submit" variant="soft" loading={saving}>
                                     Salvar

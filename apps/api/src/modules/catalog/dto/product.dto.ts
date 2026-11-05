@@ -8,6 +8,7 @@ import {
     IsArray,
     IsBoolean,
     IsIn,
+    IsObject,
     IsOptional,
     IsUUID,
     ValidateNested
@@ -48,6 +49,11 @@ export class ProductDTO {
     @IsOptional()
     @IsBoolean()
     public available?: boolean;
+
+    /** Pizza flavor: price by size id of its category. Checked against the category by the service. */
+    @IsOptional()
+    @IsObject()
+    public sizePrices?: Record<string, number>;
 
     @IsOptional()
     @IsArray()

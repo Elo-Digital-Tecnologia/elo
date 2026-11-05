@@ -1,7 +1,9 @@
 import type { OrderHistoryPage } from '@elo/core/api/views/order.view';
 import type { JwtUser } from '#/common/types/jwt-user.type.js';
+import type { PizzaContext } from './utils/pricing.js';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { CategoryKind } from '@elo/core/catalog/category-kinds';
 import {
     CancelActor,
     cancellationRule,
@@ -52,13 +54,26 @@ export class OrderService {
     /** Sending the order: the table must be open and validated by the waiter. */
     public async submit(ctx: SessionContext, dto: CreateOrderDTO): Promise<OrderEntity> {
         await this.tables.assertCanOrder(ctx);
+        const rid = ctx.restaurantId;
         const ids = [...new Set(dto.items.map((i) => i.productId))];
-        const products = await this.catalog.productsByIds(ctx.restaurantId, ids);
+        const products = await this.catalog.productsByIds(rid, ids);
         const byId = new Map(products.map((p) => [p.id, p]));
+        const categoryIds = [...new Set(products.map((p) => p.categoryId))];
+        const categories = categoryIds.length
+            ? await this.catalog.categoriesByIds(rid, categoryIds)
+            : [];
+        // A pizza is priced with every flavor of its category, loaded once per category.
+        const pizzas = new Map<string, PizzaContext>();
+        for (const category of categories)
+            if (category.kind === CategoryKind.PIZZA && category.pizza)
+                pizzas.set(category.id, {
+                    category,
+                    flavors: await this.catalog.productsOfCategory(rid, category.id)
+                });
         const items = dto.items.map((req) => {
             const product = byId.get(req.productId);
             if (!product) throw new InvalidProductException();
-            return priceItem(product, req);
+            return priceItem(product, req, pizzas.get(product.categoryId));
         });
         const order = await this.scoped(ctx.restaurantId).create({
             tableId: ctx.tableId,

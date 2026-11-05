@@ -39,6 +39,9 @@ export class ProductResponseDTO implements ProductView {
     @Expose()
     public options: Array<OptionGroup>;
 
+    @Expose()
+    public sizePrices: Record<string, number>;
+
     public static from(source: ProductResponseDTO): ProductResponseDTO {
         return plainToInstance(ProductResponseDTO, source);
     }

@@ -1,3 +1,4 @@
+import type { CategoryEntity } from '#/modules/catalog/entities/category.entity.js';
 import type { ProductEntity } from '#/modules/catalog/entities/product.entity.js';
 import { describe, expect, it } from 'vitest';
 import { InvalidOptionException } from '../exceptions/invalid-option.exception.js';
@@ -71,60 +72,62 @@ describe('priceItem', () => {
             priceItem({ ...pizza, available: false }, { productId: 'p1', quantity: 1 })
         ).toThrow(ProductUnavailableException);
     });
-    it('prices by size and by the highest flavor', () => {
-        const halfAndHalf = {
-            id: 'p2',
-            name: 'Pizza meio a meio',
-            priceCents: 0,
-            available: true,
-            options: [
-                {
-                    name: 'Tamanho',
-                    kind: 'size',
-                    required: true,
-                    multiple: false,
-                    choices: [
-                        { label: 'M', priceCents: 0, maxFlavors: 1 },
-                        { label: 'G', priceCents: 0, maxFlavors: 2 }
-                    ]
-                },
-                {
-                    name: 'Sabores',
-                    kind: 'flavor',
-                    required: true,
-                    multiple: true,
-                    flavorPricing: 'highest',
-                    choices: [
-                        {
-                            label: 'Calabresa',
-                            priceCents: 0,
-                            sizePrices: { M: 5000, G: 6000 }
-                        },
-                        {
-                            label: 'Camarão',
-                            priceCents: 0,
-                            sizePrices: { M: 6500, G: 8000 }
-                        }
-                    ]
-                }
-            ]
-        } as unknown as ProductEntity;
-        const both = [
-            { group: 'Sabores', label: 'Calabresa' },
-            { group: 'Sabores', label: 'Camarão' }
-        ];
-        const item = priceItem(halfAndHalf, {
-            productId: 'p2',
-            quantity: 1,
-            options: [{ group: 'Tamanho', label: 'G' }, ...both]
-        });
-        expect(item.unitCents).toBe(8000);
-        expect(() =>
-            priceItem(halfAndHalf, {
-                productId: 'p2',
+    it('prices a half-and-half from its pizza category', () => {
+        const ids = {
+            g: '00000000-0000-4000-8000-00000000000g',
+            m: '00000000-0000-4000-8000-00000000000m'
+        };
+        const category = {
+            id: 'cat',
+            name: 'Pizzas',
+            kind: 'pizza',
+            pizza: {
+                sizesName: 'Tamanho',
+                flavorsName: 'Sabores',
+                flavorPricing: 'highest',
+                sizes: [
+                    { id: ids.m, label: 'M', maxFlavors: 1 },
+                    { id: ids.g, label: 'G', maxFlavors: 2 }
+                ],
+                addons: []
+            }
+        } as unknown as CategoryEntity;
+        const flavor = (id: string, name: string, m: number, g: number) =>
+            ({
+                id,
+                name,
+                categoryId: 'cat',
+                available: true,
+                priceCents: 0,
+                options: [],
+                sizePrices: { [ids.m]: m, [ids.g]: g }
+            }) as unknown as ProductEntity;
+        const cal = flavor('cal', 'Calabresa', 5000, 6000);
+        const cam = flavor('cam', 'Camarão', 6500, 8000);
+        const ctx = { category, flavors: [cal, cam] };
+        const item = priceItem(
+            cal,
+            {
+                productId: 'cal',
                 quantity: 1,
-                options: [{ group: 'Tamanho', label: 'M' }, ...both]
-            })
+                pizza: { sizeId: ids.g, flavorIds: ['cal', 'cam'] }
+            },
+            ctx
+        );
+        expect(item).toMatchObject({ name: 'Pizzas', unitCents: 8000 });
+        expect(() =>
+            priceItem(
+                cal,
+                {
+                    productId: 'cal',
+                    quantity: 1,
+                    pizza: { sizeId: ids.m, flavorIds: ['cal', 'cam'] }
+                },
+                ctx
+            )
         ).toThrow(TooManyOptionsException);
+        expect(() => priceItem(cal, { productId: 'cal', quantity: 1 }, ctx)).toThrow(
+            MissingRequiredOptionException
+        );
     });
 });
