@@ -5,8 +5,7 @@ export const FEEDBACK_MS = {
     copied: 1600,
     done: 2000,
     called: 3500,
-    saved: 4000,
-    waiterComing: 8000
+    saved: 4000
 } as const;
 
 /** Waits before acting on a burst of input or events. */

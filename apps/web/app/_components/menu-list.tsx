@@ -15,6 +15,7 @@ import { motion } from '@elo/ui/components/motion/motion';
 import { MOTION_SPRINGS } from '@elo/ui/theme/motion';
 import { Plus, Search, Star, UtensilsCrossed, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { GUEST_STICKY_TOP_VAR } from '#/_lib/constants/layout';
 import { CATALOG_TEXTS, PRODUCT_TAG_LABEL } from '#/_lib/messages/catalog';
 
 /** Price on a menu card: the cheapest one, with "from" when the choices change it. */
@@ -179,6 +180,15 @@ export function Highlights({
     );
 }
 
+/** Below this much of the top, a section counts as the one being read. */
+const TABS_WATCH_TOP_PX = 110;
+
+/** Height of what is pinned above the tabs (the guest's status bar), if anything. */
+const stickyTop = () =>
+    parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(GUEST_STICKY_TOP_VAR)
+    ) || 0;
+
 /** Category tabs pinned to the top. The active tab follows the scroll; tapping goes to the section. */
 export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
     const [active, setActive] = useState(menu[0]?.id);
@@ -194,7 +204,7 @@ export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
                     )[0];
                 if (hit) setActive(hit.target.id.replace('cat-', ''));
             },
-            { rootMargin: '-110px 0px -70% 0px' }
+            { rootMargin: `-${TABS_WATCH_TOP_PX + stickyTop()}px 0px -70% 0px` }
         );
         menu.forEach((c) => {
             const el = document.getElementById(`cat-${c.id}`);
@@ -215,7 +225,10 @@ export function CategoryTabs({ menu }: { menu: CategoryView[] }) {
 
     if (menu.length < 2) return null;
     return (
-        <nav aria-label="Categorias" className="glass-bar sticky top-0 z-30">
+        <nav
+            aria-label="Categorias"
+            className="glass-bar sticky top-[var(--guest-sticky-top,0px)] z-20"
+        >
             <div
                 ref={bar}
                 className="scroll-soft mx-auto flex max-w-2xl gap-1 overflow-x-auto px-2"
@@ -347,7 +360,11 @@ export function MenuList({
     return (
         <div className="px-4">
             {menu.map((cat) => (
-                <section key={cat.id} id={`cat-${cat.id}`} className="scroll-mt-14 pt-6">
+                <section
+                    key={cat.id}
+                    id={`cat-${cat.id}`}
+                    className="scroll-mt-[calc(var(--guest-sticky-top,0px)+3.5rem)] pt-6"
+                >
                     <h2 className="font-display text-xl font-extrabold">{cat.name}</h2>
                     <ul className="cv-auto mt-1 divide-y divide-line/40">
                         {cat.products.map((p) => (

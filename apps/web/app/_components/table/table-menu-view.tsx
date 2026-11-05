@@ -3,6 +3,7 @@
 import type { ProductView } from '@elo/core/api/views/catalog.view';
 import type { SessionStateView } from '@elo/core/api/views/table.view';
 import type { FieldError } from '@elo/core/fields/field-rules';
+import type { AlertItem } from '@elo/ui/components/feedback/alerts';
 import type { CartLine } from '../product-sheet';
 import { api } from '@elo/client/http/api-client';
 import { ApiError } from '@elo/client/http/api-error';
@@ -12,7 +13,7 @@ import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { summarizeOptions } from '@elo/core/catalog/option-summary';
 import { formatBRL } from '@elo/core/money/cents';
 import { ORDER_IN_PROGRESS, canRequestBill } from '@elo/core/orders/order-status';
-import { unlockAlertSound } from '@elo/ui/components/feedback/alerts';
+import { unlockAlertSound, useAlerts } from '@elo/ui/components/feedback/alerts';
 import { Button } from '@elo/ui/components/forms/button';
 import { AnimatePresence } from '@elo/ui/components/motion/motion';
 import { Sheet } from '@elo/ui/components/overlays/sheet';
@@ -24,8 +25,7 @@ import {
     Plus,
     Smartphone,
     Timer,
-    Trash2,
-    WifiOff
+    Trash2
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -39,7 +39,7 @@ import { GUEST_ERRORS } from '#/_lib/messages/errors';
 import { fieldMessage } from '#/_lib/messages/fields';
 import { CLOSED_FALLBACK, availabilityText } from '#/_lib/messages/opening-hours';
 import { ORDER_LINE_PARTS } from '#/_lib/messages/orders';
-import { SESSION_NOTICES, TABLE_STATE_HINTS } from '#/_lib/messages/tables';
+import { GUEST_ACTION_ALERTS, SESSION_NOTICES } from '#/_lib/messages/tables';
 import { unexpected } from '#/_lib/use-form';
 import { BillPanel } from '../bill-panel';
 import { MenuFooter } from '../menu-chrome';
@@ -54,6 +54,7 @@ import { Notice } from '../notice';
 import { OrderTracker } from '../order-tracker';
 import { PizzaSheet } from '../pizza-sheet';
 import { ProductSheet, lineUnit, pizzaAddons } from '../product-sheet';
+import { TableStatusBar } from './table-status-bar';
 
 type Phase = 'ready' | 'taken' | 'rejected' | 'expired' | 'ended';
 type View = 'menu' | 'orders' | 'bill';
@@ -110,8 +111,6 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [called, setCalled] = useState(false);
-    /** Name of the waiter who took the call, shown for a few seconds. */
-    const [coming, setComing] = useState<string | null>(null);
     const [view, setView] = useState<View>('menu');
     const [billVersion, setBillVersion] = useState(0);
     const [query, setQuery] = useState('');
@@ -134,13 +133,11 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
     const tableOpen =
         state?.table.state === 'open' || state?.table.state === 'pending_close';
     const guestPush = useGuestPush(initial.restaurant.slug, tableOpen);
-    // The "on the way" banner already covers an answered call while the page is in view.
-    const quiet = useCallback(
-        (kind: string) =>
-            kind === 'call_answered' && document.visibilityState === 'visible',
-        []
-    );
-    const alertOn = useGuestAlertHandlers(guestPush.state, quiet);
+    const alertOn = useGuestAlertHandlers(guestPush.state);
+    const { notify } = useAlerts();
+    /** Confirms what the guest just did; silent, since they tapped it themselves. */
+    const done = (alert: Omit<AlertItem, 'tone'>) =>
+        notify({ ...alert, tone: 'success' }, { silent: true });
 
     // Sound needs one tap per page load; the first tap anywhere enables it.
     useEffect(() => {
@@ -162,10 +159,8 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
             },
             'order.cancelled': refresh,
             'bill.updated': () => setBillVersion((v) => v + 1),
-            'call.resolved': (p: { handledBy: { name: string | null } | null }) => {
+            'call.resolved': (p: unknown) => {
                 setCalled(false);
-                setComing(p.handledBy?.name ?? 'O garçom');
-                setTimeout(() => setComing(null), FEEDBACK_MS.waiterComing);
                 alertOn('call.resolved')(p);
             }
         },
@@ -289,6 +284,15 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
         }
     }, [phase, cartStorageKey]);
 
+    /** A refusal shows next to the bag's button while it is open, and as a pop-up anywhere else. */
+    const report = (text: string) => {
+        if (cartOpen) return setMessage(text);
+        notify(
+            { title: GUEST_ACTION_ALERTS.failed, body: text, tone: 'danger' },
+            { silent: true }
+        );
+    };
+
     /** Runs a guest action; `explain` names a refusal only that action understands. */
     const act = async (
         fn: () => Promise<unknown>,
@@ -304,10 +308,10 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
             if (e instanceof ApiError && e.status === HTTP_STATUS.UNAUTHORIZED)
                 setPhase(phaseFor(e.code));
             else if (e instanceof ApiError && e.code === ApiErrorCode.RESTAURANT_CLOSED) {
-                setMessage(GUEST_ERRORS[ApiErrorCode.RESTAURANT_CLOSED] ?? null);
+                report(GUEST_ERRORS[ApiErrorCode.RESTAURANT_CLOSED] ?? unexpected(e));
                 void refresh();
             } else
-                setMessage(
+                report(
                     (e instanceof ApiError && (explain?.(e) ?? GUEST_ERRORS[e.code])) ||
                         unexpected(e)
                 );
@@ -405,12 +409,15 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
             setCart([]);
             setCartOpen(false);
             setView('orders');
+            done(GUEST_ACTION_ALERTS.orderSent);
         }
     };
 
     const openTable = async () => {
-        if (await act(() => api('/api/public/session/open', { body: {} })))
+        if (await act(() => api('/api/public/session/open', { body: {} }))) {
             setCartOpen(false);
+            done(GUEST_ACTION_ALERTS.openRequested);
+        }
     };
 
     const callWaiter = async () => {
@@ -419,6 +426,7 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
         ) {
             setCalled(true);
             setTimeout(() => setCalled(false), FEEDBACK_MS.called);
+            done(GUEST_ACTION_ALERTS.waiterCalled);
         }
     };
 
@@ -469,47 +477,16 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                 <span className="rounded-pill bg-brand px-3 py-1 text-xs font-bold text-brand-fg">
                     {state.table.name}
                 </span>
-                <span className="flex items-center gap-2">
-                    <span className="pulse-dot" aria-hidden />{' '}
-                    {TABLE_STATE_HINTS[tableState]}
-                </span>
-                {state.table.waiterName &&
-                    (tableState === 'open' || tableState === 'pending_close') && (
-                        <span className="text-muted">
-                            Quem atende: {state.table.waiterName}
-                        </span>
-                    )}
             </MenuHeader>
 
-            <RestaurantInfo profile={state.restaurant} />
+            <TableStatusBar
+                state={tableState}
+                restaurantClosed={closedNow}
+                waiterName={state.table.waiterName}
+                link={linkDown ? (link === 'offline' ? 'offline' : 'reconnecting') : null}
+            />
 
-            {linkDown && (
-                <p
-                    role="status"
-                    className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-warning/10 px-4 py-3 text-sm font-medium text-warning"
-                >
-                    <WifiOff size={18} className="shrink-0" aria-hidden />
-                    {link === 'offline'
-                        ? 'Sem internet. A tela se atualiza quando a conexão voltar.'
-                        : 'Reconectando… A tela continua se atualizando enquanto isso.'}
-                </p>
-            )}
-            {message && !cartOpen && (
-                <p
-                    role="alert"
-                    className="mx-4 mt-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger"
-                >
-                    {message}
-                </p>
-            )}
-            {coming && (
-                <p
-                    role="status"
-                    className="mx-4 mt-4 flex items-center gap-2 rounded-md bg-success/10 px-4 py-3 text-sm font-medium text-success"
-                >
-                    <Check size={16} className="shrink-0" /> {coming} vai até a sua mesa.
-                </p>
-            )}
+            <RestaurantInfo profile={state.restaurant} />
 
             {showTabs && (
                 <div className="px-4 pt-4">
@@ -575,13 +552,16 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                         <OrderTracker
                             key={o.id}
                             order={o}
-                            onCancel={() =>
-                                act(() =>
-                                    api(`/api/public/session/orders/${o.id}/cancel`, {
-                                        body: {}
-                                    })
+                            onCancel={async () => {
+                                if (
+                                    await act(() =>
+                                        api(`/api/public/session/orders/${o.id}/cancel`, {
+                                            body: {}
+                                        })
+                                    )
                                 )
-                            }
+                                    done(GUEST_ACTION_ALERTS.orderCancelled);
+                            }}
                         />
                     ))}
                 </div>
@@ -594,11 +574,14 @@ export function TableMenuView({ initial }: { initial: SessionStateView }) {
                             <Button
                                 className="w-full !py-3.5"
                                 disabled={busy || !billReady}
-                                onClick={() =>
-                                    act(() =>
-                                        api('/api/public/session/close', { body: {} })
+                                onClick={async () => {
+                                    if (
+                                        await act(() =>
+                                            api('/api/public/session/close', { body: {} })
+                                        )
                                     )
-                                }
+                                        done(GUEST_ACTION_ALERTS.billRequested);
+                                }}
                             >
                                 Pedir a conta
                             </Button>

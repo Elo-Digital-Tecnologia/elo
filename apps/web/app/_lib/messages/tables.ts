@@ -1,8 +1,59 @@
-export const TABLE_STATE_HINTS: Record<string, string> = {
-    closed: 'Escolha os itens e abra a mesa.',
-    pending_open: 'Aguardando o garçom confirmar a mesa.',
-    open: 'Mesa aberta. Envie a comanda quando quiser.',
-    pending_close: 'Conta pedida. O garçom vai fechar a mesa.'
+/** The guest's table status, in the bar fixed at the top of their screen. */
+export const GUEST_TABLE_STATUS = {
+    closed: {
+        title: 'Escolha os itens e abra a mesa',
+        text: 'Monte a sacola e toque em "Abrir mesa". O garçom confirma antes do primeiro pedido.'
+    },
+    restaurant_closed: {
+        title: 'Restaurante fechado agora',
+        text: 'Você pode ver o cardápio. A mesa abre quando o restaurante abrir.'
+    },
+    pending_open: {
+        title: 'Aguardando o garçom',
+        text: 'Ele vai confirmar a sua mesa em instantes. Avisamos aqui quando confirmar.'
+    },
+    open: {
+        title: 'Mesa aberta',
+        text: 'Envie a comanda quando quiser e acompanhe o preparo em Pedidos.'
+    },
+    pending_close: {
+        title: 'Conta pedida',
+        text: 'O garçom vai trazer a conta e fechar a mesa.'
+    }
+} as const;
+
+export const GUEST_STATUS_TEXTS = {
+    steps: ['Abrir a mesa', 'Garçom confirma', 'Fazer pedidos', 'Pedir a conta'],
+    showSteps: 'Ver os passos',
+    hideSteps: 'Esconder os passos',
+    waiter: (name: string) => `Quem atende: ${name}`,
+    offline: 'Sem internet. A tela se atualiza quando a conexão voltar.',
+    reconnecting: 'Reconectando… A tela continua se atualizando enquanto isso.'
+};
+
+/** Pop-ups confirming what the guest just did (silent: they tapped it themselves). */
+export const GUEST_ACTION_ALERTS = {
+    openRequested: {
+        title: 'Pedido de abertura enviado',
+        body: 'O garçom vai confirmar a mesa. Avisamos aqui quando ele confirmar.'
+    },
+    orderSent: {
+        title: 'Comanda enviada',
+        body: 'Acompanhe o preparo em Pedidos.'
+    },
+    orderCancelled: {
+        title: 'Pedido cancelado',
+        body: 'Ele saiu da sua comanda.'
+    },
+    waiterCalled: {
+        title: 'Garçom chamado',
+        body: 'Ele já recebeu o aviso e vem até a sua mesa.'
+    },
+    billRequested: {
+        title: 'Conta pedida',
+        body: 'O garçom vai trazer a conta e fechar a mesa.'
+    },
+    failed: 'Não deu certo'
 };
 
 export const TABLE_STATE_LABELS = {

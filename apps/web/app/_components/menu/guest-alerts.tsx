@@ -20,19 +20,19 @@ import { guestAlertText } from '#/_lib/messages/alerts';
  * vibration, banner). When the device also gets push and the page is in the
  * background, the system notification rings instead.
  */
-export function useGuestAlertHandlers(push: PushState, quiet: (kind: string) => boolean) {
+export function useGuestAlertHandlers(push: PushState) {
     const { notify } = useAlerts();
     return useCallback(
         (event: string) => (payload: unknown) => {
             const alert = guestAlertOf(event, payload);
-            if (!alert || quiet(alert.kind)) return;
+            if (!alert) return;
             const background = document.visibilityState === 'hidden';
             notify(
                 { ...guestAlertText(alert), tag: alert.tag },
                 { silent: background && push === 'on' }
             );
         },
-        [notify, push, quiet]
+        [notify, push]
     );
 }
 

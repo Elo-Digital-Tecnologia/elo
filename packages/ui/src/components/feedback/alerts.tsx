@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { AnimatePresence, m as motion } from 'framer-motion';
-import { BellRing, X } from 'lucide-react';
+import { BellRing, CircleAlert, CircleCheck, X } from 'lucide-react';
 import {
     createContext,
     useCallback,
@@ -14,8 +14,18 @@ import {
 } from 'react';
 import { useUiTexts } from '../../texts/ui-texts';
 
+export type AlertTone = 'info' | 'success' | 'danger';
+
+const TONE_ICON: Record<AlertTone, { icon: typeof BellRing; className: string }> = {
+    info: { icon: BellRing, className: 'bg-accent text-accent-fg' },
+    success: { icon: CircleCheck, className: 'bg-success text-white' },
+    danger: { icon: CircleAlert, className: 'bg-danger text-white' }
+};
+
 export interface AlertItem {
     title: string;
+    /** Color and icon: news from others (default), an action that went through, or a refusal. */
+    tone?: AlertTone;
     body?: string;
     /** Where tapping the alert goes. */
     href?: string;
@@ -78,7 +88,7 @@ function chime() {
 }
 
 /**
- * Alerts for the staff panels: a banner on top of any page, a chime,
+ * Alerts for the staff panels and the guest's table: a banner on top of any page, a chime,
  * a vibration on phones and an unread count in the tab title until the
  * page is looked at again.
  */
@@ -153,44 +163,49 @@ export function AlertsProvider({
                 className="pointer-events-none fixed inset-x-3 top-3 z-[60] flex flex-col items-center gap-2 sm:inset-x-auto sm:right-4 sm:top-4 sm:items-end"
             >
                 <AnimatePresence initial={false}>
-                    {shown.map((a) => (
-                        <motion.div
-                            key={a.id}
-                            layout
-                            initial={{ opacity: 0, y: -16, scale: 0.97 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, x: 24 }}
-                            className="glass glass-strong pointer-events-auto flex w-full max-w-sm items-start gap-3 p-3.5"
-                            role="alert"
-                        >
-                            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-pill bg-accent text-accent-fg">
-                                <BellRing size={18} />
-                            </span>
-                            <button
-                                className="min-w-0 flex-1 text-left"
-                                onClick={() => {
-                                    dismiss(a.id);
-                                    if (a.href) onOpen?.(a.href);
-                                }}
+                    {shown.map((a) => {
+                        const tone = TONE_ICON[a.tone ?? 'info'];
+                        return (
+                            <motion.div
+                                key={a.id}
+                                layout
+                                initial={{ opacity: 0, y: -16, scale: 0.97 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, x: 24 }}
+                                className="glass glass-strong pointer-events-auto flex w-full max-w-sm items-start gap-3 p-3.5"
+                                role="alert"
                             >
-                                <span className="block font-semibold leading-snug">
-                                    {a.title}
+                                <span
+                                    className={`grid h-9 w-9 shrink-0 place-items-center rounded-pill ${tone.className}`}
+                                >
+                                    <tone.icon size={18} />
                                 </span>
-                                {a.body && (
-                                    <span className="mt-0.5 block text-sm text-muted">
-                                        {a.body}
+                                <button
+                                    className="min-w-0 flex-1 text-left"
+                                    onClick={() => {
+                                        dismiss(a.id);
+                                        if (a.href) onOpen?.(a.href);
+                                    }}
+                                >
+                                    <span className="block font-semibold leading-snug">
+                                        {a.title}
                                     </span>
-                                )}
-                            </button>
-                            <button
-                                onClick={() => dismiss(a.id)}
-                                aria-label={t.closeNotice}
-                                className="grid h-8 w-8 shrink-0 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg"
-                            >
-                                <X size={16} />
-                            </button>
-                        </motion.div>
-                    ))}
+                                    {a.body && (
+                                        <span className="mt-0.5 block text-sm text-muted">
+                                            {a.body}
+                                        </span>
+                                    )}
+                                </button>
+                                <button
+                                    onClick={() => dismiss(a.id)}
+                                    aria-label={t.closeNotice}
+                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-pill text-muted transition hover:bg-brand/10 hover:text-fg"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </motion.div>
+                        );
+                    })}
                 </AnimatePresence>
             </div>
         </Ctx.Provider>
