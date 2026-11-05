@@ -109,6 +109,7 @@ export enum ApiErrorCode {
     SESSION_CLOSED = 20_010,
     SESSION_REJECTED = 20_011,
     SESSION_TAKEN_OVER = 20_012,
+    ACTIVE_TABLE_ELSEWHERE = 20_013,
 
     // Orders
     ORDER_NOT_FOUND = 21_000,

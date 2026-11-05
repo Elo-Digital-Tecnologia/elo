@@ -62,6 +62,65 @@ describe('tables and guest sessions (e2e)', () => {
         ).toBe(ApiErrorCode.SESSION_CLOSED);
     });
 
+    it('one table per device in a restaurant: sent back to it once it moved past closed', async () => {
+        const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
+        const newTable = async (token: string, inSlug: string, name: string) => {
+            const t = await http()
+                .post('/tables')
+                .set(auth(token))
+                .send({ name })
+                .expect(201);
+            return {
+                id: t.body.id as string,
+                start: (cookie?: string) => {
+                    const req = http().post(`/public/${inSlug}/${t.body.token}/session`);
+                    return cookie ? req.set('Cookie', cookie) : req;
+                }
+            };
+        };
+        const a = await newTable(admin, slug, 'Mesa A');
+        const b = await newTable(admin, slug, 'Mesa B');
+
+        // only scanned A: scanning B moves the device there and leaves A free
+        const first = cookieOf(await a.start().expect(201));
+        const moved = cookieOf(await b.start(first).expect(201));
+        expect(
+            (await http().get('/public/session').set('Cookie', first).expect(401)).body
+                .code
+        ).toBe(ApiErrorCode.SESSION_TAKEN_OVER);
+
+        // asked to open B: scanning A is refused and the device keeps B
+        await http().post('/public/session/open').set('Cookie', moved).expect(201);
+        const refused = await a.start(moved).expect(409);
+        expect(refused.body.code).toBe(ApiErrorCode.ACTIVE_TABLE_ELSEWHERE);
+        expect(refused.body.details).toEqual([{ tableName: 'Mesa B' }]);
+        const kept = await http().get('/public/session').set('Cookie', moved).expect(200);
+        expect(kept.body.table.name).toBe('Mesa B');
+
+        // another restaurant is not affected
+        const { planId } = flow.fixture();
+        const other = (
+            await flow.restaurant(await flow.superadmin(), {
+                name: `Outro ${suf}`,
+                managerName: 'Rita',
+                managerContact: '11977777777',
+                planId,
+                adminUsername: `ou${suf}`,
+                adminPassword: 'senha12345'
+            })
+        ).body;
+        const elsewhere = await newTable(
+            await flow.login(`ou${suf}`, other.slug),
+            other.slug,
+            'Mesa X'
+        );
+        await elsewhere.start(moved).expect(201);
+
+        // once the waiter closes B, A can be scanned again
+        await http().post(`/tables/${b.id}/reject-open`).set(auth(waiter)).expect(201);
+        await a.start(moved).expect(201);
+    });
+
     it('a table accepts only a few new sessions per window, whatever the address', async () => {
         const t = await http()
             .post('/tables')

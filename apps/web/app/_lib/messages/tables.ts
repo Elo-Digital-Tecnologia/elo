@@ -12,6 +12,11 @@ export const TABLE_STATE_LABELS = {
     closed: 'Fechada'
 } as const;
 
+export const SESSION_ELSEWHERE_TEXTS = {
+    title: (table: string) => `Você já está na ${table}`,
+    back: 'Voltar para a minha mesa'
+};
+
 export const TABLE_STATE_TEXTS = {
     closed: {
         label: 'Livre'
@@ -40,6 +45,10 @@ export const SESSION_NOTICES = {
     in_use: {
         title: 'Mesa em atendimento',
         text: 'Esta mesa já está aberta em outro aparelho. Chame o garçom se precisar.'
+    },
+    elsewhere: {
+        title: 'Você já tem uma mesa aberta',
+        text: 'Este aparelho já está em outra mesa deste restaurante. Para trocar de mesa, peça ao garçom para fechar a anterior.'
     },
     busy: {
         title: 'Muitas tentativas',

@@ -22,6 +22,7 @@ import { restaurantBySlug } from '#/modules/restaurants/utils/restaurant-slug.js
 import { StaffService } from '#/modules/staff/staff.service.js';
 import { DiningTableEntity } from './entities/dining-table.entity.js';
 import { TableSessionEntity } from './entities/table-session.entity.js';
+import { ActiveTableElsewhereException } from './exceptions/active-table-elsewhere.exception.js';
 import { AlreadyHandledException } from './exceptions/already-handled.exception.js';
 import { InvalidTableStateException } from './exceptions/invalid-table-state.exception.js';
 import { InvalidTableException } from './exceptions/invalid-table.exception.js';
@@ -254,7 +255,8 @@ export class TableService {
     /**
      * Opens (or resumes) the table session from the link. An invalid token and a token of
      * another restaurant answer the same: not found. One active session per table; other
-     * devices are blocked while it exists. Each table accepts only a few new sessions per
+     * devices are blocked while it exists, and a device already at another table of the same
+     * restaurant is sent back to it. Each table accepts only a few new sessions per
      * window, so a leaked link cannot keep opening them.
      */
     public async startSession(slug: string, token: string, cookieSessionId?: string) {
@@ -264,6 +266,7 @@ export class TableService {
             : null;
         if (!restaurant || !table) throw new InvalidTableException();
 
+        const left = await this.previousTable(restaurant.id, table.id, cookieSessionId);
         const active = await this.activeSession(table.id);
         if (active) {
             if (active.id === cookieSessionId)
@@ -283,6 +286,7 @@ export class TableService {
         });
         if (recent >= TABLE_SESSION_START_LIMIT.max)
             throw new RateLimitExceededException();
+        if (left) await this.closeSessions(left, 'taken_over');
         if (active) await this.closeSessions(table.id, 'taken_over');
         const expiresInMs = this.configService.getOrThrow('session.tableExpiresInMs', {
             infer: true
@@ -357,6 +361,35 @@ export class TableService {
     /** Active session of the table (the bill belongs to it). */
     public activeSessionOf(tableId: string) {
         return this.activeSession(tableId);
+    }
+
+    /**
+     * One table per device in a restaurant. A live session of this device at another table
+     * blocks the scan once that table moved past closed; one that only scanned is left
+     * behind, and its table id is returned so the caller closes it.
+     */
+    private async previousTable(
+        restaurantId: string,
+        tableId: string,
+        cookieSessionId: string | undefined
+    ): Promise<string | null> {
+        if (!cookieSessionId || !UUID_PATTERN.test(cookieSessionId)) return null;
+        const session = await this.sessions.findOne({
+            where: {
+                id: cookieSessionId,
+                restaurantId,
+                closedAt: IsNull(),
+                expiresAt: MoreThan(new Date())
+            }
+        });
+        if (!session || session.tableId === tableId) return null;
+        const previous = await this.tables.findOne({
+            where: { id: session.tableId, restaurantId }
+        });
+        if (!previous) return null;
+        if (previous.state !== TableState.CLOSED)
+            throw new ActiveTableElsewhereException(previous.name);
+        return previous.id;
     }
 
     private activeSession(tableId: string) {

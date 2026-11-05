@@ -6,22 +6,25 @@ import { ApiError } from '@elo/client/http/api-error';
 import { HTTP_STATUS } from '@elo/client/http/http-status';
 import { ApiErrorCode } from '@elo/core/api/api-error-code';
 import { AlertsProvider } from '@elo/ui/components/feedback/alerts';
+import { Button } from '@elo/ui/components/forms/button';
 import { Hourglass, Lock, Store, WifiOff } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { forgetTokenKeys } from '#/_lib/guest-storage';
-import { SESSION_NOTICES } from '#/_lib/messages/tables';
+import { SESSION_ELSEWHERE_TEXTS, SESSION_NOTICES } from '#/_lib/messages/tables';
 import { MenuSkeleton } from '../../_components/menu/menu-skeleton';
 import { Notice } from '../../_components/notice';
 import { TableMenuView } from '../../_components/table/table-menu-view';
 
-type Failure = 'invalid' | 'unavailable' | 'in_use' | 'busy' | 'error';
+type Failure = 'invalid' | 'unavailable' | 'in_use' | 'elsewhere' | 'busy' | 'error';
 
 const failureOf = (e: unknown): Failure =>
     !(e instanceof ApiError)
         ? 'error'
         : e.code === ApiErrorCode.MENU_UNAVAILABLE
           ? 'unavailable'
-          : e.status === HTTP_STATUS.NOT_FOUND
+          : e.code === ApiErrorCode.ACTIVE_TABLE_ELSEWHERE
+            ? 'elsewhere'
+            : e.status === HTTP_STATUS.NOT_FOUND
             ? 'invalid'
             : e.status === HTTP_STATUS.CONFLICT
               ? 'in_use'
@@ -33,6 +36,7 @@ const ICONS: Record<Failure, React.ReactNode> = {
     invalid: <Lock size={30} />,
     unavailable: <Store size={30} />,
     in_use: <Lock size={30} />,
+    elsewhere: <Lock size={30} />,
     busy: <Hourglass size={30} />,
     error: <WifiOff size={30} />
 };
@@ -45,6 +49,8 @@ const ICONS: Record<Failure, React.ReactNode> = {
 export default function TableLink({ params }: { params: { slug: string; token: string } }) {
     const [state, setState] = useState<SessionStateView | null>(null);
     const [failure, setFailure] = useState<Failure | null>(null);
+    /** The table this device is already at, when the scan was refused for that. */
+    const [ownTable, setOwnTable] = useState<string | null>(null);
     const started = useRef(false);
 
     useEffect(() => {
@@ -60,13 +66,35 @@ export default function TableLink({ params }: { params: { slug: string; token: s
                 slug = s.restaurant.slug;
                 setState(s);
             })
-            .catch((e) => setFailure(failureOf(e)))
+            .catch((e) => {
+                setFailure(failureOf(e));
+                if (e instanceof ApiError)
+                    setOwnTable(
+                        e.detailsOf(ApiErrorCode.ACTIVE_TABLE_ELSEWHERE)[0]?.tableName ??
+                            null
+                    );
+            })
             .finally(() => window.history.replaceState(null, '', `/${slug}`));
     }, [params.slug, params.token]);
 
     if (failure)
         return (
-            <Notice title={SESSION_NOTICES[failure].title} icon={ICONS[failure]}>
+            <Notice
+                title={
+                    failure === 'elsewhere' && ownTable
+                        ? SESSION_ELSEWHERE_TEXTS.title(ownTable)
+                        : SESSION_NOTICES[failure].title
+                }
+                icon={ICONS[failure]}
+                action={
+                    failure === 'elsewhere' && (
+                        // The restaurant page resumes this device's session from the cookie.
+                        <Button onClick={() => window.location.assign(`/${params.slug}`)}>
+                            {SESSION_ELSEWHERE_TEXTS.back}
+                        </Button>
+                    )
+                }
+            >
                 {SESSION_NOTICES[failure].text}
             </Notice>
         );

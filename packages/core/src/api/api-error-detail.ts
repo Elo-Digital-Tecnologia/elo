@@ -48,6 +48,11 @@ export interface ApiRestaurantClosedDetail {
     availability: Availability;
 }
 
+export interface ApiActiveTableElsewhereDetail {
+    /** The table this device is already at. */
+    tableName: string;
+}
+
 /** Detail items each code carries. Codes not listed carry field references, or nothing. */
 export interface ApiErrorDetailMap {
     [ApiErrorCode.VALIDATION_FAILED]: ApiFieldErrorDetail;
@@ -56,6 +61,7 @@ export interface ApiErrorDetailMap {
     [ApiErrorCode.ALREADY_HANDLED]: ApiAlreadyHandledDetail;
     [ApiErrorCode.CANNOT_GRANT]: ApiCannotGrantDetail;
     [ApiErrorCode.RESTAURANT_CLOSED]: ApiRestaurantClosedDetail;
+    [ApiErrorCode.ACTIVE_TABLE_ELSEWHERE]: ApiActiveTableElsewhereDetail;
     [ApiErrorCode.INVALID_PAYMENT]: ApiProblemDetail<PaymentProblem>;
     [ApiErrorCode.INVALID_DUE_DATE]: ApiProblemDetail<DueDateProblem>;
     [ApiErrorCode.INVALID_CONTRACT]: ApiProblemDetail<ContractProblem>;
