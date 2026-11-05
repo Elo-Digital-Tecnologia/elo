@@ -406,11 +406,8 @@ export function PanelShell({ children }: { children: ReactNode }) {
                                 <ShieldAlert size={20} className="shrink-0 text-brand" />
                                 <span>
                                     Você está no painel de {me.name} como equipe Elo
-                                    Digital: pode ver tudo e corrigir cardápio, mesas,
-                                    equipe e configurações. Pedidos, chamados, mesas em
-                                    uso e contas ficam com a equipe do restaurante. Use{' '}
-                                    <strong>Sair</strong> para voltar ao painel Elo; o
-                                    acesso termina em 45 minutos.
+                                    Digital. Use <strong>Sair</strong> para voltar ao
+                                    painel Elo.
                                 </span>
                             </GlassCard>
                         ) : warn ? (
